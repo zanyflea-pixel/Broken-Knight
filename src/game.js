@@ -124,6 +124,8 @@ export default class Game {
     this._cachedNearbySecret = null;
     this._cachedNearbyTown = null;
     this._cachedNearbyDragonLair = null;
+    this._cachedNearbyHerb = null;
+    this.inventoryView = "list";
 
     this._rng = new RNG(hash2(this.seed, 9001));
 
@@ -182,6 +184,8 @@ export default class Game {
       storyMilestones: {},
       visitedTowns: new Set(),
       crossedBridges: new Set(),
+      herbs: 0,
+      pickedHerbs: new Set(),
     };
 
     this.shop = {
@@ -198,6 +202,10 @@ export default class Game {
       roomIndex: 0,
       totalRooms: 0,
       roomRewarded: false,
+      layout: null,
+      currentRoomId: null,
+      keys: 0,
+      roomClearT: 0,
     };
 
     this.dev = {
@@ -283,6 +291,7 @@ export default class Game {
     this._handleInteractShortcuts(dt);
 
     this.hero.update?.(dt);
+    this._updateDungeonState(dt);
     this._updateEnemies(dt);
     this._updateProjectiles(dt);
     this._handleHeroDeath(dt);
@@ -794,8 +803,14 @@ export default class Game {
       this._msg("Dev: map revealed", 0.9);
     }
     if (action === 5) {
-      this._spawnDragonBoss(this.hero.x + 220, this.hero.y, Math.max(6, (this.hero.level || 1) + 4), "Dev Dragon");
-      this._msg("Dev: dragon spawned", 0.9);
+      const dungeon = this._nearest(this.world.dungeons);
+      if (dungeon) {
+        this.hero.x = dungeon.x;
+        this.hero.y = dungeon.y + 72;
+        this.camera.x = this.hero.x;
+        this.camera.y = this.hero.y;
+        this._msg("Dev: nearest dungeon", 0.9);
+      }
     }
     if (action === 6) {
       const dock = this._nearest(this.world.docks);
@@ -804,7 +819,7 @@ export default class Game {
         this.hero.y = dock.y + 18;
         this.camera.x = this.hero.x;
         this.camera.y = this.hero.y;
-        this._msg("Dev: nearest dock", 0.9);
+        this._msg("Dev: nearest port", 0.9);
       }
     }
     if (action === 7) {
@@ -835,8 +850,8 @@ export default class Game {
       "2 add 250 gold",
       "3 grant one level worth of XP",
       "4 reveal entire world map",
-      "5 spawn a dragon nearby",
-      "6 teleport near closest dock",
+      "5 teleport near closest dungeon",
+      "6 teleport near closest port",
       `7 god mode ${this.dev?.godMode ? "ON" : "OFF"}`,
       "8 equip mythic best gear",
       this._isDevResetConfirmLive() ? "9 reset to a new game (press again now)" : "9 reset to a new game (confirm)",
@@ -990,9 +1005,11 @@ export default class Game {
       storyMilestones: {},
       visitedTowns: new Set(),
       crossedBridges: new Set(),
+      herbs: 0,
+      pickedHerbs: new Set(),
     };
     this.hero.classId = "knight";
-    this.dungeon = { active: false, floor: 0, origin: null, room: null, roomIndex: 0, totalRooms: 0, roomRewarded: false };
+    this.dungeon = { active: false, floor: 0, origin: null, room: null, roomIndex: 0, totalRooms: 0, roomRewarded: false, layout: null, currentRoomId: null, keys: 0, roomClearT: 0 };
     this.menu.open = null;
     this.menu.mapZoom = 1;
     this.trackedObjective = "story";
@@ -1005,7 +1022,9 @@ export default class Game {
     this._cachedNearbyDragonLair = null;
     this._cachedNearbyDungeon = null;
     this._cachedNearbyDock = null;
+    this._cachedNearbyHerb = null;
     this.invIndex = 0;
+    this.inventoryView = "list";
     this.quest = this._makeBountyQuest();
     this._lastHeroLevel = this.hero.level || 1;
     this.camera.x = this.hero.x;
@@ -1075,11 +1094,39 @@ export default class Game {
   }
 
   _canMoveInDungeon(x, y) {
-    const room = this.dungeon.room || { x: this.hero.x, y: this.hero.y, w: 760, h: 520 };
-    return x > room.x - room.w * 0.5 + 42 &&
-      x < room.x + room.w * 0.5 - 42 &&
-      y > room.y - room.h * 0.5 + 42 &&
-      y < room.y + room.h * 0.5 - 42;
+    const layout = this.dungeon?.layout;
+    if (!layout) {
+      const room = this.dungeon.room || { x: this.hero.x, y: this.hero.y, w: 760, h: 520 };
+      return x > room.x - room.w * 0.5 + 42 &&
+        x < room.x + room.w * 0.5 - 42 &&
+        y > room.y - room.h * 0.5 + 42 &&
+        y < room.y + room.h * 0.5 - 42;
+    }
+
+    const insideRect = (rect, inset = 0) =>
+      x >= rect.x - rect.w * 0.5 + inset &&
+      x <= rect.x + rect.w * 0.5 - inset &&
+      y >= rect.y - rect.h * 0.5 + inset &&
+      y <= rect.y + rect.h * 0.5 - inset;
+
+    let walkable = false;
+    for (const rect of layout.walkRects || []) {
+      if (insideRect(rect, rect.kind === "room" ? 8 : 6)) {
+        walkable = true;
+        break;
+      }
+    }
+    if (!walkable) return false;
+
+    for (const rect of layout.blockedRects || []) {
+      if (insideRect(rect, 0)) return false;
+    }
+
+    for (const door of layout.doors || []) {
+      if (door.open) continue;
+      if (insideRect(door.blocker, 0)) return false;
+    }
+    return true;
   }
 
   _handleSkills() {
@@ -1111,43 +1158,92 @@ export default class Game {
   }
 
   _handleInventoryInput() {
-    const inv = this.hero.inventory || [];
-    if (inv.length <= 0) {
+    const entries = this.getInventoryEntries();
+
+    if (this.input.wasPressed("v") || this.input.wasPressed("V")) {
+      this.inventoryView = this.inventoryView === "grid" ? "list" : "grid";
+      this._msg(this.inventoryView === "grid" ? "Inventory grid view" : "Inventory list view", 0.8);
+    }
+
+    if (this.input.wasPressed("b") || this.input.wasPressed("B")) {
+      this._brewPotion("hp");
+    }
+    if (this.input.wasPressed("n") || this.input.wasPressed("N")) {
+      this._brewPotion("mana");
+    }
+
+    if (entries.length <= 0) {
       this.invIndex = 0;
       return;
     }
 
-    this._handleInventoryMouse(inv);
+    this._handleInventoryMouse(entries);
 
-    if (this.input.wasPressed("ArrowDown")) {
-      this.invIndex = Math.min(inv.length - 1, (this.invIndex || 0) + 1);
+    if (this.inventoryView === "grid") {
+      const cols = this.getInventoryGridLayout().cols;
+      if (this.input.wasPressed("ArrowRight")) this.invIndex = Math.min(entries.length - 1, (this.invIndex || 0) + 1);
+      if (this.input.wasPressed("ArrowLeft")) this.invIndex = Math.max(0, (this.invIndex || 0) - 1);
+      if (this.input.wasPressed("ArrowDown")) this.invIndex = Math.min(entries.length - 1, (this.invIndex || 0) + cols);
+      if (this.input.wasPressed("ArrowUp")) this.invIndex = Math.max(0, (this.invIndex || 0) - cols);
+    } else {
+      if (this.input.wasPressed("ArrowDown")) {
+        this.invIndex = Math.min(entries.length - 1, (this.invIndex || 0) + 1);
+      }
+
+      if (this.input.wasPressed("ArrowUp")) {
+        this.invIndex = Math.max(0, (this.invIndex || 0) - 1);
+      }
     }
 
-    if (this.input.wasPressed("ArrowUp")) {
-      this.invIndex = Math.max(0, (this.invIndex || 0) - 1);
-    }
+    const entry = entries[this.invIndex];
 
-    const item = inv[this.invIndex];
-
-    if ((this.input.wasPressed("Enter") || this.input.wasPressed("e") || this.input.wasPressed("E")) && item) {
+    if ((this.input.wasPressed("Enter") || this.input.wasPressed("e") || this.input.wasPressed("E")) && entry) {
       this._runInventoryAction("equip", this.invIndex);
     }
 
-    if ((this.input.wasPressed("x") || this.input.wasPressed("X") || this.input.wasPressed("Backspace") || this.input.wasPressed("Delete")) && item) {
+    if ((this.input.wasPressed("x") || this.input.wasPressed("X") || this.input.wasPressed("Backspace") || this.input.wasPressed("Delete")) && entry?.kind === "gear") {
       this._runInventoryAction("salvage", this.invIndex);
     }
   }
 
-  _handleInventoryMouse(inv) {
+  _handleInventoryMouse(entries) {
     const layout = this.getInventoryPanelLayout();
     const leftX = layout.leftX;
     const leftY = layout.leftY;
     const leftW = layout.leftW;
     const leftH = layout.leftH;
+    if (this.inventoryView === "grid") {
+      const grid = this.getInventoryGridLayout();
+      const selected = clamp(this.invIndex || 0, 0, Math.max(0, entries.length - 1));
+      const maxRows = Math.max(1, Math.ceil(entries.length / grid.cols));
+      const selectedRow = Math.floor(selected / grid.cols);
+      const scrollRow = clamp(selectedRow - grid.rowsVisible + 1, 0, Math.max(0, maxRows - grid.rowsVisible));
+      const mx = this.mouse.x;
+      const my = this.mouse.y;
+      if (mx < leftX + 8 || mx > leftX + leftW - 8 || my < leftY + 16 || my > leftY + leftH - 8) return;
+      const localY = my - grid.startY + scrollRow * (grid.tileH + grid.gutter);
+      const row = Math.floor(localY / (grid.tileH + grid.gutter));
+      const localX = mx - grid.startX;
+      const col = Math.floor(localX / (grid.tileW + grid.gutter));
+      if (row < 0 || col < 0 || col >= grid.cols) return;
+      const withinTileX = localX - col * (grid.tileW + grid.gutter);
+      const withinTileY = localY - row * (grid.tileH + grid.gutter);
+      if (withinTileX < 0 || withinTileX > grid.tileW || withinTileY < 0 || withinTileY > grid.tileH) return;
+      const idx = row * grid.cols + col;
+      if (idx < 0 || idx >= entries.length) return;
+      if (this.mouse.clicked && idx === selected) {
+        this._runInventoryAction("equip", idx);
+        return;
+      }
+      this.invIndex = idx;
+      if (this.mouse.clicked) this._msg(`${entries[idx]?.name || "Item"} selected`, 0.55);
+      return;
+    }
+
     const rowH = layout.rowH;
     const visible = Math.max(1, Math.floor((leftH - 40) / rowH));
-    const selected = clamp(this.invIndex || 0, 0, Math.max(0, inv.length - 1));
-    const scroll = clamp(selected - visible + 1, 0, Math.max(0, inv.length - visible));
+    const selected = clamp(this.invIndex || 0, 0, Math.max(0, entries.length - 1));
+    const scroll = clamp(selected - visible + 1, 0, Math.max(0, entries.length - visible));
     const mx = this.mouse.x;
     const my = this.mouse.y;
     const inList = mx >= leftX + 8 && mx <= leftX + leftW - 8 && my >= leftY + 16 && my <= leftY + leftH - 8;
@@ -1155,7 +1251,7 @@ export default class Game {
 
     const row = Math.floor((my - (leftY + 18)) / rowH);
     const idx = scroll + row;
-    if (idx < 0 || idx >= inv.length) return;
+    if (idx < 0 || idx >= entries.length) return;
 
     if (this.mouse.clicked && idx === selected) {
       this._runInventoryAction("equip", idx);
@@ -1163,25 +1259,54 @@ export default class Game {
     }
 
     this.invIndex = idx;
-    if (this.mouse.clicked) this._msg(`${inv[idx]?.name || "Item"} selected`, 0.55);
+    if (this.mouse.clicked) this._msg(`${entries[idx]?.name || "Item"} selected`, 0.55);
   }
 
   _runInventoryAction(action, index) {
-    if (action === "equip") this._equipInventoryItem(index);
-    else if (action === "salvage") this._salvageInventoryItem(index);
+    const entry = this.getInventoryEntries()[index];
+    if (!entry) return;
+    if (action === "equip") {
+      if (entry.kind === "material") this._brewPotion("hp");
+      else this._equipInventoryItem(index);
+    } else if (action === "salvage" && entry.kind === "gear") {
+      this._salvageInventoryItem(index);
+    }
   }
 
   getInventoryPanelText(hasItems = (this.hero?.inventory?.length || 0) > 0) {
     return {
-      headerHint: hasItems ? "I or Esc close   wheel/arrow select   click again equip" : "I or Esc close",
+      headerHint: hasItems ? "I or Esc close   V swap view   wheel/arrow select   click again use/equip   B brew HP   N brew Mana" : "I or Esc close   V swap view   B brew HP   N brew Mana",
       emptyBagTitle: "No gear in your bag yet.",
       emptyBagBody: "Clear camps, shops, contracts, and dungeons will start filling it.",
       emptyDetailTitle: "Item Details",
       emptyDetailBody: "Pick up gear to compare it here.",
       emptyDetailNote: "Your equipped kit will stay visible above while the bag is empty.",
-      equipHint: "Enter/E or click again equip",
+      equipHint: "Enter/E or click again use/equip",
       salvageHint: "X/Delete salvage",
+      brewHpHint: "B Brew health potion (3 herbs)",
+      brewManaHint: "N Brew mana potion (4 herbs)",
     };
+  }
+
+  getInventoryEntries() {
+    const gear = (this.hero.inventory || []).map((item, index) => ({
+      kind: "gear",
+      index,
+      item,
+      name: item?.name || "Unknown Gear",
+      color: item?.color || "#d9dee8",
+    }));
+    const materials = [];
+    if ((this.progress.herbs || 0) > 0) {
+      materials.push({
+        kind: "material",
+        material: "herb",
+        count: this.progress.herbs || 0,
+        name: "Wild Herb",
+        color: "#8fe48d",
+      });
+    }
+    return [...gear, ...materials];
   }
 
   getInventoryPanelLayout() {
@@ -1207,24 +1332,28 @@ export default class Game {
   }
 
   _equipInventoryItem(index) {
+    const entry = this.getInventoryEntries()[index];
+    if (!entry || entry.kind !== "gear") return;
     const inv = this.hero.inventory || [];
-    const item = inv[index];
+    const item = inv[entry.index];
     if (!item?.slot) return;
 
     const prev = this.hero.equip?.[item.slot] || null;
     this.hero.equip[item.slot] = item;
-    inv.splice(index, 1);
+    inv.splice(entry.index, 1);
     if (prev) inv.push(prev);
 
-    this.invIndex = clamp(index, 0, Math.max(0, inv.length - 1));
+    this.invIndex = clamp(index, 0, Math.max(0, this.getInventoryEntries().length - 1));
     const delta = (item.score || 0) - (prev?.score || 0);
     const note = prev ? ` ${delta >= 0 ? "+" : ""}${delta} power` : "";
     this._msg(`Equipped ${item.name}${note}`, 1.6);
   }
 
   _salvageInventoryItem(index) {
+    const entry = this.getInventoryEntries()[index];
+    if (!entry || entry.kind !== "gear") return;
     const inv = this.hero.inventory || [];
-    const item = inv[index];
+    const item = inv[entry.index];
     if (!item) return;
 
     const rarityBonus =
@@ -1234,10 +1363,22 @@ export default class Game {
 
     const value = Math.max(4, 6 + (item.level || 1) * 3 + rarityBonus);
     this.hero.gold += value;
-    inv.splice(index, 1);
+    inv.splice(entry.index, 1);
 
-    this.invIndex = clamp(index, 0, Math.max(0, inv.length - 1));
+    this.invIndex = clamp(index, 0, Math.max(0, this.getInventoryEntries().length - 1));
     this._msg(`Salvaged for ${value}g`, 1.4);
+  }
+
+  getInventoryGridLayout() {
+    const layout = this.getInventoryPanelLayout();
+    const cols = 2;
+    const tileW = 166;
+    const tileH = 66;
+    const gutter = 12;
+    const startX = layout.leftX + 10;
+    const startY = layout.leftY + 34;
+    const rowsVisible = Math.max(1, Math.floor((layout.leftH - 48) / (tileH + gutter)));
+    return { cols, tileW, tileH, gutter, startX, startY, rowsVisible };
   }
 
   _handleShopInput() {
@@ -1556,10 +1697,11 @@ export default class Game {
     const dashDist = (blinkLevel >= 10 ? 182 : blinkLevel >= 5 ? 122 : 68) * classDashMul;
     const tx = this.hero.x + dir.x * dashDist;
     const ty = this.hero.y + dir.y * dashDist;
+    this._blinkLanding = null;
 
     if (this._canDashTo(tx, ty, dir, dashDist, blinkLevel)) {
-      this.hero.x = tx;
-      this.hero.y = ty;
+      this.hero.x = this._blinkLanding?.x ?? tx;
+      this.hero.y = this._blinkLanding?.y ?? ty;
       if (blinkLevel >= 5 && !this.dungeon.active) this._spawnFloatingText(this.hero.x, this.hero.y - 28, "River blink", "#ffd36e");
       if (blinkLevel >= 10) {
         const burstDmg = Math.max(1, Math.round((this.hero.getStats?.().dmg || 8) * 0.8));
@@ -1569,6 +1711,7 @@ export default class Game {
         });
       }
     }
+    this._blinkLanding = null;
 
     this.hero.state.dashT = (0.20 + Math.min(0.18, (blinkLevel - 1) * 0.02)) + (this.hero.classId === "knight" ? 0.08 : 0);
     this.skillProg.e.xp += 2;
@@ -1590,117 +1733,211 @@ export default class Game {
     }
 
     if (this.world.canWalk(tx, ty, this.hero)) return true;
+    if (canCrossWater && this.world?._findSafeLandPatchNear) {
+      const safe = this.world._findSafeLandPatchNear(tx, ty, 72);
+      if (safe && this.world.canWalk(safe.x, safe.y, this.hero)) {
+        tx = safe.x;
+        ty = safe.y;
+        this._blinkLanding = safe;
+        return true;
+      }
+    }
     return false;
   }
 
   _drawDungeonRoom(ctx) {
-    const room = this.dungeon.room || { x: this.hero.x, y: this.hero.y, w: 780, h: 540, seed: 1 };
-    const x = room.x - room.w * 0.5;
-    const y = room.y - room.h * 0.5;
+    const layout = this.dungeon.layout;
+    const room = this._getDungeonRoom() || { x: this.hero.x, y: this.hero.y, w: 780, h: 540, type: "hall" };
+    const theme = this._dungeonTheme(Math.max(1, this.dungeon.floor || 1));
+    const aliveCount = this._dungeonHasLivingEnemies(room.id) ? this.enemies.filter((e) => e?.alive && e.dungeonRoomId === room.id).length : 0;
+    const currentClear = room.cleared || aliveCount <= 0;
 
     ctx.save();
-    ctx.fillStyle = "#0f1217";
-    ctx.fillRect(x - 900, y - 700, room.w + 1800, room.h + 1400);
+    ctx.fillStyle = "#0d1015";
+    ctx.fillRect(this.hero.x - 1800, this.hero.y - 1400, 3600, 2800);
 
-    const floorLevel = Math.max(1, this.dungeon.floor || 1);
-    const bossDepth = !!room.finalRoom;
-    const theme = this._dungeonTheme(floorLevel);
-    const aliveCount = this.enemies.reduce((n, e) => n + (e?.alive ? 1 : 0), 0);
-    const clear = aliveCount <= 0;
-    const floor = ctx.createLinearGradient(x, y, x, y + room.h);
-    floor.addColorStop(0, bossDepth ? "#30202a" : theme.floor0);
-    floor.addColorStop(0.5, bossDepth ? "#211823" : theme.floor1);
-    floor.addColorStop(1, theme.floor2);
-    ctx.fillStyle = floor;
-    ctx.fillRect(x, y, room.w, room.h);
-
-    ctx.fillStyle = bossDepth ? "rgba(255,98,70,0.06)" : theme.haze;
-    for (let i = 0; i < 7; i++) {
-      const px = x + 80 + ((i * 173 + floorLevel * 29) % Math.max(1, room.w - 160));
-      const py = y + 76 + ((i * 97 + floorLevel * 41) % Math.max(1, room.h - 150));
-      ctx.beginPath();
-      ctx.ellipse(px, py, 34 + (i % 3) * 12, 10 + (i % 2) * 8, (i * 0.7) % Math.PI, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.strokeStyle = "rgba(255,255,255,0.045)";
-    ctx.lineWidth = 1;
-    for (let tx = x + 32; tx < x + room.w; tx += 48) {
-      ctx.beginPath();
-      ctx.moveTo(tx, y + 16);
-      ctx.lineTo(tx, y + room.h - 16);
-      ctx.stroke();
-    }
-    for (let ty = y + 32; ty < y + room.h; ty += 48) {
-      ctx.beginPath();
-      ctx.moveTo(x + 16, ty);
-      ctx.lineTo(x + room.w - 16, ty);
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = "rgba(0,0,0,0.32)";
-    ctx.fillRect(x, y, room.w, 34);
-    ctx.fillRect(x, y + room.h - 34, room.w, 34);
-    ctx.fillRect(x, y, 34, room.h);
-    ctx.fillRect(x + room.w - 34, y, 34, room.h);
-
-    ctx.strokeStyle = bossDepth ? "rgba(255,138,92,0.34)" : theme.accent;
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x + 33.5, y + 33.5, room.w - 67, room.h - 67);
-
-    const northGate = this._getDungeonExitAnchor("north", room);
-    const southGate = this._getDungeonExitAnchor("south", room);
-    const gateW = 118;
-    const gateH = 34;
-    const drawGate = (gate, label, active, topSide) => {
-      const gy = topSide ? y + 22 : y + room.h - 56;
-      ctx.fillStyle = active ? "rgba(139,233,255,0.18)" : "rgba(18,24,31,0.88)";
-      ctx.fillRect(gate.x - gateW * 0.5, gy, gateW, gateH);
-      ctx.strokeStyle = active ? (topSide && bossDepth ? "rgba(255,138,92,0.72)" : "rgba(139,233,255,0.72)") : "rgba(255,255,255,0.10)";
+    for (const rect of layout?.corridors || []) {
+      const gx = rect.x - rect.w * 0.5;
+      const gy = rect.y - rect.h * 0.5;
+      const g = ctx.createLinearGradient(gx, gy, gx, gy + rect.h);
+      g.addColorStop(0, theme.floor1);
+      g.addColorStop(1, theme.floor2);
+      ctx.fillStyle = g;
+      ctx.fillRect(gx, gy, rect.w, rect.h);
+      this._drawDungeonCorridorWalls(ctx, rect, theme);
+      ctx.strokeStyle = "rgba(255,255,255,0.05)";
       ctx.lineWidth = 2;
-      ctx.strokeRect(gate.x - gateW * 0.5 + 0.5, gy + 0.5, gateW - 1, gateH - 1);
-      ctx.fillStyle = active ? "#eaf8ff" : "#8493a6";
-      ctx.font = "bold 11px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(label, gate.x, gy + 21);
-    };
-    drawGate(northGate, clear ? (bossDepth ? "Victory Gate" : "Next Room") : "Locked Gate", clear, true);
-    drawGate(southGate, clear ? "Return Gate" : "Sealed Exit", clear, false);
+      ctx.strokeRect(gx + 1, gy + 1, rect.w - 2, rect.h - 2);
 
-    const rng = new RNG(room.seed || 1);
-    for (let i = 0; i < 12; i++) {
-      const px = x + 90 + rng.next() * (room.w - 180);
-      const py = y + 80 + rng.next() * (room.h - 160);
-      ctx.fillStyle = "rgba(0,0,0,0.26)";
-      ctx.fillRect(px - 13, py + 9, 26, 6);
-      ctx.fillStyle = i % 3 === 0 ? theme.propA : theme.propB;
-      ctx.fillRect(px - 10, py - 10, 20, 22);
-      ctx.fillStyle = "rgba(255,255,255,0.07)";
-      ctx.fillRect(px - 9, py - 10, 18, 4);
+      ctx.strokeStyle = "rgba(255,255,255,0.035)";
+      ctx.lineWidth = 1;
+      if (rect.orientation === "h") {
+        for (let x = gx + 26; x < gx + rect.w - 10; x += 30) {
+          ctx.beginPath();
+          ctx.moveTo(x, gy + 9);
+          ctx.lineTo(x, gy + rect.h - 9);
+          ctx.stroke();
+        }
+      } else {
+        for (let y = gy + 26; y < gy + rect.h - 10; y += 30) {
+          ctx.beginPath();
+          ctx.moveTo(gx + 9, y);
+          ctx.lineTo(gx + rect.w - 9, y);
+          ctx.stroke();
+        }
+      }
+
+      this._drawDungeonDecor(ctx, rect.decor, theme);
     }
 
-    const sx = room.x;
-    const sy = y + 86;
-    ctx.fillStyle = clear ? "rgba(139,233,255,0.22)" : "rgba(220,124,255,0.20)";
-    ctx.beginPath();
-    ctx.arc(sx, sy, 31, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = clear ? "#8be9ff" : "#dc7cff";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 18, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = "#f1d8ff";
-    ctx.font = "bold 12px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText(clear ? "C" : `${aliveCount}`, sx, sy + 4);
+    for (const r of layout?.rooms || []) {
+      const gx = r.x - r.w * 0.5;
+      const gy = r.y - r.h * 0.5;
+      const bossRoom = r.type === "boss";
+      const g = ctx.createLinearGradient(gx, gy, gx, gy + r.h);
+      g.addColorStop(0, bossRoom ? "#332129" : r.type === "start" ? "#262d37" : theme.floor0);
+      g.addColorStop(0.55, bossRoom ? "#251922" : theme.floor1);
+      g.addColorStop(1, theme.floor2);
+      ctx.fillStyle = g;
+      ctx.fillRect(gx, gy, r.w, r.h);
 
-    ctx.fillStyle = "rgba(240,226,255,0.88)";
+      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.lineWidth = 1;
+      const tile = bossRoom ? 42 : 34;
+      for (let x = gx + 18; x < gx + r.w - 10; x += tile) {
+        ctx.beginPath();
+        ctx.moveTo(x, gy + 20);
+        ctx.lineTo(x, gy + r.h - 20);
+        ctx.stroke();
+      }
+      for (let y = gy + 18; y < gy + r.h - 10; y += tile) {
+        ctx.beginPath();
+        ctx.moveTo(gx + 20, y);
+        ctx.lineTo(gx + r.w - 20, y);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = bossRoom ? "rgba(255,111,80,0.05)" : r === room ? "rgba(139,233,255,0.05)" : theme.haze;
+      for (let i = 0; i < 5; i++) {
+        const px = gx + 70 + ((i * 127 + (r.id.length * 31)) % Math.max(90, r.w - 140));
+        const py = gy + 60 + ((i * 79 + (r.id.length * 53)) % Math.max(90, r.h - 120));
+        ctx.beginPath();
+        ctx.ellipse(px, py, 28 + (i % 2) * 12, 10 + (i % 3) * 5, (i * 0.5) % Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      this._drawDungeonDecor(ctx, r.decor, theme);
+      this._drawDungeonRoomWalls(ctx, r, theme, r === room);
+
+      ctx.strokeStyle = r === room ? "rgba(139,233,255,0.44)" : bossRoom ? "rgba(255,138,92,0.30)" : "rgba(255,255,255,0.06)";
+      ctx.lineWidth = r === room ? 3 : 2;
+      ctx.strokeRect(gx + 8, gy + 8, r.w - 16, r.h - 16);
+
+      ctx.fillStyle = "#eef4fb";
+      ctx.font = "bold 12px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText(this._titleCase(r.type), gx + 28, gy + 28);
+
+      if (r.type !== "start" && !r.cacheOpened && ["loot", "key", "shrine"].includes(r.type)) {
+        const cache = this._getDungeonRoomCacheAnchor(r);
+        ctx.fillStyle = r.type === "key" ? "rgba(139,233,255,0.18)" : r.type === "loot" ? "rgba(255,214,110,0.18)" : "rgba(160,255,176,0.16)";
+        ctx.fillRect(cache.x - 18, cache.y - 12, 36, 24);
+        ctx.strokeStyle = r.type === "key" ? "#8be9ff" : r.type === "loot" ? "#ffd86e" : "#b8f59e";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(cache.x - 17.5, cache.y - 11.5, 35, 23);
+        ctx.fillStyle = "#f4fbff";
+        ctx.font = "bold 10px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(r.type === "key" ? "KEY" : r.type === "loot" ? "CACHE" : "RELIC", cache.x, cache.y + 4);
+      }
+    }
+
+    for (const door of layout?.doors || []) {
+      const frameW = door.vertical ? 22 : (door.blocker.w || 22) + 8;
+      const frameH = door.vertical ? (door.blocker.h || 58) + 8 : 22;
+      const leafW = door.vertical ? 14 : Math.max(18, frameW - 10);
+      const leafH = door.vertical ? Math.max(18, frameH - 10) : 14;
+      ctx.fillStyle = "rgba(18,13,20,0.96)";
+      ctx.fillRect(door.x - frameW * 0.5, door.y - frameH * 0.5, frameW, frameH);
+      ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : door.open ? "#8be9ff" : "#dc7cff";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(door.x - frameW * 0.5 + 0.5, door.y - frameH * 0.5 + 0.5, frameW - 1, frameH - 1);
+
+      if (!door.open) {
+        ctx.fillStyle = door.locked === "key" ? "rgba(126,84,26,0.95)" : "rgba(83,56,38,0.95)";
+        ctx.fillRect(door.x - leafW * 0.5, door.y - leafH * 0.5, leafW, leafH);
+        ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : "#c8a27d";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(door.x - leafW * 0.5 + 0.5, door.y - leafH * 0.5 + 0.5, leafW - 1, leafH - 1);
+        if (door.vertical) {
+          ctx.beginPath();
+          ctx.moveTo(door.x, door.y - leafH * 0.5 + 3);
+          ctx.lineTo(door.x, door.y + leafH * 0.5 - 3);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(door.x - leafW * 0.5 + 3, door.y);
+          ctx.lineTo(door.x + leafW * 0.5 - 3, door.y);
+          ctx.stroke();
+        }
+      } else {
+        ctx.fillStyle = "rgba(139,233,255,0.12)";
+        ctx.fillRect(door.x - leafW * 0.5, door.y - leafH * 0.5, leafW, leafH);
+      }
+
+      ctx.fillStyle = door.open ? "rgba(218,246,255,0.76)" : door.locked === "key" ? "#ffe6a8" : "#f0d0ff";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "center";
+      const labelY = door.vertical ? door.y - frameH * 0.5 - 8 : door.y - 13;
+      ctx.fillText(door.open ? "OPEN" : door.locked === "key" ? "KEY" : "SEALED", door.x, labelY);
+    }
+
+    const ret = layout?.returnStair;
+    if (ret) {
+      ctx.fillStyle = "rgba(137,206,255,0.16)";
+      ctx.beginPath();
+      ctx.arc(ret.x, ret.y, 28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#8be9ff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ret.x, ret.y, 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#f0fbff";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("OUT", ret.x, ret.y + 3);
+    }
+
+    const exit = layout?.exitStair;
+    if (exit) {
+      ctx.fillStyle = currentClear && room.type === "boss" ? "rgba(255,211,110,0.20)" : "rgba(44,34,24,0.85)";
+      ctx.beginPath();
+      ctx.arc(exit.x, exit.y, 30, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = currentClear && room.type === "boss" ? "#ffd86e" : "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(exit.x, exit.y, 18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = currentClear && room.type === "boss" ? "#fff1c8" : "#7f8a97";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("DOWN", exit.x, exit.y + 3);
+    }
+
+    ctx.fillStyle = "rgba(240,226,255,0.90)";
     ctx.font = "bold 13px Arial";
-    ctx.fillText(`${theme.name} - Room ${room.roomIndex || 1}/${room.totalRooms || 1}`, room.x, y + room.h - 18);
+    ctx.textAlign = "center";
+    ctx.fillText(`${theme.name}  Floor ${this.dungeon.floor}  Keys ${this.dungeon.keys || 0}`, room.x, room.y + room.h * 0.5 - 18);
     ctx.font = "11px Arial";
-    ctx.fillStyle = "rgba(214,225,239,0.76)";
-    ctx.fillText(clear ? (bossDepth ? "Use the north gate to finish or south gate to retreat" : "North gate goes deeper, south gate returns outside") : "Clear the room to open the gates", room.x, y + room.h - 36);
+    ctx.fillStyle = "rgba(214,225,239,0.78)";
+    const detail = !currentClear
+      ? `${aliveCount} enemies remain in this room`
+      : room.type === "boss"
+      ? "Boss room cleared. Use DOWN to go deeper or OUT to leave."
+      : "Room clear. Search caches and open doors.";
+    ctx.fillText(detail, room.x, room.y + room.h * 0.5 - 36);
     ctx.restore();
   }
 
@@ -2234,6 +2471,14 @@ export default class Game {
     const goldAmt = Math.max(2, 3 + Math.round((e.level || 1) * 0.8) + (e.lootBonus?.() || 0) + (e.extraLoot || 0));
     this.loot.push(new Loot(e.x, e.y, "gold", { amount: goldAmt }));
 
+    const hasLockedKeyDoor = !!this.dungeon?.active && (this.dungeon?.layout?.doors || []).some((door) => !door.open && door.locked === "key");
+    if (e?.dungeonRoomId && hasLockedKeyDoor) {
+      const keyDropChance = e.boss ? 1 : e.elite ? 0.45 : 0.14;
+      if (Math.random() < keyDropChance) {
+        this.loot.push(new Loot(e.x + 4, e.y - 6, "key", { label: "Dungeon Key" }));
+      }
+    }
+
     if (e.boss || Math.random() < (e.elite ? 0.24 : 0.14)) {
       this.loot.push(new Loot(e.x + 8, e.y, "potion", { potionType: Math.random() < 0.35 ? "mana" : "hp" }));
     }
@@ -2271,6 +2516,20 @@ export default class Game {
     return true;
   }
 
+  _brewPotion(kind) {
+    const cost = kind === "mana" ? 4 : 3;
+    const label = kind === "mana" ? "mana" : "health";
+    if ((this.progress.herbs || 0) < cost) {
+      this._msg(`${cost} herbs needed for a ${label} potion`, 0.95);
+      return false;
+    }
+    this.progress.herbs = Math.max(0, (this.progress.herbs || 0) - cost);
+    this.hero.potions[kind] = (this.hero.potions[kind] || 0) + 1;
+    this._spawnFloatingText(this.hero.x, this.hero.y - 28, kind === "mana" ? "+Mana potion" : "+Health potion", kind === "mana" ? "#88cfff" : "#ff8fa0");
+    this._msg(`${label === "mana" ? "Mana" : "Health"} potion brewed`, 1.0);
+    return true;
+  }
+
   _updateLoot(dt) {
     const updateD2 = this.dungeon.active ? Infinity : (this.perf.lootUpdateRadius || 820) ** 2;
     for (const l of this.loot) {
@@ -2302,6 +2561,13 @@ export default class Game {
       return;
     }
 
+    if (l.kind === "key") {
+      this.dungeon.keys = (this.dungeon.keys || 0) + 1;
+      this._spawnFloatingText(this.hero.x, this.hero.y - 28, "+Dungeon key", "#8be9ff");
+      this._msg("Dungeon key picked up", 0.95);
+      return;
+    }
+
     if (l.kind === "gear" && l.data) {
       this.hero.inventory.push(l.data);
       const power = l.data.score ? ` PWR ${l.data.score}` : "";
@@ -2328,10 +2594,12 @@ export default class Game {
     this._cachedNearbyDungeon = null;
     this._cachedNearbyShrine = null;
     this._cachedNearbyCache = null;
+    this._cachedNearbyHerb = null;
 
-    const check = (arr, r) => {
+    const check = (arr, r, predicate = null) => {
       const r2 = r * r;
       for (const p of arr || []) {
+        if (predicate && !predicate(p)) continue;
         if (dist2(this.hero.x, this.hero.y, p.x, p.y) <= r2) return p;
       }
       return null;
@@ -2343,6 +2611,7 @@ export default class Game {
     this._cachedNearbyDungeon = check(this.world.dungeons, 74);
     this._cachedNearbyShrine = check(this.world.shrines, 72);
     this._cachedNearbyCache = check(this.world.caches, 58);
+    this._cachedNearbyHerb = check(this.world.herbs, 54, (h) => !h.picked);
     this._cachedNearbySecret = check(this.world.secrets, 62);
     this._cachedNearbyTown = check(this.world.towns, 96);
     this._cachedNearbyDragonLair = check(this.world.dragonLairs, 110);
@@ -2360,34 +2629,59 @@ export default class Game {
 
   _interact() {
     if (this.dungeon.active) {
-      if (this._dungeonHasLivingEnemies()) {
-        this._msg("Clear the floor first", 0.9);
-      } else {
-        if (!this.dungeon.roomRewarded) {
-          this._claimDungeonClearReward();
-          this.dungeon.roomRewarded = true;
-        }
-        const finalRoom = !!this.dungeon.room?.finalRoom;
-        const nearNorth = this._isHeroNearDungeonExit("north");
-        const nearSouth = this._isHeroNearDungeonExit("south");
-        if (nearSouth) {
-          this._leaveDungeon();
-        } else if (nearNorth) {
-          if (finalRoom) {
-            this._msg("Dungeon cleared", 1.0);
-            this._leaveDungeon();
-          } else {
-            this._descendDungeon();
-          }
+      const room = this._getDungeonRoom(this.dungeon.currentRoomId);
+      const currentClear = room ? !this._dungeonHasLivingEnemies(room.id) : !this._dungeonHasLivingEnemies();
+      const cacheRoom = this._getDungeonNearbyCacheRoom();
+      if (cacheRoom) {
+        if (!cacheRoom.cleared) {
+          this._msg("Clear the room first", 0.9);
+        } else if (cacheRoom.cacheOpened) {
+          this._msg("Already looted", 0.8);
         } else {
-          this._msg(finalRoom ? "North gate leaves victorious, south gate retreats" : "North gate deeper, south gate leaves", 1.1);
+          this._openDungeonCache(cacheRoom);
         }
+        return;
       }
+
+      const door = this._getNearbyDungeonDoor();
+      if (door) {
+        if (door.open) {
+          this._msg("Door is open", 0.7);
+        } else if (!currentClear) {
+          this._msg("Clear the room to open the door", 0.9);
+        } else if (door.locked === "key" && (this.dungeon.keys || 0) <= 0) {
+          this._msg("You need a dungeon key", 1.0);
+        } else {
+          this._openDungeonDoor(door);
+        }
+        return;
+      }
+
+      if (this._isHeroNearDungeonReturn()) {
+        this._leaveDungeon();
+        return;
+      }
+
+      if (this._isHeroNearDungeonExitStair()) {
+        if (!currentClear) {
+          this._msg("The way deeper is sealed", 0.9);
+        } else {
+          this._descendDungeon();
+        }
+        return;
+      }
+
+      this._msg(currentClear ? "Search caches, unlock doors, or use the stairs" : "Clear the room first", 1.0);
       return;
     }
 
     if (this._cachedNearbyCamp) {
       this._openShop(this._cachedNearbyCamp);
+      return;
+    }
+
+    if (this._cachedNearbyHerb) {
+      this._collectHerb(this._cachedNearbyHerb);
       return;
     }
 
@@ -2419,6 +2713,17 @@ export default class Game {
     if (this._cachedNearbyDungeon) {
       this._enterDungeon(this._cachedNearbyDungeon);
     }
+  }
+
+  _collectHerb(herb) {
+    if (!herb || herb.picked) return;
+    herb.picked = true;
+    this.progress.herbs = (this.progress.herbs || 0) + 1;
+    if (!this.progress.pickedHerbs) this.progress.pickedHerbs = new Set();
+    this.progress.pickedHerbs.add(herb.id);
+    this._cachedNearbyHerb = null;
+    this._spawnFloatingText(this.hero.x, this.hero.y - 24, "+1 Herb", "#8fe48d");
+    this._msg("Wild herbs gathered", 0.8);
   }
 
   _openShop(camp) {
@@ -2905,12 +3210,17 @@ export default class Game {
     this.dungeon.active = true;
     this.dungeon.floor = Math.max(1, (this.progress.dungeonBest || 0) + 1);
     this.dungeon.origin = { x: dungeonPoi.x, y: dungeonPoi.y };
+    this.dungeon.layout = this._buildDungeonFloor();
     this.dungeon.roomIndex = 1;
-    this.dungeon.totalRooms = 4;
+    this.dungeon.totalRooms = this.dungeon.layout?.combatRooms || 1;
     this.dungeon.roomRewarded = false;
-    this.dungeon.room = this._makeDungeonRoom();
-    this.hero.x = this.dungeon.room.x;
-    this.hero.y = this.dungeon.room.y + 150;
+    this.dungeon.keys = 0;
+    this.dungeon.roomClearT = 0;
+    this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
+    this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
+    const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + 150 };
+    this.hero.x = start.x;
+    this.hero.y = start.y;
     this.hero.vx = 0;
     this.hero.vy = 0;
     this.hero.state.sailing = false;
@@ -2920,19 +3230,25 @@ export default class Game {
     this.projectiles = [];
     this.loot = [];
 
-    this._msg(`${this._dungeonTheme(this.dungeon.floor).name} - Room 1/${this.dungeon.totalRooms}`, 1.2);
-    this._spawnDungeonWave();
+    this._msg(`${this._dungeonTheme(this.dungeon.floor).name} - explore the floor`, 1.2);
+    this._updateDungeonState(0);
   }
 
   _descendDungeon() {
     if (!this.dungeon.active) return;
     this.progress.dungeonBest = Math.max(this.progress.dungeonBest || 0, this.dungeon.floor || 0);
     this.dungeon.floor = Math.max(1, (this.dungeon.floor || 1) + 1);
-    this.dungeon.roomIndex = Math.min(this.dungeon.totalRooms || 4, (this.dungeon.roomIndex || 1) + 1);
+    this.dungeon.layout = this._buildDungeonFloor();
+    this.dungeon.roomIndex = 1;
+    this.dungeon.totalRooms = this.dungeon.layout?.combatRooms || 1;
     this.dungeon.roomRewarded = false;
-    this.dungeon.room = this._makeDungeonRoom();
-    this.hero.x = this.dungeon.room.x;
-    this.hero.y = this.dungeon.room.y + this.dungeon.room.h * 0.28;
+    this.dungeon.keys = 0;
+    this.dungeon.roomClearT = 0;
+    this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
+    this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
+    const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + this.dungeon.room.h * 0.28 };
+    this.hero.x = start.x;
+    this.hero.y = start.y;
     this.camera.x = this.hero.x;
     this.camera.y = this.hero.y;
     this.enemies = [];
@@ -2941,73 +3257,643 @@ export default class Game {
     this.hero.hp = Math.min(this.hero.maxHp || 100, (this.hero.hp || 0) + 12);
     this.hero.mana = Math.min(this.hero.maxMana || 60, (this.hero.mana || 0) + 10);
     if (this.dungeon.floor % 3 === 0) this._awardRelicShards(1, "depths");
-    this._spawnDungeonWave();
-    this._msg(`Descended: ${this._dungeonTheme(this.dungeon.floor).name} Room ${this.dungeon.roomIndex}/${this.dungeon.totalRooms}`, 1.4);
+    this._updateDungeonState(0);
+    this._msg(`Descended: ${this._dungeonTheme(this.dungeon.floor).name}`, 1.4);
   }
 
-  _makeDungeonRoom() {
+  _buildDungeonFloor() {
     const floor = Math.max(1, this.dungeon.floor || 1);
-    const roomIndex = Math.max(1, this.dungeon.roomIndex || 1);
-    const totalRooms = Math.max(1, this.dungeon.totalRooms || 4);
-    const finalRoom = roomIndex >= totalRooms;
-    const seed = hash2(this.seed, floor, roomIndex, 4117);
+    const seed = hash2(this.seed, floor, 4117);
     const rng = new RNG(seed);
-    const baseW = finalRoom ? 920 : 680 + rng.range(0, 170);
-    const baseH = finalRoom ? 620 : 440 + rng.range(0, 130);
-    const scaleW = Math.min(170, floor * 8);
-    const scaleH = Math.min(110, floor * 6);
+    const originX = this.dungeon.origin?.x || this.hero.x;
+    const originY = this.dungeon.origin?.y || this.hero.y;
+    const layoutHash = Math.abs(hash2(originX | 0, originY | 0, floor, 9173));
+    const cellX = 360;
+    const cellY = 260;
+    const rooms = [];
+    const corridors = [];
+    const doors = [];
+    const walkRects = [];
+
+    const makeRoom = (id, type, gx, gy, baseW, baseH) => {
+      const room = {
+        id,
+        type,
+        x: originX + gx * cellX,
+        y: originY + gy * cellY,
+        w: baseW + rng.range(-32, 32),
+        h: baseH + rng.range(-26, 26),
+        discovered: id === "start",
+        spawned: false,
+        cleared: id === "start",
+        rewardClaimed: id === "start",
+        cacheOpened: false,
+        openings: [],
+        decor: [],
+      };
+      rooms.push(room);
+      walkRects.push({
+        x: room.x,
+        y: room.y,
+        w: Math.max(96, room.w - 72),
+        h: Math.max(96, room.h - 72),
+        kind: "room",
+        roomId: id,
+      });
+      return room;
+    };
+
+    const addOpening = (room, side, center, span) => {
+      room.openings.push({ side, center, span });
+    };
+
+    const connect = (a, b, locked = "none", label = "") => {
+      let corridor;
+      let door;
+      if (Math.abs(a.y - b.y) < 20) {
+        const left = a.x < b.x ? a : b;
+        const right = left === a ? b : a;
+        const startX = left.x + left.w * 0.5 - 26;
+        const endX = right.x - right.w * 0.5 + 26;
+        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 74, kind: "corridor", rooms: [a.id, b.id] };
+        door = {
+          id: `${a.id}_${b.id}`,
+          a: a.id,
+          b: b.id,
+          x: corridor.x,
+          y: corridor.y,
+          vertical: true,
+          open: locked === "none",
+          locked,
+          label,
+          blocker: { x: corridor.x, y: corridor.y, w: 26, h: corridor.h - 12 },
+        };
+        addOpening(left, "right", left.y, corridor.h + 8);
+        addOpening(right, "left", right.y, corridor.h + 8);
+      } else {
+        const top = a.y < b.y ? a : b;
+        const bottom = top === a ? b : a;
+        const startY = top.y + top.h * 0.5 - 26;
+        const endY = bottom.y - bottom.h * 0.5 + 26;
+        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 74, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
+        door = {
+          id: `${a.id}_${b.id}`,
+          a: a.id,
+          b: b.id,
+          x: corridor.x,
+          y: corridor.y,
+          vertical: false,
+          open: locked === "none",
+          locked,
+          label,
+          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 12, h: 26 },
+        };
+        addOpening(top, "bottom", top.x, corridor.w + 8);
+        addOpening(bottom, "top", bottom.x, corridor.w + 8);
+      }
+      corridor.orientation = door.vertical ? "h" : "v";
+      corridor.decor = [];
+      corridors.push(corridor);
+      walkRects.push(corridor);
+      doors.push(door);
+      return door;
+    };
+
+    const templates = [
+      {
+        name: "forked-depths",
+        rooms: [
+          ["start", "start", 0, 0, 680, 460],
+          ["guard", "hall", 0, -1, 600, 380],
+          ["loot", "loot", -1, -1, 500, 340],
+          ["armory", "armory", 1, -1, 520, 340],
+          ["crypt", "crypt", 0, -2, 620, 390],
+          ["shrine", "shrine", -1, -2, 500, 330],
+          ["key", "key", 1, -2, 500, 330],
+          ["boss", "boss", 0, -3, 840, 520],
+        ],
+        links: [
+          ["start", "guard", "clear", "Gate"],
+          ["guard", "loot", "clear", "Loot Door"],
+          ["guard", "armory", "clear", "Armory Door"],
+          ["guard", "crypt", "clear", "Crypt Gate"],
+          ["loot", "shrine", "clear", "Shrine Door"],
+          ["armory", "key", "clear", "Archive Door"],
+          ["crypt", "boss", "key", "Boss Gate"],
+          ["shrine", "crypt", "clear", "Stone Door"],
+          ["key", "crypt", "clear", "Stone Door"],
+        ],
+      },
+      {
+        name: "long-spine",
+        rooms: [
+          ["start", "start", 0, 0, 650, 450],
+          ["hallA", "hall", 0, -1, 560, 340],
+          ["hallB", "hall", 0, -2, 580, 350],
+          ["loot", "loot", -1, -1, 500, 320],
+          ["armory", "armory", 1, -2, 500, 320],
+          ["shrine", "shrine", -1, -3, 500, 320],
+          ["key", "key", 1, -3, 500, 320],
+          ["crypt", "crypt", 0, -4, 620, 400],
+          ["boss", "boss", 0, -5, 860, 540],
+        ],
+        links: [
+          ["start", "hallA", "clear", "Entry Gate"],
+          ["hallA", "hallB", "clear", "North Gate"],
+          ["hallA", "loot", "clear", "Loot Door"],
+          ["hallB", "armory", "clear", "Armory Door"],
+          ["hallB", "crypt", "clear", "Crypt Gate"],
+          ["loot", "shrine", "clear", "Shrine Door"],
+          ["armory", "key", "clear", "Key Door"],
+          ["crypt", "boss", "key", "Boss Gate"],
+          ["shrine", "crypt", "clear", "Hidden Gate"],
+          ["key", "crypt", "clear", "Iron Gate"],
+        ],
+      },
+      {
+        name: "ring-vault",
+        rooms: [
+          ["start", "start", 0, 0, 660, 450],
+          ["west", "hall", -1, 0, 540, 340],
+          ["east", "hall", 1, 0, 540, 340],
+          ["north", "hall", 0, -1, 620, 360],
+          ["loot", "loot", -1, -1, 500, 320],
+          ["key", "key", 1, -1, 500, 320],
+          ["shrine", "shrine", -1, -2, 500, 320],
+          ["armory", "armory", 1, -2, 500, 320],
+          ["crypt", "crypt", 0, -2, 620, 390],
+          ["boss", "boss", 0, -3, 840, 520],
+        ],
+        links: [
+          ["start", "west", "clear", "West Door"],
+          ["start", "east", "clear", "East Door"],
+          ["start", "north", "clear", "North Gate"],
+          ["west", "loot", "clear", "Loot Door"],
+          ["east", "key", "clear", "Archive Door"],
+          ["north", "crypt", "clear", "Crypt Gate"],
+          ["loot", "shrine", "clear", "Shrine Door"],
+          ["key", "armory", "clear", "Armory Door"],
+          ["shrine", "crypt", "clear", "Stone Door"],
+          ["armory", "crypt", "clear", "Stone Door"],
+          ["crypt", "boss", "key", "Boss Gate"],
+        ],
+      },
+    ];
+
+    const template = templates[layoutHash % templates.length];
+    const roomById = new Map();
+    for (const [id, type, gx, gy, w, h] of template.rooms) {
+      roomById.set(id, makeRoom(id, type, gx, gy, w, h));
+    }
+    for (const [aId, bId, locked, label] of template.links) {
+      connect(roomById.get(aId), roomById.get(bId), locked, label);
+    }
+
+    this._populateDungeonDecor({ rooms, corridors }, this._dungeonTheme(floor), rng);
+    const blockedRects = this._buildDungeonBlockedRects({ rooms, corridors });
+    const start = roomById.get("start");
+    const boss = roomById.get("boss");
+    const returnStair = { x: start.x, y: start.y + start.h * 0.5 - 78 };
+    const exitStair = { x: boss.x, y: boss.y - boss.h * 0.5 + 92 };
+
     return {
-      x: this.dungeon.origin?.x || this.hero.x,
-      y: this.dungeon.origin?.y || this.hero.y,
-      w: baseW + scaleW,
-      h: baseH + scaleH,
       seed,
-      finalRoom,
-      roomIndex,
-      totalRooms,
+      rooms,
+      corridors,
+      doors,
+      walkRects,
+      blockedRects,
+      startRoomId: "start",
+      bossRoomId: "boss",
+      currentRoomId: "start",
+      combatRooms: rooms.filter((r) => r.type !== "start").length,
+      returnStair,
+      exitStair,
     };
   }
 
-  _getDungeonExitAnchor(which = "north", room = this.dungeon.room) {
-    const r = room || this.dungeon.room || { x: this.hero.x, y: this.hero.y, w: 780, h: 540 };
-    return which === "south"
-      ? { x: r.x, y: r.y + r.h * 0.5 - 52 }
-      : { x: r.x, y: r.y - r.h * 0.5 + 52 };
+  _populateDungeonDecor(layout, theme, rng) {
+    const addRoomProp = (room, kind, x, y, sx = 1, sy = 1) => {
+      room.decor.push({ kind, x, y, sx, sy });
+    };
+    const addCorridorProp = (corridor, kind, x, y, sx = 1, sy = 1) => {
+      corridor.decor.push({ kind, x, y, sx, sy });
+    };
+
+    for (const room of layout.rooms || []) {
+      const insetX = room.w * 0.34;
+      const insetY = room.h * 0.28;
+      if (room.type === "start") {
+        addRoomProp(room, "banner", room.x - room.w * 0.24, room.y - room.h * 0.34, 1.1, 1);
+        addRoomProp(room, "banner", room.x + room.w * 0.24, room.y - room.h * 0.34, 1.1, 1);
+        addRoomProp(room, "brazer", room.x - room.w * 0.26, room.y + room.h * 0.12, 1, 1);
+        addRoomProp(room, "brazer", room.x + room.w * 0.26, room.y + room.h * 0.12, 1, 1);
+      } else if (room.type === "boss") {
+        addRoomProp(room, "dais", room.x, room.y + room.h * 0.08, 1.8, 1.15);
+        addRoomProp(room, "banner", room.x - room.w * 0.28, room.y - room.h * 0.34, 1.2, 1.1);
+        addRoomProp(room, "banner", room.x + room.w * 0.28, room.y - room.h * 0.34, 1.2, 1.1);
+        addRoomProp(room, "pillar", room.x - room.w * 0.22, room.y - room.h * 0.05, 1.1, 1.1);
+        addRoomProp(room, "pillar", room.x + room.w * 0.22, room.y - room.h * 0.05, 1.1, 1.1);
+      } else if (room.type === "loot") {
+        addRoomProp(room, "crate", room.x - insetX * 0.6, room.y + insetY * 0.18, 1.05, 1);
+        addRoomProp(room, "crate", room.x + insetX * 0.5, room.y - insetY * 0.24, 0.95, 0.95);
+      } else if (room.type === "key") {
+        addRoomProp(room, "shelf", room.x - insetX * 0.72, room.y - insetY * 0.34, 1.15, 1);
+        addRoomProp(room, "shelf", room.x + insetX * 0.68, room.y - insetY * 0.34, 1.15, 1);
+        addRoomProp(room, "table", room.x, room.y + insetY * 0.06, 1.1, 1);
+      } else if (room.type === "shrine") {
+        addRoomProp(room, "pool", room.x, room.y, 1.2, 1);
+        addRoomProp(room, "brazer", room.x - insetX * 0.78, room.y + insetY * 0.2, 0.9, 0.9);
+        addRoomProp(room, "brazer", room.x + insetX * 0.78, room.y + insetY * 0.2, 0.9, 0.9);
+      } else {
+        const pillarCount = room.type === "hall" ? 4 : 2;
+        for (let i = 0; i < pillarCount; i++) {
+          const px = room.x + ((i % 2 === 0 ? -1 : 1) * insetX * (0.48 + (i % 3) * 0.06));
+          const py = room.y + (Math.floor(i / 2) - 0.5) * insetY * 1.05;
+          addRoomProp(room, "pillar", px, py, 1, 1);
+        }
+        addRoomProp(room, "rubble", room.x - insetX * 0.58, room.y + insetY * 0.52, 1.2, 1);
+        addRoomProp(room, "rubble", room.x + insetX * 0.55, room.y - insetY * 0.52, 1, 0.9);
+      }
+    }
+
+    for (const corridor of layout.corridors || []) {
+      if (corridor.orientation === "h") {
+        addCorridorProp(corridor, "sconce", corridor.x - corridor.w * 0.24, corridor.y - corridor.h * 0.28, 0.9, 1);
+        addCorridorProp(corridor, "sconce", corridor.x + corridor.w * 0.24, corridor.y - corridor.h * 0.28, 0.9, 1);
+      } else {
+        addCorridorProp(corridor, "sconce", corridor.x - corridor.w * 0.28, corridor.y - corridor.h * 0.22, 0.9, 1);
+        addCorridorProp(corridor, "sconce", corridor.x - corridor.w * 0.28, corridor.y + corridor.h * 0.22, 0.9, 1);
+      }
+
+      if (rng.next() < 0.75) {
+        addCorridorProp(
+          corridor,
+          "rubble",
+          corridor.x + rng.range(-corridor.w * 0.22, corridor.w * 0.22),
+          corridor.y + rng.range(-corridor.h * 0.22, corridor.h * 0.22),
+          0.95,
+          0.9
+        );
+      }
+    }
   }
 
-  _isHeroNearDungeonExit(which = "north", radius = 82) {
-    if (!this.dungeon.active) return false;
-    const p = this._getDungeonExitAnchor(which);
-    return dist2(this.hero.x, this.hero.y, p.x, p.y) <= radius * radius;
+  _buildDungeonBlockedRects(layout) {
+    const blocked = [];
+    const addRect = (x, y, w, h) => {
+      if (w > 6 && h > 6) blocked.push({ x, y, w, h });
+    };
+
+    for (const room of layout.rooms || []) {
+      const left = room.x - room.w * 0.5;
+      const right = room.x + room.w * 0.5;
+      const top = room.y - room.h * 0.5;
+      const bottom = room.y + room.h * 0.5;
+      const wall = 22;
+      const openingsBySide = { top: [], right: [], bottom: [], left: [] };
+      for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
+
+      const addHorizontalSegments = (side) => {
+        const y = side === "top" ? top + wall * 0.5 : bottom - wall * 0.5;
+        const openings = openingsBySide[side].slice().sort((a, b) => a.center - b.center);
+        let cursor = left;
+        for (const opening of openings) {
+          const gapLeft = Math.max(left, opening.center - opening.span * 0.5);
+          const gapRight = Math.min(right, opening.center + opening.span * 0.5);
+          if (gapLeft > cursor) addRect((cursor + gapLeft) * 0.5, y, gapLeft - cursor, wall);
+          cursor = Math.max(cursor, gapRight);
+        }
+        if (cursor < right) addRect((cursor + right) * 0.5, y, right - cursor, wall);
+      };
+
+      const addVerticalSegments = (side) => {
+        const x = side === "left" ? left + wall * 0.5 : right - wall * 0.5;
+        const openings = openingsBySide[side].slice().sort((a, b) => a.center - b.center);
+        let cursor = top;
+        for (const opening of openings) {
+          const gapTop = Math.max(top, opening.center - opening.span * 0.5);
+          const gapBottom = Math.min(bottom, opening.center + opening.span * 0.5);
+          if (gapTop > cursor) addRect(x, (cursor + gapTop) * 0.5, wall, gapTop - cursor);
+          cursor = Math.max(cursor, gapBottom);
+        }
+        if (cursor < bottom) addRect(x, (cursor + bottom) * 0.5, wall, bottom - cursor);
+      };
+
+      addHorizontalSegments("top");
+      addHorizontalSegments("bottom");
+      addVerticalSegments("left");
+      addVerticalSegments("right");
+    }
+
+    for (const corridor of layout.corridors || []) {
+      const wall = 14;
+      if (corridor.orientation === "h") {
+        addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, corridor.w, wall);
+        addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, corridor.w, wall);
+      } else {
+        addRect(corridor.x - corridor.w * 0.5 + wall * 0.5, corridor.y, wall, corridor.h);
+        addRect(corridor.x + corridor.w * 0.5 - wall * 0.5, corridor.y, wall, corridor.h);
+      }
+    }
+
+    return blocked;
   }
 
-  _dungeonHasLivingEnemies() {
-    return this.enemies.some((e) => e?.alive);
+  _getDungeonRoom(id = this.dungeon.currentRoomId) {
+    return this.dungeon?.layout?.rooms?.find((room) => room.id === id) || null;
   }
 
-  _claimDungeonClearReward() {
+  _drawDungeonRoomWalls(ctx, room, theme, active = false) {
+    const left = room.x - room.w * 0.5;
+    const right = room.x + room.w * 0.5;
+    const top = room.y - room.h * 0.5;
+    const bottom = room.y + room.h * 0.5;
+    const wall = 22;
+    const edge = active ? "rgba(139,233,255,0.60)" : theme.accent;
+    const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(14,17,22,0.94)";
+
+    const openingsBySide = { top: [], right: [], bottom: [], left: [] };
+    for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
+
+    const drawHorizontal = (y, side) => {
+      const span = side === "top" ? top : bottom - wall;
+      const openings = openingsBySide[side].slice().sort((a, b) => a.center - b.center);
+      let cursor = left;
+      for (const opening of openings) {
+        const gapLeft = Math.max(left, opening.center - opening.span * 0.5);
+        const gapRight = Math.min(right, opening.center + opening.span * 0.5);
+        if (gapLeft > cursor) {
+          ctx.fillStyle = face;
+          ctx.fillRect(cursor, span, gapLeft - cursor, wall);
+        }
+        cursor = Math.max(cursor, gapRight);
+      }
+      if (cursor < right) {
+        ctx.fillStyle = face;
+        ctx.fillRect(cursor, span, right - cursor, wall);
+      }
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(left + 2, side === "top" ? top + 1.5 : bottom - 1.5);
+      ctx.lineTo(right - 2, side === "top" ? top + 1.5 : bottom - 1.5);
+      ctx.stroke();
+    };
+
+    const drawVertical = (x, side) => {
+      const span = side === "left" ? left : right - wall;
+      const openings = openingsBySide[side].slice().sort((a, b) => a.center - b.center);
+      let cursor = top;
+      for (const opening of openings) {
+        const gapTop = Math.max(top, opening.center - opening.span * 0.5);
+        const gapBottom = Math.min(bottom, opening.center + opening.span * 0.5);
+        if (gapTop > cursor) {
+          ctx.fillStyle = face;
+          ctx.fillRect(span, cursor, wall, gapTop - cursor);
+        }
+        cursor = Math.max(cursor, gapBottom);
+      }
+      if (cursor < bottom) {
+        ctx.fillStyle = face;
+        ctx.fillRect(span, cursor, wall, bottom - cursor);
+      }
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(side === "left" ? left + 1.5 : right - 1.5, top + 2);
+      ctx.lineTo(side === "left" ? left + 1.5 : right - 1.5, bottom - 2);
+      ctx.stroke();
+    };
+
+    drawHorizontal(top, "top");
+    drawHorizontal(bottom, "bottom");
+    drawVertical(left, "left");
+    drawVertical(right, "right");
+  }
+
+  _drawDungeonCorridorWalls(ctx, rect, theme) {
+    const gx = rect.x - rect.w * 0.5;
+    const gy = rect.y - rect.h * 0.5;
+    const wall = 14;
+    const face = "rgba(13,16,22,0.95)";
+
+    if (rect.orientation === "h") {
+      ctx.fillStyle = face;
+      ctx.fillRect(gx, gy, rect.w, wall);
+      ctx.fillRect(gx, gy + rect.h - wall, rect.w, wall);
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gx + 4, gy + 1.5);
+      ctx.lineTo(gx + rect.w - 4, gy + 1.5);
+      ctx.moveTo(gx + 4, gy + rect.h - 1.5);
+      ctx.lineTo(gx + rect.w - 4, gy + rect.h - 1.5);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = face;
+      ctx.fillRect(gx, gy, wall, rect.h);
+      ctx.fillRect(gx + rect.w - wall, gy, wall, rect.h);
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gx + 1.5, gy + 4);
+      ctx.lineTo(gx + 1.5, gy + rect.h - 4);
+      ctx.moveTo(gx + rect.w - 1.5, gy + 4);
+      ctx.lineTo(gx + rect.w - 1.5, gy + rect.h - 4);
+      ctx.stroke();
+    }
+  }
+
+  _drawDungeonDecor(ctx, items, theme) {
+    for (const item of items || []) {
+      const sx = item.sx || 1;
+      const sy = item.sy || 1;
+      ctx.save();
+      ctx.translate(item.x, item.y);
+      ctx.scale(sx, sy);
+      switch (item.kind) {
+        case "pillar":
+          ctx.fillStyle = theme.propB;
+          ctx.fillRect(-12, -16, 24, 34);
+          ctx.fillStyle = theme.propA;
+          ctx.fillRect(-16, -22, 32, 10);
+          ctx.fillRect(-16, 12, 32, 8);
+          break;
+        case "rubble":
+          ctx.fillStyle = theme.propB;
+          for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            ctx.ellipse(-16 + i * 10, -2 + (i % 2) * 6, 7 + (i % 2) * 3, 5 + ((i + 1) % 2) * 3, i * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        case "crate":
+          ctx.fillStyle = "#5a4632";
+          ctx.fillRect(-18, -14, 36, 28);
+          ctx.strokeStyle = "#8a6b4a";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(-17, -13, 34, 26);
+          ctx.beginPath();
+          ctx.moveTo(-18, 0);
+          ctx.lineTo(18, 0);
+          ctx.moveTo(0, -14);
+          ctx.lineTo(0, 14);
+          ctx.stroke();
+          break;
+        case "table":
+          ctx.fillStyle = "#61462f";
+          ctx.fillRect(-26, -10, 52, 20);
+          ctx.fillStyle = "#3b2a1e";
+          ctx.fillRect(-22, 10, 6, 12);
+          ctx.fillRect(16, 10, 6, 12);
+          ctx.fillRect(-22, -22, 6, 12);
+          ctx.fillRect(16, -22, 6, 12);
+          break;
+        case "shelf":
+          ctx.fillStyle = "#3a2f24";
+          ctx.fillRect(-30, -12, 60, 24);
+          ctx.fillStyle = "#71573b";
+          ctx.fillRect(-30, -12, 60, 5);
+          ctx.fillRect(-30, 1, 60, 5);
+          break;
+        case "banner":
+          ctx.fillStyle = "#3f2636";
+          ctx.fillRect(-5, -24, 10, 12);
+          ctx.fillStyle = "#7a4da0";
+          ctx.beginPath();
+          ctx.moveTo(-18, -12);
+          ctx.lineTo(18, -12);
+          ctx.lineTo(12, 18);
+          ctx.lineTo(0, 9);
+          ctx.lineTo(-12, 18);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        case "brazer":
+        case "sconce":
+          ctx.fillStyle = "#584b3a";
+          ctx.beginPath();
+          ctx.arc(0, 8, 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ffbd64";
+          ctx.beginPath();
+          ctx.ellipse(0, -4, 10, 16, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,200,96,0.18)";
+          ctx.beginPath();
+          ctx.arc(0, -2, item.kind === "sconce" ? 24 : 30, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        case "pool":
+          ctx.fillStyle = "rgba(100,196,255,0.18)";
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 38, 22, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(160,232,255,0.46)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          break;
+        case "dais":
+          ctx.fillStyle = "#463027";
+          ctx.fillRect(-52, -12, 104, 24);
+          ctx.fillStyle = "#6a4938";
+          ctx.fillRect(-40, -22, 80, 18);
+          break;
+      }
+      ctx.restore();
+    }
+  }
+
+  _findDungeonRoomAt(x, y, inset = 0) {
+    const rooms = this.dungeon?.layout?.rooms || [];
+    return rooms.find((room) =>
+      x >= room.x - room.w * 0.5 + inset &&
+      x <= room.x + room.w * 0.5 - inset &&
+      y >= room.y - room.h * 0.5 + inset &&
+      y <= room.y + room.h * 0.5 - inset
+    ) || null;
+  }
+
+  _getNearbyDungeonDoor(radius = 104) {
+    if (!this.dungeon.active) return null;
+    let best = null;
+    let bestD2 = radius * radius;
+    for (const door of this.dungeon?.layout?.doors || []) {
+      const d2 = dist2(this.hero.x, this.hero.y, door.x, door.y);
+      if (d2 <= bestD2) {
+        best = door;
+        bestD2 = d2;
+      }
+    }
+    return best;
+  }
+
+  _getDungeonNearbyCacheRoom(radius = 78) {
+    if (!this.dungeon.active) return null;
+    const room = this._getDungeonRoom();
+    if (!room || room.type === "start" || room.type === "boss" || room.cacheOpened) return null;
+    const cache = this._getDungeonRoomCacheAnchor(room);
+    return dist2(this.hero.x, this.hero.y, cache.x, cache.y) <= radius * radius ? room : null;
+  }
+
+  _getDungeonRoomCacheAnchor(room) {
+    return {
+      x: room.x + (room.type === "key" ? room.w * 0.18 : room.type === "loot" ? -room.w * 0.18 : room.type === "shrine" ? -room.w * 0.16 : room.w * 0.12),
+      y: room.y - room.h * 0.10,
+    };
+  }
+
+  _isHeroNearDungeonReturn(radius = 92) {
+    const p = this.dungeon?.layout?.returnStair;
+    return !!p && dist2(this.hero.x, this.hero.y, p.x, p.y) <= radius * radius;
+  }
+
+  _isHeroNearDungeonExitStair(radius = 92) {
+    const p = this.dungeon?.layout?.exitStair;
+    return !!p && dist2(this.hero.x, this.hero.y, p.x, p.y) <= radius * radius;
+  }
+
+  _openDungeonDoor(door) {
+    if (!door || door.open) return;
+    if (door.locked === "key") {
+      this.dungeon.keys = Math.max(0, (this.dungeon.keys || 0) - 1);
+    }
+    door.open = true;
+    this._spawnFloatingText(door.x, door.y - 18, door.locked === "key" ? "Unlocked" : "Opened", "#8be9ff");
+    this._msg(door.locked === "key" ? "Dungeon key used" : "Door opened", 1.0);
+  }
+
+  _dungeonHasLivingEnemies(roomId = this.dungeon.currentRoomId) {
+    return this.enemies.some((e) => e?.alive && (!roomId || e.dungeonRoomId === roomId));
+  }
+
+  _claimDungeonClearReward(room = this._getDungeonRoom()) {
+    if (!room || room.rewardClaimed) return;
+    room.rewardClaimed = true;
     const floor = Math.max(1, this.dungeon.floor || 1);
-    const room = this.dungeon.room || {};
-    const gold = 16 + floor * 7 + Math.round((this.hero.level || 1) * 2.5);
+    const roomBonus =
+      room.type === "boss" ? 34 :
+      room.type === "hall" ? 22 :
+      room.type === "shrine" ? 18 :
+      14;
+    const gold = roomBonus + floor * 5 + Math.round((this.hero.level || 1) * 1.8);
     this.hero.gold += gold;
-    this.hero.giveXP?.(8 + floor * 3);
+    this.hero.giveXP?.(6 + floor * 2 + (room.type === "boss" ? 10 : 0));
 
-    if (floor % 2 === 0) {
-      const potionType = floor % 4 === 0 ? "mana" : "hp";
+    if (room.type !== "boss" && floor % 2 === 0) {
+      const potionType = room.type === "shrine" || floor % 4 === 0 ? "mana" : "hp";
       this.hero.potions[potionType] = (this.hero.potions[potionType] || 0) + 1;
     }
 
-    if (floor % 3 === 0) {
+    if (room.type === "boss") {
       const slots = EQUIPMENT_SLOTS;
       const slot = slots[Math.abs(hash2(this.seed, floor, this.hero.level || 1)) % slots.length];
       const rarity = floor >= 9 ? "epic" : floor >= 5 ? "rare" : "uncommon";
-      const gear = makeGear(slot, Math.max(1, (this.hero.level || 1) + Math.floor(floor / 3)), rarity, hash2(this.seed, floor, slot.length));
+      const gear = makeGear(slot, Math.max(1, (this.hero.level || 1) + Math.floor(floor / 2)), rarity, hash2(this.seed, floor, slot.length));
       gear.name = `Depth-Forged ${gear.name}`;
       this.hero.inventory.push(gear);
       this._spawnFloatingText(this.hero.x, this.hero.y - 58, `Gear PWR ${gear.score || "-"}`, gear.color || "#dc7cff");
-    }
-
-    if (room.finalRoom) {
       const done = this.progress.storyMilestones || (this.progress.storyMilestones = {});
       if (!done.mountainPassAccess) {
         done.mountainPassAccess = true;
@@ -3017,35 +3903,108 @@ export default class Game {
       }
     }
 
-    this._spawnFloatingText(this.hero.x, this.hero.y - 38, `${this._dungeonTheme(floor).name} clear +${gold}g`, "#ffd86e");
+    this._spawnFloatingText(this.hero.x, this.hero.y - 38, `${room.type === "boss" ? "Boss room" : "Room clear"} +${gold}g`, "#ffd86e");
   }
 
-  _spawnDungeonWave() {
+  _spawnDungeonWave(room = this._getDungeonRoom()) {
+    if (!room || room.type === "start") return;
     const floor = Math.max(1, this.dungeon.floor || 1);
-    const room = this.dungeon.room;
-    const finalRoom = !!room?.finalRoom;
-    const count = finalRoom ? Math.min(8, 4 + Math.ceil(floor * 0.45)) : Math.min(10, 3 + Math.ceil(floor * 0.6));
-    const bossFloor = finalRoom;
     const theme = this._dungeonTheme(floor);
+    const roomSeed = hash2(this.seed, floor, room.id.length, room.x | 0, room.y | 0);
+    const rng = new RNG(roomSeed);
+    const enemies = [];
 
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2 + floor * 0.31;
-      const r = 220 + (i % 3) * 65;
-      const rawX = this.hero.x + Math.cos(a) * r;
-      const rawY = this.hero.y + Math.sin(a) * r;
-      const x = room ? clamp(rawX, room.x - room.w * 0.5 + 80, room.x + room.w * 0.5 - 80) : rawX;
-      const y = room ? clamp(rawY, room.y - room.h * 0.5 + 80, room.y + room.h * 0.5 - 80) : rawY;
-      const kind = bossFloor && i === 0 ? theme.enemies[0] : this._pickFrom(theme.enemies);
-      const enemy = new Enemy(x, y, Math.max(1, (this.hero.level || 1) + floor - 1), kind, hash2(x | 0, y | 0, this.seed + floor), i % 4 === 0, bossFloor && i === 0);
-      this.enemies.push(this._applyEnemyAffix(enemy));
+    const addEnemy = (kind, elite = false, boss = false, px = null, py = null) => {
+      const x = px ?? rng.range(room.x - room.w * 0.28, room.x + room.w * 0.28);
+      const y = py ?? rng.range(room.y - room.h * 0.20, room.y + room.h * 0.20);
+      const enemy = new Enemy(x, y, Math.max(1, (this.hero.level || 1) + floor - 1), kind, hash2(x | 0, y | 0, roomSeed), elite, boss);
+      enemy.dungeonRoomId = room.id;
+      enemies.push(this._applyEnemyAffix(enemy));
+    };
+
+    if (room.type === "boss") {
+      addEnemy(theme.enemies[0], false, true, room.x, room.y - 40);
+      for (let i = 0; i < Math.min(2, 1 + Math.floor(floor / 6)); i++) {
+        addEnemy(this._pickFrom(theme.enemies.slice(1)), i === 1 && floor >= 6, false);
+      }
+    } else {
+      const baseCount =
+        room.type === "hall" ? 1 + Math.min(1, Math.floor(floor / 7)) :
+        room.type === "shrine" ? 1 :
+        room.type === "armory" || room.type === "crypt" ? 2 :
+        1;
+      for (let i = 0; i < baseCount; i++) {
+        addEnemy(this._pickFrom(theme.enemies), room.type === "hall" && i === baseCount - 1 && floor >= 4, false);
+      }
     }
 
-    if (finalRoom && floor >= 5 && floor % 4 === 0) {
-      const room = this.dungeon.room;
-      const bx = room ? room.x + room.w * 0.30 : this.hero.x + 280;
-      const by = room ? room.y - room.h * 0.18 : this.hero.y - 40;
-      this._spawnDragonBoss(bx, by, Math.max(8, (this.hero.level || 1) + floor), `Depth Dragon F${floor}`);
+    this.enemies.push(...enemies);
+  }
+
+  _updateDungeonState(dt) {
+    if (!this.dungeon.active || !this.dungeon.layout) return;
+
+    const roomAtHero = this._findDungeonRoomAt(this.hero.x, this.hero.y, 18);
+    if (roomAtHero && roomAtHero.id !== this.dungeon.currentRoomId) {
+      this.dungeon.currentRoomId = roomAtHero.id;
+      roomAtHero.discovered = true;
+      this.dungeon.room = roomAtHero;
+      this._msg(`${this._titleCase(roomAtHero.type)} room`, 0.8);
+    } else if (roomAtHero) {
+      this.dungeon.room = roomAtHero;
     }
+
+    const room = this._getDungeonRoom();
+    if (!room) return;
+    room.discovered = true;
+
+    if (!room.spawned) {
+      room.spawned = true;
+      this._spawnDungeonWave(room);
+    }
+
+    const alive = this._dungeonHasLivingEnemies(room.id);
+    if (!alive && !room.cleared) {
+      room.cleared = true;
+      this._claimDungeonClearReward(room);
+      for (const door of this.dungeon.layout.doors || []) {
+        if (!door.open && door.locked === "clear" && (door.a === room.id || door.b === room.id)) door.open = true;
+      }
+    }
+
+    const visitedCombat = this.dungeon.layout.rooms.filter((r) => r.cleared && r.type !== "start").length;
+    this.dungeon.roomIndex = Math.max(1, visitedCombat);
+  }
+
+  _openDungeonCache(room) {
+    if (!room || room.cacheOpened) return;
+    room.cacheOpened = true;
+    const floor = Math.max(1, this.dungeon.floor || 1);
+    if (room.type === "key") {
+      this.dungeon.keys = (this.dungeon.keys || 0) + 1;
+      this._spawnFloatingText(this.hero.x, this.hero.y - 30, "Dungeon Key", "#8be9ff");
+      this._msg("A heavy key clinks into your palm", 1.2);
+      return;
+    }
+
+    if (room.type === "loot") {
+      const slots = EQUIPMENT_SLOTS;
+      const slot = slots[Math.abs(hash2(this.seed, floor, room.x | 0)) % slots.length];
+      const rarity = floor >= 7 ? "rare" : "uncommon";
+      const gear = makeGear(slot, Math.max(1, (this.hero.level || 1) + Math.floor(floor / 2)), rarity, hash2(this.seed, floor, room.y | 0));
+      gear.name = `Vault ${gear.name}`;
+      this.hero.inventory.push(gear);
+      this.hero.gold += 20 + floor * 4;
+      this._spawnFloatingText(this.hero.x, this.hero.y - 30, gear.name, gear.color || "#dc7cff");
+      this._msg("You found a sealed cache", 1.2);
+      return;
+    }
+
+    this.hero.potions.hp = (this.hero.potions.hp || 0) + 1;
+    this.hero.potions.mana = (this.hero.potions.mana || 0) + 1;
+    this._awardRelicShards(1, "depths");
+    this._spawnFloatingText(this.hero.x, this.hero.y - 30, "Sanctum cache", "#c8ff9a");
+    this._msg("The cache restores your reserves", 1.2);
   }
 
   _leaveDungeon() {
@@ -3065,6 +4024,10 @@ export default class Game {
     this.dungeon.roomIndex = 0;
     this.dungeon.totalRooms = 0;
     this.dungeon.roomRewarded = false;
+    this.dungeon.layout = null;
+    this.dungeon.currentRoomId = null;
+    this.dungeon.keys = 0;
+    this.dungeon.roomClearT = 0;
 
     this.camera.x = this.hero.x;
     this.camera.y = this.hero.y;
@@ -3187,11 +4150,25 @@ export default class Game {
   getObjective() {
     if (this.dungeon.active) {
       const floor = this.dungeon.floor || 1;
-      const alive = this.enemies.reduce((n, e) => n + (e?.alive ? 1 : 0), 0);
+      const room = this._getDungeonRoom();
+      const alive = room ? this.enemies.reduce((n, e) => n + (e?.alive && e.dungeonRoomId === room.id ? 1 : 0), 0) : this.enemies.reduce((n, e) => n + (e?.alive ? 1 : 0), 0);
       const theme = this._dungeonTheme(floor);
+      const lockedDoor = (this.dungeon?.layout?.doors || []).find((door) => !door.open && (door.a === room?.id || door.b === room?.id));
+      const cacheRoom = room && !room.cacheOpened && ["loot", "key", "shrine"].includes(room.type) ? room : null;
+      let detail = alive > 0
+        ? `${alive} enemies remain in the ${this._titleCase(room?.type || "room")}.`
+        : cacheRoom
+        ? "Room clear. Search the cache, then unlock the next door."
+        : lockedDoor
+        ? lockedDoor.locked === "key"
+          ? (this.dungeon.keys > 0 ? "Room clear. Press F at the boss gate to unlock it." : "Room clear. Find a dungeon key to open the boss gate.")
+          : "Room clear. Press F at the sealed door."
+        : room?.type === "boss"
+        ? "Boss defeated. Use the stairs to descend or the OUT sigil to leave."
+        : "Room clear. Explore onward.";
       return this._objective(
         `${theme.name} Floor ${floor}`,
-        alive > 0 ? `${alive} enemies remain. Clear the room, then press F at the stairs.` : "Room clear. Press F at the stairs to descend.",
+        detail,
         null,
         "#dc7cff"
       );
@@ -3522,7 +4499,8 @@ export default class Game {
   }
 
   _ensureHeroSafe(showMsg = false) {
-    const onSafeGround = this.world.canWalk?.(this.hero.x, this.hero.y, { state: { sailing: false, mountainPassAccess: !!this.hero.state?.mountainPassAccess } });
+    const onSafeGround = this.world.canWalk?.(this.hero.x, this.hero.y, this.hero);
+
     if (onSafeGround) {
       return;
     }
@@ -3598,6 +4576,8 @@ export default class Game {
           storyMilestones: this.progress.storyMilestones || {},
           visitedTowns: Array.from(this.progress.visitedTowns || []),
           crossedBridges: Array.from(this.progress.crossedBridges || []),
+          herbs: this.progress.herbs || 0,
+          pickedHerbs: Array.from(this.progress.pickedHerbs || []),
           exploredCells: this.world?.exportDiscovery?.() || [],
         },
         trackedObjective: this.trackedObjective,
@@ -3699,6 +4679,9 @@ export default class Game {
         this.progress.storyMilestones = data.progress.storyMilestones || {};
         this.progress.visitedTowns = new Set(data.progress.visitedTowns || []);
         this.progress.crossedBridges = new Set(data.progress.crossedBridges || []);
+        this.progress.herbs = data.progress.herbs || 0;
+        this.progress.pickedHerbs = new Set(data.progress.pickedHerbs || []);
+        for (const herb of this.world.herbs || []) herb.picked = this.progress.pickedHerbs.has(herb.id);
         if (!needsWorldMigration) {
           this.world?.importDiscovery?.(data.progress.exploredCells || []);
         }

@@ -24,9 +24,13 @@ export default class UI {
     this._msgT = 0;
 
     this._miniFrame = document.createElement("canvas");
-    this._miniFrame.width = 172;
-    this._miniFrame.height = 172;
+    this._miniFrame.width = 128;
+    this._miniFrame.height = 128;
     this._miniFrameCtx = this._miniFrame.getContext("2d");
+    this._miniSampleFrame = document.createElement("canvas");
+    this._miniSampleFrame.width = 20;
+    this._miniSampleFrame.height = 20;
+    this._miniSampleFrameCtx = this._miniSampleFrame.getContext("2d");
     this._miniFrameDirty = true;
     this._miniFrameT = 0;
     this._lastMiniHeroX = 0;
@@ -62,9 +66,9 @@ export default class UI {
     }
 
     this._miniT += dt;
-    if (this._miniT >= 0.45) {
+    if (this._miniT >= 3.6) {
       this._miniT = 0;
-      this._mini = game?.world?.peekMinimapCanvas?.() || game?.world?.getMinimapCanvas?.() || null;
+      this._mini = game?.world?.peekMinimapCanvas?.() || null;
       this._miniFrameDirty = true;
     }
 
@@ -73,7 +77,7 @@ export default class UI {
     const hy = game?.hero?.y || 0;
     const heroShift = Math.abs(hx - this._lastMiniHeroX) + Math.abs(hy - this._lastMiniHeroY);
 
-    if (heroShift > 64 || this._miniFrameT >= 0.18) {
+    if (heroShift > 920 || this._miniFrameT >= 2.8) {
       this._miniFrameT = 0;
       this._lastMiniHeroX = hx;
       this._lastMiniHeroY = hy;
@@ -730,7 +734,11 @@ export default class UI {
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(this._miniFrame, cx - r, cy - r, r * 2, r * 2);
+    if (game?.dungeon?.active && game?.dungeon?.layout) {
+      this._drawDungeonMapFrame(ctx, game, cx - r, cy - r, r * 2, r * 2, false);
+    } else {
+      ctx.drawImage(this._miniFrame, cx - r, cy - r, r * 2, r * 2);
+    }
     ctx.restore();
 
     ctx.strokeStyle = "rgba(142,214,232,0.58)";
@@ -743,7 +751,7 @@ export default class UI {
     ctx.font = "bold 12px 'Segoe UI', Arial";
     ctx.textAlign = "center";
     ctx.fillText("N", cx, y + 16);
-    this._drawPill(ctx, x + 28, y + size - 26, size - 56, 16, `Tracking ${this._titleCase(game?.trackedObjective || "story")}`, {
+    this._drawPill(ctx, x + 28, y + size - 26, size - 56, 16, game?.dungeon?.active ? `Dungeon F${game?.dungeon?.floor || 1}` : `Tracking ${this._titleCase(game?.trackedObjective || "story")}`, {
       fill: "rgba(3,7,12,0.72)",
       stroke: "rgba(143,216,255,0.20)",
       textColor: "#d8e9f9",
@@ -761,9 +769,8 @@ export default class UI {
 
     c.clearRect(0, 0, w, h);
 
-    const info = game?.world?.peekMapInfo?.() || game?.world?.getMapInfo?.();
-    if (info?.revealed?.length) {
-      this._drawMinimapFromMapInfo(c, game, 0, 0, w, h, info);
+    if (game?.dungeon?.active && game?.dungeon?.layout) {
+      this._drawDungeonMapFrame(c, game, 0, 0, w, h, false);
       return;
     }
 
@@ -772,8 +779,79 @@ export default class UI {
       return;
     }
 
+    const info = game?.world?.peekMapInfo?.() || game?.world?.getMapInfo?.();
+    if (info?.revealed?.length) {
+      this._drawMinimapFromMapInfo(c, game, 0, 0, w, h, info);
+      return;
+    }
+
+    if (game?.world?._sampleMapCell) {
+      this._drawMinimapLocalSample(c, game, 0, 0, w, h);
+      return;
+    }
+
     c.fillStyle = "rgba(255,255,255,0.06)";
     c.fillRect(0, 0, w, h);
+  }
+
+  _drawMinimapLocalSample(ctx, game, x, y, w, h) {
+    const world = game?.world;
+    const hero = game?.hero;
+    if (!world || !hero || !world._sampleMapCell) {
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(x, y, w, h);
+      return;
+    }
+
+    const sampleCanvas = this._miniSampleFrame;
+    const sampleCtx = this._miniSampleFrameCtx;
+    if (!sampleCanvas || !sampleCtx) {
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(x, y, w, h);
+      return;
+    }
+
+    const worldSpan = 700;
+    const half = worldSpan * 0.5;
+    const left = hero.x - half;
+    const top = hero.y - half;
+    const sampleW = sampleCanvas.width;
+    const sampleH = sampleCanvas.height;
+
+    const bg = sampleCtx.createLinearGradient(0, 0, 0, sampleH);
+    bg.addColorStop(0, "rgba(9,15,20,0.98)");
+    bg.addColorStop(1, "rgba(4,8,12,0.98)");
+    sampleCtx.fillStyle = bg;
+    sampleCtx.fillRect(0, 0, sampleW, sampleH);
+
+    for (let py = 0; py < sampleH; py++) {
+      const wy = top + (py / sampleH) * worldSpan;
+      for (let px = 0; px < sampleW; px++) {
+        const wx = left + (px / sampleW) * worldSpan;
+        const s = world._sampleMapCell(wx, wy);
+        let color = s?.color || "#4f6b5a";
+
+        if (s?.zone === "mountain") color = "rgba(144,154,168,0.98)";
+        else if (s?.zone === "forest" || s?.zone === "greenwood" || s?.zone === "deep wilds") color = "rgba(74,122,74,0.98)";
+        else if (s?.zone === "ashlands") color = "rgba(165,132,86,0.98)";
+        else if (s?.zone === "highlands") color = "rgba(122,138,95,0.98)";
+        else if (s?.zone === "stone flats") color = "rgba(116,124,136,0.98)";
+        else if (s?.zone === "road") color = "rgba(196,169,112,0.98)";
+        else if (s?.zone === "bridge") color = "rgba(223,193,148,0.98)";
+        else if (s?.isWater) color = "rgba(70,156,206,0.98)";
+
+        sampleCtx.fillStyle = color;
+        sampleCtx.fillRect(px, py, 1, 1);
+      }
+    }
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(sampleCanvas, x, y, w, h);
+    ctx.restore();
+
+    this._drawMapPoiMarkers(ctx, game, x, y, w, h, left, top, worldSpan, 2.2);
+    this._drawHeroCrosshair(ctx, x, y, w, h, x + w * 0.5, y + h * 0.5, false);
   }
 
   _drawMinimapFromCanvas(ctx, game, mini, x, y, size) {
@@ -783,9 +861,10 @@ export default class UI {
     const heroNormX = clamp((game.hero.x + half) / span, 0, 1);
     const heroNormY = clamp((game.hero.y + half) / span, 0, 1);
 
-    const srcFrac = 0.22;
-    const srcW = Math.max(28, Math.floor(mini.width * srcFrac));
-    const srcH = Math.max(28, Math.floor(mini.height * srcFrac));
+    const srcFrac = 0.26;
+    const srcW = Math.max(36, Math.floor(mini.width * srcFrac));
+    const srcH = Math.max(36, Math.floor(mini.height * srcFrac));
+    const viewSpan = 760;
 
     let srcX = Math.floor(heroNormX * mini.width - srcW * 0.5);
     let srcY = Math.floor(heroNormY * mini.height - srcH * 0.5);
@@ -797,9 +876,21 @@ export default class UI {
     ctx.beginPath();
     ctx.rect(x, y, size, size);
     ctx.clip();
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(mini, srcX, srcY, srcW, srcH, x, y, size, size);
     ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(mini, srcX, srcY, srcW, srcH, x, y, size, size);
+    this._drawMapWaterOverlay(ctx, game, x, y, size, size, game.hero.x - viewSpan * 0.5, game.hero.y - viewSpan * 0.5, viewSpan, {
+      color: "rgba(78,188,236,0.82)",
+      width: 2.2,
+    });
+    this._drawMapRoadOverlay(ctx, game, x, y, size, size, game.hero.x - viewSpan * 0.5, game.hero.y - viewSpan * 0.5, viewSpan, {
+      roadBase: "rgba(38,22,12,0.72)",
+      roadTop: "rgba(214,188,138,0.82)",
+      roadBaseWidth: 2.2,
+      roadTopWidth: 1.0,
+      bridgeColor: "rgba(242,222,184,0.92)",
+      bridgeWidth: 2.0,
+    });
+    this._drawMapPoiMarkers(ctx, game, x, y, size, size, game.hero.x - viewSpan * 0.5, game.hero.y - viewSpan * 0.5, viewSpan, 2.1);
     ctx.restore();
 
     this._drawHeroCrosshair(ctx, x, y, size, size, x + size * 0.5, y + size * 0.5, false);
@@ -885,6 +976,214 @@ export default class UI {
     this._drawMapPoiMarkers(ctx, game, x, y, w, h, left, top, worldSpan, 2.8);
     ctx.restore();
     this._drawHeroCrosshair(ctx, x, y, w, h, x + w * 0.5, y + h * 0.5, false);
+  }
+
+  _drawDungeonMapFrame(ctx, game, x, y, w, h, large = false) {
+    const layout = game?.dungeon?.layout;
+    if (!layout) {
+      ctx.fillStyle = "rgba(255,255,255,0.05)";
+      ctx.fillRect(x, y, w, h);
+      return;
+    }
+
+    const rects = layout.walkRects || [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const rect of rects) {
+      minX = Math.min(minX, rect.x - rect.w * 0.5);
+      minY = Math.min(minY, rect.y - rect.h * 0.5);
+      maxX = Math.max(maxX, rect.x + rect.w * 0.5);
+      maxY = Math.max(maxY, rect.y + rect.h * 0.5);
+    }
+    if (!isFinite(minX)) {
+      ctx.fillStyle = "rgba(255,255,255,0.05)";
+      ctx.fillRect(x, y, w, h);
+      return;
+    }
+
+    const pad = 48;
+    minX -= pad;
+    minY -= pad;
+    maxX += pad;
+    maxY += pad;
+    const spanW = Math.max(1, maxX - minX);
+    const spanH = Math.max(1, maxY - minY);
+    const scale = Math.min(w / spanW, h / spanH);
+    const ox = x + (w - spanW * scale) * 0.5;
+    const oy = y + (h - spanH * scale) * 0.5;
+    const roomNow = game?.dungeon?.currentRoomId;
+
+    ctx.save();
+    const bg = ctx.createLinearGradient(x, y, x, y + h);
+    bg.addColorStop(0, "rgba(10,14,20,0.98)");
+    bg.addColorStop(1, "rgba(3,6,10,0.98)");
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+
+    const toScreenRect = (rect) => ({
+      x: ox + ((rect.x - rect.w * 0.5) - minX) * scale,
+      y: oy + ((rect.y - rect.h * 0.5) - minY) * scale,
+      w: rect.w * scale,
+      h: rect.h * scale,
+    });
+    const toScreenPoint = (px, py) => ({
+      x: ox + (px - minX) * scale,
+      y: oy + (py - minY) * scale,
+    });
+
+    for (const corridor of layout.corridors || []) {
+      const rect = toScreenRect(corridor);
+      ctx.fillStyle = "rgba(56,66,78,0.92)";
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    }
+
+    for (const room of layout.rooms || []) {
+      const rect = toScreenRect(room);
+      const discovered = room.discovered || room.id === roomNow || large;
+      ctx.fillStyle = !discovered
+        ? "rgba(26,31,39,0.70)"
+        : room.id === roomNow
+        ? "rgba(66,118,143,0.92)"
+        : room.type === "boss"
+        ? "rgba(108,58,66,0.92)"
+        : room.type === "start"
+        ? "rgba(72,82,98,0.92)"
+        : "rgba(88,98,112,0.92)";
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = room.id === roomNow ? "#8be9ff" : room.type === "boss" ? "#ff9a7c" : "rgba(255,255,255,0.24)";
+      ctx.lineWidth = Math.max(1, scale * 0.06);
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+    }
+
+    for (const door of layout.doors || []) {
+      const p = toScreenPoint(door.x, door.y);
+      const dw = Math.max(6, (door.vertical ? 14 : 28) * scale);
+      const dh = Math.max(6, (door.vertical ? 28 : 14) * scale);
+      ctx.fillStyle = door.open ? "rgba(139,233,255,0.92)" : door.locked === "key" ? "rgba(255,214,110,0.92)" : "rgba(220,124,255,0.92)";
+      ctx.fillRect(p.x - dw * 0.5, p.y - dh * 0.5, dw, dh);
+    }
+
+    for (const room of layout.rooms || []) {
+      if (room.cacheOpened || !["loot", "key", "shrine"].includes(room.type)) continue;
+      const cachePoint = this._getDungeonCachePoint(game, room);
+      const p = toScreenPoint(cachePoint.x, cachePoint.y);
+      ctx.fillStyle = room.type === "key" ? "#8be9ff" : room.type === "loot" ? "#ffd86e" : "#b8f59e";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(3, scale * 0.08 * 28), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (layout.returnStair) {
+      const p = toScreenPoint(layout.returnStair.x, layout.returnStair.y);
+      ctx.fillStyle = "#8be9ff";
+      ctx.fillRect(p.x - 5, p.y - 5, 10, 10);
+    }
+    if (layout.exitStair) {
+      const p = toScreenPoint(layout.exitStair.x, layout.exitStair.y);
+      ctx.fillStyle = "#ffd86e";
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - 6);
+      ctx.lineTo(p.x + 6, p.y + 6);
+      ctx.lineTo(p.x - 6, p.y + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const hero = toScreenPoint(game.hero.x, game.hero.y);
+    this._drawHeroCrosshair(ctx, x, y, w, h, hero.x, hero.y, false);
+    ctx.restore();
+  }
+
+  _getDungeonCachePoint(game, room) {
+    const p = game?._getDungeonRoomCacheAnchor?.(room);
+    return p || { x: room.x, y: room.y };
+  }
+
+  _drawMapWaterOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, opts = {}) {
+    const world = game?.world;
+    if (!world?._riverBands?.length) return;
+
+    const px = w / viewSpan;
+    const py = h / viewSpan;
+    const right = viewLeft + viewSpan;
+    const bottom = viewTop + viewSpan;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = opts.color || "rgba(84,198,255,0.72)";
+    ctx.lineWidth = opts.width || 3;
+
+    for (const band of world._riverBands || []) {
+      const pts = world._riverPath?.(band) || [];
+      if (!pts || pts.length < 2) continue;
+      let visible = false;
+      let revealed = false;
+      for (const p of pts) {
+        if (!revealed && this._isMapPointRevealed(game, p)) revealed = true;
+        if (p.x >= viewLeft - 80 && p.x <= right + 80 && p.y >= viewTop - 80 && p.y <= bottom + 80) {
+          visible = true;
+          if (revealed) break;
+        }
+      }
+      if (!visible || !revealed) continue;
+
+      const keep = [];
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const prev = pts[Math.max(0, i - 1)];
+        const next = pts[Math.min(pts.length - 1, i + 1)];
+        keep.push(this._shouldDrawRiverPoint(world, prev, p, next));
+      }
+
+      let drawing = false;
+      for (let i = 0; i < pts.length; i++) {
+        if (!keep[i]) {
+          drawing = false;
+          continue;
+        }
+        const sx = x + (pts[i].x - viewLeft) * px;
+        const sy = y + (pts[i].y - viewTop) * py;
+        if (!drawing) {
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          drawing = true;
+        } else {
+          ctx.lineTo(sx, sy);
+        }
+        const isLast = i === pts.length - 1 || !keep[i + 1];
+        if (isLast && drawing) {
+          ctx.stroke();
+          drawing = false;
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  _shouldDrawRiverPoint(world, prev, point, next) {
+    if (!world?._sampleCellRaw || !point) return true;
+    if (world._groundAt?.(point.x, point.y) < 0.245) return false;
+    if (prev && world._isRiverSegmentInOcean?.(prev, point, next, 0.245)) return false;
+    const dx = (next?.x ?? point.x) - (prev?.x ?? point.x);
+    const dy = (next?.y ?? point.y) - (prev?.y ?? point.y);
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const near = 42;
+    const far = 92;
+    const leftNear = world._sampleCellRaw(point.x + nx * near, point.y + ny * near);
+    const rightNear = world._sampleCellRaw(point.x - nx * near, point.y - ny * near);
+    const leftFar = world._sampleCellRaw(point.x + nx * far, point.y + ny * far);
+    const rightFar = world._sampleCellRaw(point.x - nx * far, point.y - ny * far);
+    const openWaterBothSides =
+      leftNear?.isWater &&
+      rightNear?.isWater &&
+      leftFar?.isWater &&
+      rightFar?.isWater;
+    return !openWaterBothSides;
   }
 
   _drawMapRoadOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, opts = {}) {
@@ -1330,10 +1629,11 @@ export default class UI {
     ctx.save();
     this._drawPanel(ctx, x, y, panelW, panelH, { alpha: 0.92, accent: UI_PURPLE });
 
+    const dungeonMap = !!game?.dungeon?.active && !!game?.dungeon?.layout;
     ctx.fillStyle = "#eef4fb";
     ctx.font = "bold 20px 'Segoe UI', Arial";
     ctx.textAlign = "left";
-    ctx.fillText("World Map", x + 18, y + 28);
+    ctx.fillText(dungeonMap ? "Dungeon Map" : "World Map", x + 18, y + 28);
 
     const zoom = clamp(game?.menu?.mapZoom || 1, 1, 8);
     this._drawPill(ctx, x + panelW - 74, y + 10, 56, 18, `${zoom}x`, {
@@ -1342,13 +1642,13 @@ export default class UI {
       textColor: zoom > 1 ? "#8fd8ff" : "#95a7bd",
       font: "bold 11px 'Segoe UI', Arial",
     });
-    this._drawPill(ctx, x + 138, y + 10, Math.min(170, panelW - 238), 18, `Tracking ${this._titleCase(game?.trackedObjective || "story")}`, {
+    this._drawPill(ctx, x + 138, y + 10, Math.min(170, panelW - 238), 18, dungeonMap ? `Floor ${game?.dungeon?.floor || 1}` : `Tracking ${this._titleCase(game?.trackedObjective || "story")}`, {
       fill: "rgba(255,255,255,0.06)",
       stroke: "rgba(255,255,255,0.12)",
       textColor: "#9db2ca",
       font: "bold 10px 'Segoe UI', Arial",
     });
-    const info = game?.world?.getMapInfo?.();
+    const info = dungeonMap ? null : game?.world?.getMapInfo?.();
     const revealedRows = info?.revealed || [];
     let discovered = 0;
     let discoveredTotal = 0;
@@ -1357,7 +1657,7 @@ export default class UI {
       for (const cell of row || []) if (cell) discovered++;
     }
     const discoveredPct = discoveredTotal > 0 ? Math.round((discovered / discoveredTotal) * 100) : 0;
-    this._drawPill(ctx, x + panelW - 160, y + 10, 78, 18, `${discoveredPct}% seen`, {
+    this._drawPill(ctx, x + panelW - 160, y + 10, 78, 18, dungeonMap ? `${game?.dungeon?.keys || 0} keys` : `${discoveredPct}% seen`, {
       fill: "rgba(255,255,255,0.06)",
       stroke: "rgba(255,255,255,0.12)",
       textColor: "#d8e5f4",
@@ -1374,7 +1674,9 @@ export default class UI {
     ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.strokeRect(mapX + 0.5, mapY + 0.5, mapW - 1, mapH - 1);
 
-    if (info?.revealed?.length) {
+    if (dungeonMap) {
+      this._drawDungeonMapFrame(ctx, game, mapX, mapY, mapW, mapH, true);
+    } else if (info?.revealed?.length) {
       this._drawBigMapFromMapInfo(ctx, game, info, mapX, mapY, mapW, mapH);
     } else if (this._mini) {
       this._drawBigMapFromCanvas(ctx, game, this._mini, mapX, mapY, mapW, mapH);
@@ -1385,39 +1687,72 @@ export default class UI {
 
     ctx.fillStyle = "#95a7bd";
     ctx.font = "12px 'Segoe UI', Arial";
-    this._drawPill(ctx, x + 18, y + panelH - 40, 64, 16, "Roads", {
+    if (dungeonMap) {
+      this._drawPill(ctx, x + 18, y + panelH - 40, 64, 16, "Doors", {
+        fill: "rgba(220,124,255,0.12)",
+        stroke: "rgba(220,124,255,0.22)",
+        textColor: "#f0d0ff",
+        font: "bold 9px 'Segoe UI', Arial",
+      });
+      this._drawPill(ctx, x + 88, y + panelH - 40, 58, 16, "Keys", {
+        fill: "rgba(255,214,110,0.12)",
+        stroke: "rgba(255,214,110,0.22)",
+        textColor: "#ffe6a8",
+        font: "bold 9px 'Segoe UI', Arial",
+      });
+      this._drawPill(ctx, x + 152, y + panelH - 40, 74, 16, "Caches", {
+        fill: "rgba(166,238,170,0.12)",
+        stroke: "rgba(166,238,170,0.22)",
+        textColor: "#d8ffd0",
+        font: "bold 9px 'Segoe UI', Arial",
+      });
+      this._drawPill(ctx, x + 232, y + panelH - 40, 76, 16, "Stairs", {
+        fill: "rgba(139,233,255,0.12)",
+        stroke: "rgba(139,233,255,0.22)",
+        textColor: "#dff8ff",
+        font: "bold 9px 'Segoe UI', Arial",
+      });
+      this._drawPill(ctx, x + 314, y + panelH - 40, 88, 16, "Boss Gate", {
+        fill: "rgba(255,154,124,0.12)",
+        stroke: "rgba(255,154,124,0.22)",
+        textColor: "#ffd7ca",
+        font: "bold 9px 'Segoe UI', Arial",
+      });
+    } else {
+      this._drawPill(ctx, x + 18, y + panelH - 40, 64, 16, "Roads", {
       fill: "rgba(186,154,107,0.14)",
       stroke: "rgba(186,154,107,0.24)",
       textColor: "#e8d5ac",
       font: "bold 9px 'Segoe UI', Arial",
-    });
-    this._drawPill(ctx, x + 88, y + panelH - 40, 74, 16, "Bridges", {
+      });
+      this._drawPill(ctx, x + 88, y + panelH - 40, 74, 16, "Bridges", {
       fill: "rgba(231,214,178,0.12)",
       stroke: "rgba(231,214,178,0.22)",
       textColor: "#f0e2c7",
       font: "bold 9px 'Segoe UI', Arial",
-    });
-    this._drawPill(ctx, x + 168, y + panelH - 40, 60, 16, "Towns", {
+      });
+      this._drawPill(ctx, x + 168, y + panelH - 40, 60, 16, "Towns", {
       fill: "rgba(139,233,255,0.12)",
       stroke: "rgba(139,233,255,0.22)",
       textColor: "#dff8ff",
       font: "bold 9px 'Segoe UI', Arial",
-    });
-    this._drawPill(ctx, x + 234, y + panelH - 40, 86, 16, "Objective", {
+      });
+      this._drawPill(ctx, x + 234, y + panelH - 40, 86, 16, "Objective", {
       fill: "rgba(255,211,110,0.12)",
       stroke: "rgba(255,211,110,0.22)",
       textColor: "#ffdf97",
       font: "bold 9px 'Segoe UI', Arial",
-    });
-    this._drawPill(ctx, x + 326, y + panelH - 40, 74, 16, "Coast", {
+      });
+      this._drawPill(ctx, x + 326, y + panelH - 40, 74, 16, "Coast", {
       fill: "rgba(97,190,236,0.14)",
       stroke: "rgba(97,190,236,0.24)",
       textColor: "#bcecff",
       font: "bold 9px 'Segoe UI', Arial",
-    });
+      });
+    }
     ctx.fillStyle = "#95a7bd";
     ctx.font = "11px 'Segoe UI', Arial";
-    this._drawFitText(ctx, "M or Esc close   wheel or +/- zoom   0 reset   hero coords shown on map", x + 18, y + panelH - 17, panelW - 36, 8);
+    this._drawFitText(ctx, dungeonMap ? "M or Esc close   explore rooms   unlock doors   stairs go deeper" : "M or Esc close   wheel or +/- zoom   0 reset   hero coords shown on map", x + 18, y + panelH - 17, panelW - 36, 8);
     ctx.restore();
   }
 
@@ -1611,6 +1946,12 @@ export default class UI {
     const zones = info?.zones;
     if (!zones?.length) return;
     ctx.save();
+
+    const cellCenter = (row, col) => ({
+      x: x + ((-mapHalf + col * cellWorldW + cellWorldW * 0.5) - viewLeft) * pxPerWorldX,
+      y: y + ((-mapHalf + row * cellWorldH + cellWorldH * 0.5) - viewTop) * pxPerWorldY,
+    });
+
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
         if (!info?.revealed?.[r]?.[c]) continue;
@@ -1634,17 +1975,17 @@ export default class UI {
         let southColor = "";
         if (eastVisible && eastType !== type) {
           if (type === "water" || eastType === "water") eastColor = "rgba(134,214,255,0.42)";
-          else if (type === "mountain" || eastType === "mountain") eastColor = "rgba(231,237,245,0.30)";
+          else if (type === "mountain" || eastType === "mountain") eastColor = "rgba(226,233,242,0.16)";
         }
         if (southVisible && southType !== type) {
           if (type === "water" || southType === "water") southColor = "rgba(134,214,255,0.42)";
-          else if (type === "mountain" || southType === "mountain") southColor = "rgba(231,237,245,0.30)";
+          else if (type === "mountain" || southType === "mountain") southColor = "rgba(226,233,242,0.16)";
         }
 
         if (eastColor) {
           ctx.globalAlpha = alphaScale;
           ctx.strokeStyle = eastColor;
-          ctx.lineWidth = type === "mountain" || eastType === "mountain" ? 2 : 1.25;
+          ctx.lineWidth = type === "mountain" || eastType === "mountain" ? 1.4 : 1.25;
           ctx.beginPath();
           ctx.moveTo(sx + sw - 0.5, sy + 1);
           ctx.lineTo(sx + sw - 0.5, sy + sh - 1);
@@ -1659,6 +2000,40 @@ export default class UI {
           ctx.lineTo(sx + sw - 1, sy + sh - 0.5);
           ctx.stroke();
         }
+
+        if (type !== "mountain") continue;
+
+        const northType = this._getMapZoneType(zones?.[r - 1]?.[c] || "");
+        const westType = this._getMapZoneType(zones?.[r]?.[c - 1] || "");
+        const northVisible = info?.revealed?.[r - 1]?.[c];
+        const westVisible = info?.revealed?.[r]?.[c - 1];
+        const exposedNorth = northVisible && northType !== "mountain";
+        const exposedSouth = southVisible && southType !== "mountain";
+        const exposedEast = eastVisible && eastType !== "mountain";
+        const exposedWest = westVisible && westType !== "mountain";
+        if (!exposedNorth && !exposedSouth && !exposedEast && !exposedWest) continue;
+
+        const center = cellCenter(r, c);
+        const north = { x: center.x, y: sy };
+        const south = { x: center.x, y: sy + sh };
+        const west = { x: sx, y: center.y };
+        const east = { x: sx + sw, y: center.y };
+        const points = [];
+        if (exposedNorth) points.push(north);
+        if (exposedEast) points.push(east);
+        if (exposedSouth) points.push(south);
+        if (exposedWest) points.push(west);
+        if (points.length < 2) continue;
+
+        ctx.globalAlpha = alphaScale;
+        ctx.strokeStyle = "rgba(248,250,255,0.46)";
+        ctx.lineWidth = 2.1;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+        ctx.stroke();
       }
     }
 
@@ -1758,12 +2133,12 @@ export default class UI {
           ctx.fill();
         }
 
-        if (radius >= 4 && (type === "town" || type === "dungeon" || type === "dragon")) {
+        if (type === "town" || (radius >= 4 && (type === "dungeon" || type === "dragon"))) {
           const label = type === "town" ? (p.name || "Town") : type === "dragon" ? "Dragon" : "Dungeon";
-          const labelW = Math.min(86, Math.max(38, label.length * 6 + 12));
+          const labelW = Math.min(type === "town" ? 132 : 86, Math.max(type === "town" ? 52 : 38, label.length * 6 + 12));
           ctx.fillStyle = "rgba(3,7,12,0.68)";
           ctx.fillRect(sx - labelW * 0.5, sy + radius + 4, labelW, 14);
-          ctx.fillStyle = "#e9f2ff";
+          ctx.fillStyle = type === "town" ? "#dff8ff" : "#e9f2ff";
           ctx.font = "bold 10px Arial";
           ctx.textAlign = "left";
           this._drawFitText(ctx, label, sx - labelW * 0.5 + 4, sy + radius + 15, labelW - 8, 7);
@@ -1841,6 +2216,7 @@ export default class UI {
   _drawInventoryPanel(ctx, game) {
     const hero = game.hero;
     const items = hero.inventory || [];
+    const entries = game?.getInventoryEntries?.() || items.map((item) => ({ kind: "gear", item, name: item?.name || "Unknown Gear", color: item?.color || "#d9dee8" }));
     const equip = hero.equip || {};
     const inventoryText = game?.getInventoryPanelText?.(items.length > 0) || {
       headerHint: items.length > 0 ? "I or Esc close   wheel/arrow select   click again equip" : "I or Esc close",
@@ -1895,44 +2271,75 @@ export default class UI {
 
     ctx.fillStyle = "#dce6f4";
     ctx.font = "bold 15px Arial";
-    ctx.fillText(`Bag (${items.length})`, leftX + 12, leftY + 22);
+    ctx.fillText(`Inventory (${entries.length})`, leftX + 12, leftY + 22);
 
     const rowH = layout.rowH ?? 28;
-    const visible = Math.max(1, Math.floor((leftH - 40) / rowH));
-    const selected = clamp(game?.invIndex || 0, 0, Math.max(0, items.length - 1));
-    const scroll = clamp(selected - visible + 1, 0, Math.max(0, items.length - visible));
-
-    for (let i = 0; i < visible; i++) {
-      const idx = scroll + i;
-      if (idx >= items.length) break;
-
-      const item = items[idx];
-      const iy = leftY + 32 + i * rowH;
-      const active = idx === selected;
-
-      if (active) {
-        ctx.fillStyle = "rgba(120,160,220,0.22)";
-        ctx.fillRect(leftX + 8, iy - 16, leftW - 16, rowH - 2);
-        ctx.strokeStyle = "rgba(170,210,255,0.32)";
-        ctx.strokeRect(leftX + 8.5, iy - 15.5, leftW - 17, rowH - 3);
+    const selected = clamp(game?.invIndex || 0, 0, Math.max(0, entries.length - 1));
+    if (game?.inventoryView === "grid") {
+      const grid = game?.getInventoryGridLayout?.() || { cols: 2, tileW: 166, tileH: 66, gutter: 12, startX: leftX + 10, startY: leftY + 34, rowsVisible: 4 };
+      const maxRows = Math.max(1, Math.ceil(entries.length / grid.cols));
+      const selectedRow = Math.floor(selected / grid.cols);
+      const scrollRow = clamp(selectedRow - grid.rowsVisible + 1, 0, Math.max(0, maxRows - grid.rowsVisible));
+      for (let vr = 0; vr < grid.rowsVisible; vr++) {
+        const row = scrollRow + vr;
+        for (let col = 0; col < grid.cols; col++) {
+          const idx = row * grid.cols + col;
+          if (idx >= entries.length) continue;
+          const entry = entries[idx];
+          const item = entry?.item;
+          const cardX = grid.startX + col * (grid.tileW + grid.gutter);
+          const cardY = grid.startY + vr * (grid.tileH + grid.gutter);
+          const active = idx === selected;
+          ctx.fillStyle = active ? "rgba(120,160,220,0.22)" : "rgba(255,255,255,0.045)";
+          ctx.fillRect(cardX, cardY, grid.tileW, grid.tileH);
+          ctx.strokeStyle = active ? "rgba(170,210,255,0.38)" : "rgba(255,255,255,0.08)";
+          ctx.strokeRect(cardX + 0.5, cardY + 0.5, grid.tileW - 1, grid.tileH - 1);
+          ctx.fillStyle = entry?.color || item?.color || "#d9dee8";
+          ctx.font = "bold 13px Arial";
+          this._drawFitText(ctx, entry?.name || item?.name || "Unknown Gear", cardX + 10, cardY + 18, grid.tileW - 20);
+          ctx.fillStyle = "#92a3b8";
+          ctx.font = "11px Arial";
+          const meta = entry?.kind === "material"
+            ? `Material  x${entry?.count || 0}`
+            : `${(item?.slot || "gear").toUpperCase()}  PWR ${item?.score || "-"}`;
+          this._drawFitText(ctx, meta, cardX + 10, cardY + 36, grid.tileW - 20, 8);
+          ctx.fillStyle = "#7f90a6";
+          this._drawFitText(ctx, entry?.kind === "material" ? "Use: Brewing" : `${(item?.rarity || "common").toUpperCase()}  Lv.${item?.level || 1}`, cardX + 10, cardY + 52, grid.tileW - 20, 8);
+        }
       }
+    } else {
+      const visible = Math.max(1, Math.floor((leftH - 40) / rowH));
+      const scroll = clamp(selected - visible + 1, 0, Math.max(0, entries.length - visible));
+      for (let i = 0; i < visible; i++) {
+        const idx = scroll + i;
+        if (idx >= entries.length) break;
 
-      ctx.fillStyle = item?.color || "#d9dee8";
-      ctx.font = "bold 13px Arial";
-      this._drawFitText(ctx, item?.name || "Unknown Gear", leftX + 16, iy, 162);
+        const entry = entries[idx];
+        const item = entry?.item;
+        const iy = leftY + 32 + i * rowH;
+        const active = idx === selected;
 
-      ctx.fillStyle = "#92a3b8";
-      ctx.font = "12px Arial";
-      this._drawFitText(
-        ctx,
-        `${(item?.slot || "gear").toUpperCase()}  Lv.${item?.level || 1}  ${(item?.rarity || "common").toUpperCase()}  PWR ${item?.score || "-"}`,
-        leftX + 190,
-        iy,
-        leftW - 205
-      );
+        if (active) {
+          ctx.fillStyle = "rgba(120,160,220,0.22)";
+          ctx.fillRect(leftX + 8, iy - 16, leftW - 16, rowH - 2);
+          ctx.strokeStyle = "rgba(170,210,255,0.32)";
+          ctx.strokeRect(leftX + 8.5, iy - 15.5, leftW - 17, rowH - 3);
+        }
+
+        ctx.fillStyle = entry?.color || item?.color || "#d9dee8";
+        ctx.font = "bold 13px Arial";
+        this._drawFitText(ctx, entry?.name || item?.name || "Unknown Gear", leftX + 16, iy, 162);
+
+        ctx.fillStyle = "#92a3b8";
+        ctx.font = "12px Arial";
+        const meta = entry?.kind === "material"
+          ? `MATERIAL  COUNT ${entry?.count || 0}  BREWING`
+          : `${(item?.slot || "gear").toUpperCase()}  Lv.${item?.level || 1}  ${(item?.rarity || "common").toUpperCase()}  PWR ${item?.score || "-"}`;
+        this._drawFitText(ctx, meta, leftX + 190, iy, leftW - 205);
+      }
     }
 
-    if (items.length <= 0) {
+    if (entries.length <= 0) {
       ctx.fillStyle = "#8ea1b8";
       ctx.font = "12px Arial";
       this._drawFitText(ctx, inventoryText.emptyBagTitle, leftX + 16, leftY + 58, leftW - 32);
@@ -1955,11 +2362,26 @@ export default class UI {
 
     this._drawHeroPortrait(ctx, hero, rightX + rightW - 96, rightY + 14, 74, 92);
 
+    const herbCount = game?.progress?.herbs || 0;
+    const materialY = rightY + 36;
+    const materialW = Math.max(148, rightW - 132);
+    ctx.fillStyle = "rgba(126,210,126,0.10)";
+    ctx.fillRect(rightX + 12, materialY, materialW, 54);
+    ctx.strokeStyle = "rgba(143,228,141,0.24)";
+    ctx.strokeRect(rightX + 12.5, materialY + 0.5, materialW - 1, 53);
+    ctx.fillStyle = "#dff2de";
+    ctx.font = "bold 12px Arial";
+    ctx.fillText(`Herbs ${herbCount}`, rightX + 22, materialY + 17);
+    ctx.fillStyle = "#9cc5a0";
+    ctx.font = "11px Arial";
+    this._drawFitText(ctx, inventoryText.brewHpHint || "B Brew health potion (3 herbs)", rightX + 22, materialY + 33, materialW - 18, 8);
+    this._drawFitText(ctx, inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", rightX + 22, materialY + 47, materialW - 18, 8);
+
     const slots = game?.getEquipmentSlots?.() || ["weapon", "armor", "helm", "boots", "ring", "trinket"];
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const item = equip[slot];
-      const iy = rightY + 46 + i * 32;
+      const iy = rightY + 106 + i * 28;
       const textW = Math.max(80, rightW - 220);
 
       ctx.fillStyle = "#9db0c8";
@@ -1977,16 +2399,35 @@ export default class UI {
       }
     }
 
-    const picked = items[selected];
+    const pickedEntry = entries[selected];
+    const picked = pickedEntry?.item;
     const statX = rightX + 12;
-    let sy = rightY + 272;
+    let sy = rightY + 284;
 
     ctx.fillStyle = "#dce6f4";
     ctx.font = "bold 15px Arial";
-    ctx.fillText(picked ? "Selected Item" : inventoryText.emptyDetailTitle, statX, sy);
+    ctx.fillText(pickedEntry ? "Selected Item" : inventoryText.emptyDetailTitle, statX, sy);
     sy += 22;
 
-    if (picked) {
+    if (pickedEntry?.kind === "material") {
+      ctx.fillStyle = pickedEntry.color || "#8fe48d";
+      ctx.font = "bold 14px Arial";
+      this._drawFitText(ctx, pickedEntry.name || "Material", statX, sy, rightW - 24);
+      sy += 20;
+
+      ctx.fillStyle = "#9cb0c9";
+      ctx.font = "12px Arial";
+      this._drawFitText(ctx, `Material  Count ${pickedEntry.count || 0}`, statX, sy, rightW - 24);
+      sy += 22;
+
+      ctx.fillStyle = "#dfe8f5";
+      this._drawFitText(ctx, "Gathered from the wild. Used for brewing potions and future crafting.", statX, sy, rightW - 24, 8);
+      sy += 36;
+      ctx.fillStyle = "#95a7bd";
+      ctx.fillText(inventoryText.brewHpHint || "B Brew health potion (3 herbs)", statX, sy);
+      sy += 16;
+      ctx.fillText(inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", statX, sy);
+    } else if (picked) {
       ctx.fillStyle = picked.color || "#eef4fb";
       ctx.font = "bold 14px Arial";
       this._drawFitText(ctx, picked.name || "Unknown Gear", statX, sy, rightW - 24);
@@ -2054,7 +2495,7 @@ export default class UI {
     } else {
       ctx.fillStyle = "#8ea1b8";
       ctx.font = "12px Arial";
-      if (items.length > 0) {
+      if (entries.length > 0) {
         ctx.fillText("No item selected.", statX, sy);
       } else {
         this._drawFitText(ctx, inventoryText.emptyDetailBody, statX, sy, rightW - 24);
@@ -2246,163 +2687,156 @@ export default class UI {
     const bootsColor = boots?.color || "#8993a3";
     const ringColor = ring?.color || "#e3d39a";
     const trinketColor = trinket?.color || "#b99cff";
+    const portraitImg = this._assets?.heroPortrait;
+    const inset = 5;
+    const innerX = x + inset;
+    const innerY = y + inset;
+    const innerW = w - inset * 2;
+    const innerH = h - inset * 2;
+    const badgeY = y + h - 19;
+    const cx = x + w * 0.5;
+    const portraitBodyTop = innerY + 8;
+    const portraitBodyBottom = y + h - 24;
+    const headY = y + 27;
+    const chestY = y + 56;
+    const chestW = Math.max(22, Math.round(w * 0.40));
+    const bodyH = Math.max(22, Math.round(h * 0.22));
+    const armorTier = armor?.stats?.armor || 0;
+    const weaponTier = weapon?.stats?.dmg || 0;
 
     ctx.save();
     ctx.fillStyle = "rgba(255,255,255,0.055)";
     ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = "rgba(201,167,255,0.18)";
+    ctx.strokeStyle = "rgba(201,167,255,0.20)";
     ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
-    const cx = x + w * 0.5;
-    const base = y + h - 12;
     const bg = ctx.createLinearGradient(x, y, x, y + h);
-    bg.addColorStop(0, "rgba(31,24,46,0.98)");
-    bg.addColorStop(0.55, "rgba(14,16,28,0.98)");
+    bg.addColorStop(0, "rgba(40,30,61,0.98)");
+    bg.addColorStop(0.45, "rgba(16,18,32,0.98)");
     bg.addColorStop(1, "rgba(8,10,18,0.98)");
     ctx.fillStyle = bg;
     ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
 
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(x + 5, y + 5, w - 10, 12);
-    ctx.fillStyle = "rgba(0,0,0,0.24)";
-    ctx.beginPath();
-    ctx.ellipse(cx, base + 1, w * 0.34, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(innerX, innerY, innerW, 10);
 
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fillRect(x + 9, y + 8, w - 18, h - 22);
-
-    ctx.fillStyle = "rgba(90,32,48,0.22)";
+    ctx.save();
     ctx.beginPath();
-    ctx.moveTo(cx - 20, base - 2);
-    ctx.lineTo(cx - 16, y + 44);
-    ctx.lineTo(cx, y + 58);
-    ctx.lineTo(cx + 16, y + 44);
-    ctx.lineTo(cx + 20, base - 2);
-    ctx.closePath();
-    ctx.fill();
+    ctx.rect(innerX, innerY, innerW, innerH - 16);
+    ctx.clip();
 
-    const chestHeavy = (armor?.stats?.armor || 0) >= 18;
-    const chestMedium = !chestHeavy && (armor?.stats?.armor || 0) >= 9;
-    ctx.fillStyle = armorColor;
-    ctx.beginPath();
-    ctx.moveTo(cx - 20, base - 3);
-    ctx.lineTo(cx - (chestHeavy ? 18 : 14), y + 46);
-    ctx.lineTo(cx + (chestHeavy ? 18 : 14), y + 46);
-    ctx.lineTo(cx + 20, base - 3);
-    ctx.closePath();
-    ctx.fill();
-    if (chestHeavy) {
-      ctx.fillStyle = "rgba(255,255,255,0.22)";
-      ctx.fillRect(cx - 14, y + 49, 28, 4);
-      ctx.fillRect(cx - 16, y + 61, 32, 3);
-    } else if (chestMedium) {
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fillRect(cx - 11, y + 49, 22, 3);
-    } else {
-      ctx.fillStyle = "rgba(255,255,255,0.16)";
-      ctx.fillRect(cx - 8, y + 49, 16, 2);
+    const halo = ctx.createRadialGradient(cx, y + 32, 4, cx, y + 42, Math.max(w * 0.62, 36));
+    halo.addColorStop(0, "rgba(167,126,255,0.34)");
+    halo.addColorStop(0.5, "rgba(92,74,148,0.18)");
+    halo.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(x, y, w, h);
+
+    if (this._hasUiImage(portraitImg)) {
+      const cropX = Math.round(portraitImg.naturalWidth * 0.14);
+      const cropY = Math.round(portraitImg.naturalHeight * 0.08);
+      const cropW = Math.round(portraitImg.naturalWidth * 0.72);
+      const cropH = Math.round(portraitImg.naturalHeight * 0.78);
+      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 2, innerY + 3, innerW - 4, innerH - 6);
     }
 
-    ctx.fillStyle = bootsColor;
-    ctx.fillRect(cx - 15, base - 10, 10, 6);
-    ctx.fillRect(cx + 5, base - 10, 10, 6);
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(innerX, innerY + innerH * 0.58, innerW, innerH * 0.34);
 
-    ctx.fillStyle = "#e4bca4";
+    ctx.fillStyle = armorColor;
+    ctx.globalAlpha = 0.88;
     ctx.beginPath();
-    ctx.arc(cx, y + 34, 13, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#4a3728";
-    ctx.beginPath();
-    ctx.moveTo(cx - 13, y + 32);
-    ctx.quadraticCurveTo(cx - 9, y + 15, cx, y + 15);
-    ctx.quadraticCurveTo(cx + 9, y + 15, cx + 13, y + 32);
-    ctx.lineTo(cx + 10, y + 25);
-    ctx.quadraticCurveTo(cx, y + 18, cx - 10, y + 25);
+    ctx.moveTo(cx - chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.lineTo(cx - chestW * 0.34, chestY + 10);
+    ctx.quadraticCurveTo(cx, chestY - 4, cx + chestW * 0.34, chestY + 10);
+    ctx.lineTo(cx + chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.quadraticCurveTo(cx, Math.min(portraitBodyBottom + 6, chestY + bodyH + 6), cx - chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = "rgba(238,246,255,0.12)";
-    ctx.beginPath();
-    ctx.arc(cx, y + 29, 9, Math.PI, Math.PI * 2);
-    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(cx - chestW * 0.32, chestY + 11, chestW * 0.64, armorTier >= 16 ? 4 : 3);
+    ctx.fillRect(cx - 2, chestY + 6, 4, bodyH - 2);
+    if (armorTier >= 10) {
+      ctx.fillRect(cx - chestW * 0.24, chestY + 21, chestW * 0.48, 3);
+    }
+    if (armorTier >= 18) {
+      ctx.fillRect(cx - chestW * 0.36, chestY + 31, chestW * 0.72, 3);
+    }
+
     if (helm) {
       ctx.fillStyle = helmColor;
+      ctx.globalAlpha = 0.94;
       ctx.beginPath();
-      ctx.moveTo(cx - 15, y + 32);
-      ctx.quadraticCurveTo(cx, y + 10, cx + 15, y + 32);
-      ctx.lineTo(cx + 12, y + 25);
-      ctx.lineTo(cx - 12, y + 25);
+      ctx.moveTo(cx - 15, headY + 16);
+      ctx.quadraticCurveTo(cx, headY - 2, cx + 16, headY + 17);
+      ctx.lineTo(cx + 10, headY + 27);
+      ctx.lineTo(cx - 10, headY + 27);
       ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.16)";
-      ctx.fillRect(cx - 8, y + 25, 16, 3);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "rgba(255,255,255,0.24)";
+      ctx.fillRect(cx - 9, headY + 18, 18, 3);
       if ((helm?.stats?.armor || 0) >= 8 || helm?.rarity === "epic") {
-        ctx.fillStyle = "rgba(229,236,248,0.22)";
-        ctx.fillRect(cx - 3, y + 28, 6, 10);
+        ctx.fillRect(cx - 2, headY + 21, 4, 9);
       }
     }
-    ctx.fillStyle = "#111820";
-    ctx.fillRect(cx - 7, y + 35, 4, 2);
-    ctx.fillRect(cx + 3, y + 35, 4, 2);
-
-    ctx.fillStyle = armor ? "rgba(99,128,168,0.22)" : "rgba(90,106,126,0.14)";
-    ctx.beginPath();
-    ctx.ellipse(cx - 16, y + 56, 12, 16, -0.32, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = armor ? "#9cb3c8" : "rgba(148,162,182,0.52)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.ellipse(cx - 16, y + 56, 11, 15, -0.32, 0, Math.PI * 2);
-    ctx.stroke();
 
     ctx.strokeStyle = weaponColor;
-    ctx.lineWidth = (weapon?.stats?.dmg || 0) >= 18 ? 5.5 : 4.5;
+    ctx.lineWidth = weaponTier >= 18 ? 5.5 : weaponTier >= 10 ? 4.8 : 4;
     ctx.beginPath();
-    ctx.moveTo(x + w - 18, y + 20);
-    ctx.lineTo(x + w - 29, y + 72);
+    ctx.moveTo(x + w - 22, y + 27);
+    ctx.lineTo(x + w - 29, y + 71);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.45)";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255,255,255,0.52)";
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(x + w - 17, y + 20);
-    ctx.lineTo(x + w - 28, y + 72);
+    ctx.moveTo(x + w - 21, y + 27);
+    ctx.lineTo(x + w - 27, y + 69);
     ctx.stroke();
-    ctx.fillStyle = "#b68958";
-    ctx.fillRect(x + w - 33, y + 67, 8, 4);
-    ctx.fillStyle = "#f0f5fb";
-    ctx.fillRect(x + w - 20, y + 17, 4, 6);
+    ctx.fillStyle = "#bf8d57";
+    ctx.fillRect(x + w - 33, y + 64, 10, 4);
+    ctx.fillStyle = "#eef5ff";
+    ctx.fillRect(x + w - 24, y + 24, 4, 5);
+
+    ctx.fillStyle = bootsColor;
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(cx - 14, y + h - 27, 10, 5);
+    ctx.fillRect(cx + 4, y + h - 27, 10, 5);
+    ctx.globalAlpha = 1;
 
     if (ring) {
       ctx.fillStyle = ringColor;
       ctx.beginPath();
-      ctx.arc(cx - 18, y + 58, 3, 0, Math.PI * 2);
+      ctx.arc(cx - 18, chestY + 17, 3.5, 0, Math.PI * 2);
       ctx.fill();
     }
     if (trinket) {
       ctx.fillStyle = trinketColor;
       ctx.beginPath();
-      ctx.arc(cx, y + 57, 4, 0, Math.PI * 2);
+      ctx.arc(cx, chestY + 18, 4.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.strokeStyle = "rgba(255,255,255,0.24)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(cx, y + 46);
-      ctx.lineTo(cx, y + 53);
+      ctx.moveTo(cx, chestY + 7);
+      ctx.lineTo(cx, chestY + 14);
       ctx.stroke();
     }
 
-    ctx.fillStyle = "rgba(0,0,0,0.14)";
-    ctx.fillRect(x + 5, y + h - 18, w - 10, 12);
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(0,0,0,0.20)";
+    ctx.fillRect(x + 5, badgeY, w - 10, 11);
     ctx.fillStyle = armorColor;
-    ctx.fillRect(x + 6, y + h - 10, Math.max(12, Math.floor(w * 0.24)), 4);
+    ctx.fillRect(x + 7, badgeY + 3, Math.max(13, Math.floor(w * 0.24)), 4);
     ctx.fillStyle = helmColor;
-    ctx.fillRect(x + Math.floor(w * 0.31), y + h - 10, Math.max(10, Math.floor(w * 0.16)), 4);
+    ctx.fillRect(x + Math.floor(w * 0.31), badgeY + 3, Math.max(10, Math.floor(w * 0.16)), 4);
     ctx.fillStyle = weaponColor;
-    ctx.fillRect(x + Math.floor(w * 0.51), y + h - 10, Math.max(12, Math.floor(w * 0.18)), 4);
+    ctx.fillRect(x + Math.floor(w * 0.51), badgeY + 3, Math.max(12, Math.floor(w * 0.18)), 4);
     ctx.fillStyle = trinketColor;
-    ctx.fillRect(x + Math.floor(w * 0.74), y + h - 10, Math.max(8, Math.floor(w * 0.10)), 4);
+    ctx.fillRect(x + Math.floor(w * 0.74), badgeY + 3, Math.max(8, Math.floor(w * 0.10)), 4);
     ctx.restore();
   }
 

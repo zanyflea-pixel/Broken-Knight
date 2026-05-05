@@ -418,10 +418,702 @@ function Save-MountainTexture {
   $bmp.Dispose()
 }
 
+function Save-TreeAltSprite {
+  $path = Join-Path $outDir "tree-sprite-alt.png"
+  $bmp = New-Object System.Drawing.Bitmap 128, 128
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(42, 0, 0, 0))
+  $g.FillEllipse($shadow, 28, 104, 72, 18)
+
+  $trunkBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 76, 54, 34))
+  $g.FillRectangle($trunkBrush, 58, 62, 12, 42)
+
+  $canopyA = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 38, 78, 42))
+  $canopyB = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 58, 114, 64))
+  $canopyC = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 94, 152, 82))
+  $g.FillEllipse($canopyA, 28, 34, 72, 52)
+  $g.FillEllipse($canopyB, 18, 48, 46, 42)
+  $g.FillEllipse($canopyB, 62, 46, 48, 44)
+  $g.FillEllipse($canopyC, 42, 18, 46, 38)
+  $g.FillEllipse($canopyC, 28, 64, 26, 20)
+  $g.FillEllipse($canopyC, 74, 64, 26, 20)
+
+  $edgePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(160, 26, 56, 28), 2.4)
+  $g.DrawEllipse($edgePen, 28, 34, 72, 52)
+  $g.DrawEllipse($edgePen, 18, 48, 46, 42)
+  $g.DrawEllipse($edgePen, 62, 46, 48, 44)
+  $g.DrawEllipse($edgePen, 42, 18, 46, 38)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $edgePen.Dispose()
+  $canopyA.Dispose()
+  $canopyB.Dispose()
+  $canopyC.Dispose()
+  $trunkBrush.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-RockSprite {
+  $path = Join-Path $outDir "rock-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 96, 64
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(38, 0, 0, 0))
+  $g.FillEllipse($shadow, 18, 46, 56, 12)
+
+  $basePath = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $basePath.AddPolygon(@(
+    [System.Drawing.PointF]::new(14, 46),
+    [System.Drawing.PointF]::new(22, 28),
+    [System.Drawing.PointF]::new(36, 16),
+    [System.Drawing.PointF]::new(56, 14),
+    [System.Drawing.PointF]::new(72, 24),
+    [System.Drawing.PointF]::new(80, 44),
+    [System.Drawing.PointF]::new(62, 54),
+    [System.Drawing.PointF]::new(30, 54)
+  ))
+  $baseBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(18, 18),
+    [System.Drawing.Point]::new(74, 52),
+    [System.Drawing.Color]::FromArgb(255, 132, 142, 152),
+    [System.Drawing.Color]::FromArgb(255, 86, 94, 104)
+  )
+  $g.FillPath($baseBrush, $basePath)
+
+  $facetA = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 165, 174, 183))
+  $g.FillPolygon($facetA, @(
+    [System.Drawing.PointF]::new(24, 34),
+    [System.Drawing.PointF]::new(38, 20),
+    [System.Drawing.PointF]::new(52, 18),
+    [System.Drawing.PointF]::new(46, 36),
+    [System.Drawing.PointF]::new(28, 40)
+  ))
+  $facetB = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 102, 110, 120))
+  $g.FillPolygon($facetB, @(
+    [System.Drawing.PointF]::new(48, 22),
+    [System.Drawing.PointF]::new(66, 24),
+    [System.Drawing.PointF]::new(74, 42),
+    [System.Drawing.PointF]::new(56, 48),
+    [System.Drawing.PointF]::new(46, 38)
+  ))
+
+  $edgePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(150, 52, 58, 66), 2)
+  $g.DrawPath($edgePen, $basePath)
+  $crackPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90, 40, 46, 52), 1.6)
+  $g.DrawLine($crackPen, 40, 20, 36, 42)
+  $g.DrawLine($crackPen, 54, 20, 64, 42)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $crackPen.Dispose()
+  $edgePen.Dispose()
+  $facetA.Dispose()
+  $facetB.Dispose()
+  $baseBrush.Dispose()
+  $basePath.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-MountainEdgeSprite {
+  $path = Join-Path $outDir "mountain-edge-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 128, 32
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 18, 22, 26))
+  $midBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(230, 58, 64, 72))
+  $lightBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(170, 220, 228, 236))
+
+  $ridge = @(
+    [System.Drawing.PointF]::new(0, 18),
+    [System.Drawing.PointF]::new(12, 16),
+    [System.Drawing.PointF]::new(24, 8),
+    [System.Drawing.PointF]::new(34, 15),
+    [System.Drawing.PointF]::new(48, 9),
+    [System.Drawing.PointF]::new(61, 18),
+    [System.Drawing.PointF]::new(72, 12),
+    [System.Drawing.PointF]::new(84, 8),
+    [System.Drawing.PointF]::new(95, 16),
+    [System.Drawing.PointF]::new(108, 10),
+    [System.Drawing.PointF]::new(118, 14),
+    [System.Drawing.PointF]::new(128, 12),
+    [System.Drawing.PointF]::new(128, 25),
+    [System.Drawing.PointF]::new(0, 25)
+  )
+  $g.FillPolygon($shadowBrush, $ridge)
+
+  $mid = @(
+    [System.Drawing.PointF]::new(0, 20),
+    [System.Drawing.PointF]::new(12, 18),
+    [System.Drawing.PointF]::new(24, 11),
+    [System.Drawing.PointF]::new(34, 17),
+    [System.Drawing.PointF]::new(48, 12),
+    [System.Drawing.PointF]::new(61, 20),
+    [System.Drawing.PointF]::new(72, 14),
+    [System.Drawing.PointF]::new(84, 11),
+    [System.Drawing.PointF]::new(95, 18),
+    [System.Drawing.PointF]::new(108, 13),
+    [System.Drawing.PointF]::new(118, 16),
+    [System.Drawing.PointF]::new(128, 15),
+    [System.Drawing.PointF]::new(128, 22),
+    [System.Drawing.PointF]::new(0, 22)
+  )
+  $g.FillPolygon($midBrush, $mid)
+
+  $lightPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(165, 238, 244, 250), 2)
+  $g.DrawCurve($lightPen, @(
+    [System.Drawing.PointF]::new(2, 21),
+    [System.Drawing.PointF]::new(14, 19),
+    [System.Drawing.PointF]::new(24, 13),
+    [System.Drawing.PointF]::new(34, 18),
+    [System.Drawing.PointF]::new(48, 14),
+    [System.Drawing.PointF]::new(61, 20),
+    [System.Drawing.PointF]::new(72, 15),
+    [System.Drawing.PointF]::new(84, 13),
+    [System.Drawing.PointF]::new(95, 18),
+    [System.Drawing.PointF]::new(108, 14),
+    [System.Drawing.PointF]::new(118, 17),
+    [System.Drawing.PointF]::new(126, 16)
+  ))
+
+  $facetPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90, 248, 250, 252), 1.2)
+  foreach ($x in 10, 28, 50, 76, 98, 116) {
+    $g.DrawLine($facetPen, $x, 17, $x - 4, 23)
+  }
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $facetPen.Dispose()
+  $lightPen.Dispose()
+  $lightBrush.Dispose()
+  $midBrush.Dispose()
+  $shadowBrush.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-DockBoatSprite {
+  $path = Join-Path $outDir "dock-boat-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 96, 48
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(70, 10, 16, 24))
+  $g.FillEllipse($shadow, 18, 31, 50, 10)
+
+  $hull = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $hull.AddPolygon(@(
+    [System.Drawing.PointF]::new(18, 25),
+    [System.Drawing.PointF]::new(30, 33),
+    [System.Drawing.PointF]::new(62, 33),
+    [System.Drawing.PointF]::new(74, 25),
+    [System.Drawing.PointF]::new(60, 18),
+    [System.Drawing.PointF]::new(28, 18)
+  ))
+  $hullBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(18, 18),
+    [System.Drawing.Point]::new(74, 33),
+    [System.Drawing.Color]::FromArgb(255, 120, 84, 48),
+    [System.Drawing.Color]::FromArgb(255, 82, 55, 33)
+  )
+  $g.FillPath($hullBrush, $hull)
+  $hullPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(120, 38, 26, 19), 2)
+  $g.DrawPath($hullPen, $hull)
+
+  $mastPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 200, 180, 150), 2.4)
+  $g.DrawLine($mastPen, 47, 8, 47, 24)
+  $ropePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(110, 228, 236, 244), 1.2)
+  $g.DrawLine($ropePen, 47, 9, 61, 17)
+
+  $sail = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $sail.AddPolygon(@(
+    [System.Drawing.PointF]::new(47, 10),
+    [System.Drawing.PointF]::new(47, 24),
+    [System.Drawing.PointF]::new(63, 18)
+  ))
+  $sailBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(47, 10),
+    [System.Drawing.Point]::new(63, 24),
+    [System.Drawing.Color]::FromArgb(255, 234, 242, 248),
+    [System.Drawing.Color]::FromArgb(255, 194, 208, 220)
+  )
+  $g.FillPath($sailBrush, $sail)
+
+  $shinePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(110, 255, 250, 236), 1.4)
+  $g.DrawLine($shinePen, 27, 19, 59, 19)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $shinePen.Dispose()
+  $sailBrush.Dispose()
+  $sail.Dispose()
+  $ropePen.Dispose()
+  $mastPen.Dispose()
+  $hullPen.Dispose()
+  $hullBrush.Dispose()
+  $hull.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-ShrineSprite {
+  $path = Join-Path $outDir "shrine-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 72, 88
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $aura = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $aura.AddEllipse(10, 16, 52, 52)
+  $auraBrush = New-Object System.Drawing.Drawing2D.PathGradientBrush $aura
+  $auraBrush.CenterColor = [System.Drawing.Color]::FromArgb(120, 197, 146, 255)
+  $auraBrush.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 197, 146, 255))
+  $g.FillPath($auraBrush, $aura)
+
+  $baseBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(20, 58),
+    [System.Drawing.Point]::new(52, 78),
+    [System.Drawing.Color]::FromArgb(255, 100, 79, 142),
+    [System.Drawing.Color]::FromArgb(255, 56, 43, 86)
+  )
+  $g.FillRectangle($baseBrush, 20, 58, 32, 10)
+  $g.FillRectangle($baseBrush, 26, 50, 20, 10)
+
+  $crystal = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $crystal.AddPolygon(@(
+    [System.Drawing.PointF]::new(36, 18),
+    [System.Drawing.PointF]::new(48, 46),
+    [System.Drawing.PointF]::new(36, 58),
+    [System.Drawing.PointF]::new(24, 46)
+  ))
+  $crystalBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(24, 18),
+    [System.Drawing.Point]::new(48, 58),
+    [System.Drawing.Color]::FromArgb(255, 228, 196, 255),
+    [System.Drawing.Color]::FromArgb(255, 151, 98, 241)
+  )
+  $g.FillPath($crystalBrush, $crystal)
+  $crystalPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(220, 249, 238, 255), 2)
+  $shinePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(120, 255, 255, 255), 1.4)
+  $g.DrawPath($crystalPen, $crystal)
+  $g.DrawLine($shinePen, 36, 20, 36, 57)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $shinePen.Dispose()
+  $crystalPen.Dispose()
+  $crystalBrush.Dispose()
+  $crystal.Dispose()
+  $baseBrush.Dispose()
+  $auraBrush.Dispose()
+  $aura.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-CacheSprite {
+  $path = Join-Path $outDir "cache-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 64, 52
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(64, 12, 16, 24))
+  $g.FillEllipse($shadow, 12, 36, 40, 10)
+
+  $box = New-Object System.Drawing.Rectangle 14, 18, 36, 20
+  $boxBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    $box,
+    [System.Drawing.Color]::FromArgb(255, 213, 163, 83),
+    [System.Drawing.Color]::FromArgb(255, 130, 92, 42),
+    90
+  )
+  $boxPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 92, 56, 24), 2)
+  $trimBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 246, 220, 146))
+  $bandBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 244, 211, 120))
+  $lockBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 255, 241, 179))
+  $g.FillRectangle($boxBrush, $box)
+  $g.DrawRectangle($boxPen, $box)
+  $g.FillRectangle($trimBrush, 14, 18, 36, 4)
+  $g.FillRectangle($bandBrush, 30, 18, 4, 20)
+  $g.FillEllipse($lockBrush, 28, 24, 8, 8)
+
+  $sparkPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(180, 255, 240, 186), 1.6)
+  $g.DrawLine($sparkPen, 22, 14, 26, 18)
+  $g.DrawLine($sparkPen, 42, 12, 38, 18)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $sparkPen.Dispose()
+  $lockBrush.Dispose()
+  $bandBrush.Dispose()
+  $trimBrush.Dispose()
+  $boxPen.Dispose()
+  $boxBrush.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-BushSprite {
+  $path = Join-Path $outDir "bush-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 72, 48
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(56, 12, 18, 20))
+  $g.FillEllipse($shadow, 10, 31, 52, 11)
+
+  $leafA = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 56, 112, 58))
+  $leafB = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 74, 140, 72))
+  $leafC = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 98, 168, 88))
+  $g.FillEllipse($leafA, 10, 16, 20, 18)
+  $g.FillEllipse($leafB, 22, 10, 24, 22)
+  $g.FillEllipse($leafA, 36, 15, 20, 18)
+  $g.FillEllipse($leafC, 16, 18, 18, 16)
+  $g.FillEllipse($leafC, 34, 19, 18, 16)
+
+  $berry = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 244, 212, 112))
+  $g.FillEllipse($berry, 26, 22, 4, 4)
+  $g.FillEllipse($berry, 41, 23, 4, 4)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $berry.Dispose()
+  $leafC.Dispose()
+  $leafB.Dispose()
+  $leafA.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-LogSprite {
+  $path = Join-Path $outDir "log-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 84, 40
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(52, 14, 14, 18))
+  $g.FillEllipse($shadow, 12, 25, 60, 10)
+
+  $bodyBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(12, 14),
+    [System.Drawing.Point]::new(68, 28),
+    [System.Drawing.Color]::FromArgb(255, 112, 78, 46),
+    [System.Drawing.Color]::FromArgb(255, 76, 50, 30)
+  )
+  $g.FillRectangle($bodyBrush, 16, 14, 48, 12)
+  $ringBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 158, 118, 74))
+  $barkPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(180, 56, 36, 24), 1.6)
+  $g.FillEllipse($ringBrush, 10, 12, 14, 14)
+  $g.FillEllipse($ringBrush, 58, 14, 14, 14)
+  $g.DrawEllipse($barkPen, 10, 12, 14, 14)
+  $g.DrawEllipse($barkPen, 58, 14, 14, 14)
+  $g.DrawLine($barkPen, 24, 18, 56, 18)
+  $g.DrawLine($barkPen, 26, 22, 54, 22)
+
+  $moss = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(190, 96, 132, 70))
+  $g.FillEllipse($moss, 28, 11, 14, 7)
+  $g.FillEllipse($moss, 42, 21, 12, 6)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $moss.Dispose()
+  $barkPen.Dispose()
+  $ringBrush.Dispose()
+  $bodyBrush.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-CampSprite {
+  $path = Join-Path $outDir "camp-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 84, 64
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(58, 12, 16, 18))
+  $g.FillEllipse($shadow, 14, 42, 56, 12)
+
+  $tent = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $tent.AddPolygon(@(
+    [System.Drawing.PointF]::new(20, 40),
+    [System.Drawing.PointF]::new(42, 16),
+    [System.Drawing.PointF]::new(64, 40)
+  ))
+  $tentBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(20, 16),
+    [System.Drawing.Point]::new(64, 40),
+    [System.Drawing.Color]::FromArgb(255, 142, 102, 62),
+    [System.Drawing.Color]::FromArgb(255, 84, 58, 36)
+  )
+  $g.FillPath($tentBrush, $tent)
+  $tentPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(180, 58, 38, 26), 2)
+  $g.DrawPath($tentPen, $tent)
+  $g.DrawLine($tentPen, 42, 16, 42, 40)
+
+  $fireGlow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(96, 255, 190, 88))
+  $g.FillEllipse($fireGlow, 34, 32, 16, 12)
+  $fireA = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 255, 208, 116))
+  $fireB = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 255, 132, 64))
+  $g.FillEllipse($fireB, 37, 34, 10, 8)
+  $g.FillEllipse($fireA, 39, 32, 6, 7)
+
+  $logBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 98, 68, 44))
+  $g.FillRectangle($logBrush, 24, 38, 10, 3)
+  $g.FillRectangle($logBrush, 50, 38, 10, 3)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $logBrush.Dispose()
+  $fireB.Dispose()
+  $fireA.Dispose()
+  $fireGlow.Dispose()
+  $tentPen.Dispose()
+  $tentBrush.Dispose()
+  $tent.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-WaystoneSprite {
+  $path = Join-Path $outDir "waystone-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 64, 92
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $aura = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $aura.AddEllipse(8, 18, 48, 52)
+  $auraBrush = New-Object System.Drawing.Drawing2D.PathGradientBrush $aura
+  $auraBrush.CenterColor = [System.Drawing.Color]::FromArgb(110, 116, 228, 255)
+  $auraBrush.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 116, 228, 255))
+  $g.FillPath($auraBrush, $aura)
+
+  $stone = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $stone.AddPolygon(@(
+    [System.Drawing.PointF]::new(32, 16),
+    [System.Drawing.PointF]::new(44, 54),
+    [System.Drawing.PointF]::new(32, 72),
+    [System.Drawing.PointF]::new(20, 54)
+  ))
+  $stoneBrush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+    [System.Drawing.Point]::new(20, 16),
+    [System.Drawing.Point]::new(44, 72),
+    [System.Drawing.Color]::FromArgb(255, 98, 198, 224),
+    [System.Drawing.Color]::FromArgb(255, 44, 128, 152)
+  )
+  $g.FillPath($stoneBrush, $stone)
+  $stonePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(210, 216, 248, 255), 2)
+  $g.DrawPath($stonePen, $stone)
+  $runePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(170, 255, 255, 255), 1.4)
+  $g.DrawLine($runePen, 32, 26, 32, 60)
+  $g.DrawLine($runePen, 26, 42, 38, 42)
+
+  $baseBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 74, 112, 136))
+  $g.FillRectangle($baseBrush, 18, 72, 28, 8)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $baseBrush.Dispose()
+  $runePen.Dispose()
+  $stonePen.Dispose()
+  $stoneBrush.Dispose()
+  $stone.Dispose()
+  $auraBrush.Dispose()
+  $aura.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-HerbSprite {
+  $path = Join-Path $outDir "herb-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 44, 44
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(44, 10, 16, 18))
+  $g.FillEllipse($shadow, 10, 30, 22, 7)
+
+  $leafA = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 86, 170, 88))
+  $leafB = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 62, 138, 72))
+  $stemPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 84, 118, 62), 1.8)
+  $flower = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(230, 214, 188, 255))
+  $core = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 246, 218, 124))
+
+  $g.DrawLine($stemPen, 21, 28, 21, 16)
+  $g.DrawLine($stemPen, 21, 25, 12, 20)
+  $g.DrawLine($stemPen, 21, 23, 30, 18)
+  $g.FillEllipse($leafB, 7, 16, 11, 7)
+  $g.FillEllipse($leafA, 24, 14, 12, 8)
+  $g.FillEllipse($leafA, 15, 10, 8, 12)
+  $g.FillEllipse($flower, 16, 8, 5, 5)
+  $g.FillEllipse($flower, 21, 6, 5, 5)
+  $g.FillEllipse($flower, 25, 10, 5, 5)
+  $g.FillEllipse($flower, 19, 12, 5, 5)
+  $g.FillEllipse($core, 20, 9, 4, 4)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $core.Dispose()
+  $flower.Dispose()
+  $stemPen.Dispose()
+  $leafB.Dispose()
+  $leafA.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-AshTreeSprite {
+  $path = Join-Path $outDir "ash-tree-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 48, 48
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(40, 10, 12, 12))
+  $trunk = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 92, 78, 64), 2.2)
+  $branch = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(220, 118, 98, 76), 1.6)
+  $ember = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(120, 184, 124, 82))
+
+  $g.FillEllipse($shadow, 12, 34, 24, 7)
+  $g.DrawLine($trunk, 24, 34, 24, 15)
+  $g.DrawLine($branch, 24, 18, 16, 10)
+  $g.DrawLine($branch, 24, 21, 32, 12)
+  $g.DrawLine($branch, 24, 24, 15, 25)
+  $g.DrawLine($branch, 24, 26, 33, 24)
+  $g.FillEllipse($ember, 14, 8, 4, 4)
+  $g.FillEllipse($ember, 31, 11, 3, 3)
+  $g.FillEllipse($ember, 34, 22, 3, 3)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $ember.Dispose()
+  $branch.Dispose()
+  $trunk.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-AshTreeAltSprite {
+  $path = Join-Path $outDir "ash-tree-alt-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 48, 48
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(38, 10, 12, 12))
+  $trunk = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 86, 72, 60), 2.0)
+  $branch = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(210, 126, 108, 88), 1.4)
+  $ash = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(110, 166, 138, 114))
+
+  $g.FillEllipse($shadow, 11, 34, 24, 6)
+  $g.DrawLine($trunk, 23, 34, 21, 15)
+  $g.DrawLine($branch, 21, 18, 12, 15)
+  $g.DrawLine($branch, 20, 22, 30, 15)
+  $g.DrawLine($branch, 22, 24, 14, 28)
+  $g.DrawLine($branch, 21, 27, 31, 26)
+  $g.FillEllipse($ash, 10, 13, 4, 3)
+  $g.FillEllipse($ash, 29, 14, 4, 3)
+  $g.FillEllipse($ash, 14, 27, 3, 3)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $ash.Dispose()
+  $branch.Dispose()
+  $trunk.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-AshShrubSprite {
+  $path = Join-Path $outDir "ash-shrub-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 40, 28
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(36, 12, 12, 12))
+  $twigA = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(220, 108, 88, 66), 1.5)
+  $twigB = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(180, 142, 116, 84), 1.2)
+
+  $g.FillEllipse($shadow, 8, 18, 22, 6)
+  $g.DrawLine($twigA, 18, 20, 12, 12)
+  $g.DrawLine($twigA, 18, 20, 22, 10)
+  $g.DrawLine($twigA, 18, 20, 27, 14)
+  $g.DrawLine($twigB, 15, 17, 9, 16)
+  $g.DrawLine($twigB, 20, 17, 26, 17)
+  $g.DrawLine($twigB, 22, 16, 30, 11)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $twigB.Dispose()
+  $twigA.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
+function Save-AshDeadBrushSprite {
+  $path = Join-Path $outDir "ash-dead-brush-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 40, 24
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(30, 10, 10, 10))
+  $stemA = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(210, 126, 112, 88), 1.4)
+  $stemB = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(180, 164, 142, 112), 1.1)
+  $ash = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(100, 162, 146, 126))
+
+  $g.FillEllipse($shadow, 8, 16, 24, 5)
+  $g.DrawLine($stemA, 18, 18, 12, 7)
+  $g.DrawLine($stemA, 18, 18, 17, 5)
+  $g.DrawLine($stemA, 18, 18, 24, 7)
+  $g.DrawLine($stemA, 18, 18, 27, 10)
+  $g.DrawLine($stemB, 12, 17, 8, 12)
+  $g.DrawLine($stemB, 24, 16, 31, 12)
+  $g.FillEllipse($ash, 9, 10, 4, 3)
+  $g.FillEllipse($ash, 17, 6, 4, 3)
+  $g.FillEllipse($ash, 26, 10, 4, 3)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $ash.Dispose()
+  $stemB.Dispose()
+  $stemA.Dispose()
+  $shadow.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
 Save-HeroPortrait
 Save-SpellIcons
 Save-MapParchment
 Save-TreeSprite
+Save-TreeAltSprite
 Save-MountainTexture
+Save-RockSprite
+Save-MountainEdgeSprite
+Save-DockBoatSprite
+Save-ShrineSprite
+Save-CacheSprite
+Save-BushSprite
+Save-LogSprite
+Save-CampSprite
+Save-WaystoneSprite
+Save-HerbSprite
+Save-AshTreeSprite
+Save-AshTreeAltSprite
+Save-AshShrubSprite
+Save-AshDeadBrushSprite
 
 Write-Output "Generated UI assets in $outDir"

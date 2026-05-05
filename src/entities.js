@@ -1,10 +1,11 @@
 // src/entities.js
-// v102.3 FULL ENTITIES RESTORE
+// v102.3 FULL ENTITIES RESTORE + SAILING BOAT
 // - fuller hero visuals / equipment visuals
 // - fuller enemy variety + behavior
 // - projectile / loot behavior
 // - makeGear compatible with current game.js
 // - built to match current util.js / world.js / ui.js
+// - NEW: sailing boat graphic (drawn when hero.state.sailing === true)
 
 import { clamp, norm } from "./util.js";
 
@@ -289,6 +290,45 @@ export class Hero {
     this.hp = Math.min(this.maxHp, this.hp + dt * 0.18);
   }
 
+  _drawSailingBoat(ctx) {
+    const dir = this.lastMove || { x: 1, y: 0 };
+    const angle = Math.atan2(dir.y, dir.x);
+
+    ctx.save();
+    ctx.rotate(angle);
+
+    // Hull (dark wood)
+    ctx.fillStyle = "#8B4513";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 23, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Deck (lighter wood)
+    ctx.fillStyle = "#D2B48C";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 18, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mast
+    ctx.fillStyle = "#2C2C2C";
+    ctx.fillRect(-2, -26, 4, 28);
+
+    // Sail (white with light blue edge)
+    ctx.fillStyle = "#f0f8ff";
+    ctx.beginPath();
+    ctx.moveTo(0, -25);
+    ctx.lineTo(24, -6);
+    ctx.lineTo(0, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "#1e90ff";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   _drawWeapon(ctx, aim) {
     const sword = this.equip?.weapon;
     const rarity = sword?.rarity || "common";
@@ -386,6 +426,11 @@ export class Hero {
 
     ctx.save();
     ctx.translate(this.x, this.y + bob);
+
+    // NEW: draw boat when sailing (under the hero)
+    if (this.state?.sailing) {
+      this._drawSailingBoat(ctx);
+    }
 
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.beginPath();
@@ -1672,7 +1717,7 @@ export class Loot {
     const dy = hero.y - this.y;
     const d = Math.hypot(dx, dy) || 0.001;
 
-    const pullRange = this.kind === "gear" ? 132 : 96;
+    const pullRange = this.kind === "gear" ? 132 : this.kind === "key" ? 112 : 96;
     if (d < pullRange) {
       const dir = { x: dx / d, y: dy / d };
       const speed = 44 + (pullRange - d) * (this.kind === "gear" ? 3.0 : 3.5);
@@ -1756,6 +1801,32 @@ export class Loot {
       ctx.font = "bold 8px Arial";
       ctx.textAlign = "center";
       ctx.fillText(mana ? "MANA" : "HP", 0, -14);
+    } else if (this.kind === "key") {
+      ctx.fillStyle = "rgba(139,233,255,0.20)";
+      ctx.beginPath();
+      ctx.arc(0, 1, 11 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "#8be9ff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(-2, 0, 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(2, 0);
+      ctx.lineTo(10, 0);
+      ctx.lineTo(10, 3);
+      ctx.lineTo(7, 3);
+      ctx.moveTo(8, 0);
+      ctx.lineTo(8, -3);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(5,8,12,0.68)";
+      ctx.fillRect(-18, -22, 36, 11);
+      ctx.fillStyle = "#dff8ff";
+      ctx.font = "bold 8px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("KEY", 0, -14);
     } else if (this.kind === "gear") {
       const color = this.data?.color || "#d9dee8";
       const rarity = this.data?.rarity || "common";
