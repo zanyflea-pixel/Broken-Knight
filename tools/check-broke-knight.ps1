@@ -43,24 +43,24 @@ foreach ($matchInfo in $imports) {
   }
 }
 
-if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
-  $BaseUrl = "http://127.0.0.1:8001"
-}
-
-try {
-  $modules = @("index.html") + ($required | Where-Object { $_ -like "src/*" })
-  foreach ($rel in $modules) {
-    $uri = "$($BaseUrl.TrimEnd('/'))/$rel"
-    $res = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $uri -TimeoutSec 3
-    if ($res.StatusCode -eq 200) {
-      Write-Host "OK http $rel"
-    } else {
-      Write-Host "HTTP $($res.StatusCode) $rel" -ForegroundColor Red
-      $failed = $true
+if (![string]::IsNullOrWhiteSpace($BaseUrl)) {
+  try {
+    $modules = @("index.html") + ($required | Where-Object { $_ -like "src/*" })
+    foreach ($rel in $modules) {
+      $uri = "$($BaseUrl.TrimEnd('/'))/$rel"
+      $res = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $uri -TimeoutSec 3
+      if ($res.StatusCode -eq 200) {
+        Write-Host "OK http $rel"
+      } else {
+        Write-Host "HTTP $($res.StatusCode) $rel" -ForegroundColor Red
+        $failed = $true
+      }
     }
+  } catch {
+    Write-Host "HTTP checks skipped or failed at ${BaseUrl}: $($_.Exception.Message)" -ForegroundColor Yellow
   }
-} catch {
-  Write-Host "HTTP checks skipped or failed at ${BaseUrl}: $($_.Exception.Message)" -ForegroundColor Yellow
+} else {
+  Write-Host "HTTP checks skipped (no BaseUrl provided)" -ForegroundColor DarkYellow
 }
 
 if ($failed) {

@@ -24,12 +24,12 @@ export default class UI {
     this._msgT = 0;
 
     this._miniFrame = document.createElement("canvas");
-    this._miniFrame.width = 128;
-    this._miniFrame.height = 128;
+    this._miniFrame.width = 120;
+    this._miniFrame.height = 120;
     this._miniFrameCtx = this._miniFrame.getContext("2d");
     this._miniSampleFrame = document.createElement("canvas");
-    this._miniSampleFrame.width = 20;
-    this._miniSampleFrame.height = 20;
+    this._miniSampleFrame.width = 16;
+    this._miniSampleFrame.height = 16;
     this._miniSampleFrameCtx = this._miniSampleFrame.getContext("2d");
     this._miniFrameDirty = true;
     this._miniFrameT = 0;
@@ -37,6 +37,7 @@ export default class UI {
     this._lastMiniHeroY = 0;
     this._controlsCollapsed = false;
     this._controlsToggleRect = null;
+    this._profilerCopyRect = null;
     this._assets = this._loadUiAssets();
   }
 
@@ -66,7 +67,7 @@ export default class UI {
     }
 
     this._miniT += dt;
-    if (this._miniT >= 3.6) {
+    if (this._miniT >= 5.0) {
       this._miniT = 0;
       this._mini = game?.world?.peekMinimapCanvas?.() || null;
       this._miniFrameDirty = true;
@@ -77,7 +78,7 @@ export default class UI {
     const hy = game?.hero?.y || 0;
     const heroShift = Math.abs(hx - this._lastMiniHeroX) + Math.abs(hy - this._lastMiniHeroY);
 
-    if (heroShift > 920 || this._miniFrameT >= 2.8) {
+    if (heroShift > 1400 || this._miniFrameT >= 4.0) {
       this._miniFrameT = 0;
       this._lastMiniHeroX = hx;
       this._lastMiniHeroY = hy;
@@ -90,6 +91,15 @@ export default class UI {
       const my = game.mouse.y;
       if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
         this._controlsCollapsed = !this._controlsCollapsed;
+      }
+    }
+
+    if (game?.mouse?.clicked && this._profilerCopyRect) {
+      const { x, y, w, h } = this._profilerCopyRect;
+      const mx = game.mouse.x;
+      const my = game.mouse.y;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+        this._copyProfilerText(game);
       }
     }
   }
@@ -109,6 +119,8 @@ export default class UI {
     this._drawPrompt(ctx, game);
     this._drawToast(ctx, game);
     this._drawZoneText(ctx, game);
+    this._drawPerfReadout(ctx, game);
+    this._drawProfilerPanel(ctx, game);
 
     const open = game?.menu?.open || this._open || null;
     if (!open) return;
@@ -714,7 +726,8 @@ export default class UI {
     const cy = y + size * 0.5;
     const r = size * 0.5 - 4;
 
-    if (this._miniFrameDirty) {
+    if (!this._mini && game?.world?.peekMinimapCanvas?.()) this._mini = game.world.peekMinimapCanvas();
+    if (this._miniFrameDirty && (!this._mini || game?.dungeon?.active)) {
       this._rebuildMiniFrame(game);
       this._miniFrameDirty = false;
     }
@@ -736,6 +749,8 @@ export default class UI {
     ctx.clip();
     if (game?.dungeon?.active && game?.dungeon?.layout) {
       this._drawDungeonMapFrame(ctx, game, cx - r, cy - r, r * 2, r * 2, false);
+    } else if (this._mini) {
+      this._drawMinimapFromCanvas(ctx, game, this._mini, cx - r, cy - r, r * 2);
     } else {
       ctx.drawImage(this._miniFrame, cx - r, cy - r, r * 2, r * 2);
     }
@@ -782,11 +797,6 @@ export default class UI {
     const info = game?.world?.peekMapInfo?.() || game?.world?.getMapInfo?.();
     if (info?.revealed?.length) {
       this._drawMinimapFromMapInfo(c, game, 0, 0, w, h, info);
-      return;
-    }
-
-    if (game?.world?._sampleMapCell) {
-      this._drawMinimapLocalSample(c, game, 0, 0, w, h);
       return;
     }
 
@@ -861,36 +871,41 @@ export default class UI {
     const heroNormX = clamp((game.hero.x + half) / span, 0, 1);
     const heroNormY = clamp((game.hero.y + half) / span, 0, 1);
 
-    const srcFrac = 0.26;
+    const srcFrac = 0.20;
     const srcW = Math.max(36, Math.floor(mini.width * srcFrac));
     const srcH = Math.max(36, Math.floor(mini.height * srcFrac));
-    const viewSpan = 760;
+    const viewSpanX = span * (srcW / Math.max(1, mini.width));
+    const viewSpanY = span * (srcH / Math.max(1, mini.height));
 
     let srcX = Math.floor(heroNormX * mini.width - srcW * 0.5);
     let srcY = Math.floor(heroNormY * mini.height - srcH * 0.5);
 
     srcX = clamp(srcX, 0, Math.max(0, mini.width - srcW));
     srcY = clamp(srcY, 0, Math.max(0, mini.height - srcH));
+    const viewLeft = (srcX / Math.max(1, mini.width)) * span - half;
+    const viewTop = (srcY / Math.max(1, mini.height)) * span - half;
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(x, y, size, size);
     ctx.clip();
-    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(mini, srcX, srcY, srcW, srcH, x, y, size, size);
-    this._drawMapWaterOverlay(ctx, game, x, y, size, size, game.hero.x - viewSpan * 0.5, game.hero.y - viewSpan * 0.5, viewSpan, {
-      color: "rgba(78,188,236,0.82)",
-      width: 2.2,
+    this._drawMapWaterOverlay(ctx, game, x, y, size, size, viewLeft, viewTop, viewSpanX, {
+      color: "rgba(76,196,255,0.92)",
+      width: 4.2,
+      revealRequired: false,
     });
-    this._drawMapRoadOverlay(ctx, game, x, y, size, size, game.hero.x - viewSpan * 0.5, game.hero.y - viewSpan * 0.5, viewSpan, {
-      roadBase: "rgba(38,22,12,0.72)",
-      roadTop: "rgba(214,188,138,0.82)",
-      roadBaseWidth: 2.2,
-      roadTopWidth: 1.0,
+    this._drawMapRoadOverlay(ctx, game, x, y, size, size, viewLeft, viewTop, viewSpanX, {
+      roadBase: "rgba(46,28,15,0.82)",
+      roadTop: "rgba(231,204,156,0.96)",
+      roadBaseWidth: 3.2,
+      roadTopWidth: 1.8,
       bridgeColor: "rgba(242,222,184,0.92)",
-      bridgeWidth: 2.0,
+      bridgeWidth: 2.8,
+      revealRequired: false,
     });
-    this._drawMapPoiMarkers(ctx, game, x, y, size, size, game.hero.x - viewSpan * 0.5, game.hero.y - viewSpan * 0.5, viewSpan, 2.1);
+    this._drawMapPoiMarkers(ctx, game, x, y, size, size, viewLeft, viewTop, viewSpanX, 2.1, false);
     ctx.restore();
 
     this._drawHeroCrosshair(ctx, x, y, size, size, x + size * 0.5, y + size * 0.5, false);
@@ -900,7 +915,7 @@ export default class UI {
     const info = infoOverride || game.world.peekMapInfo?.() || game.world.getMapInfo();
     const hero = game.hero;
 
-    const worldSpan = 760;
+    const worldSpan = 620;
     const half = worldSpan * 0.5;
     const pxPerWorld = w / worldSpan;
 
@@ -1120,7 +1135,8 @@ export default class UI {
       const pts = world._riverPath?.(band) || [];
       if (!pts || pts.length < 2) continue;
       let visible = false;
-      let revealed = false;
+      const revealRequired = opts.revealRequired !== false;
+      let revealed = !revealRequired;
       for (const p of pts) {
         if (!revealed && this._isMapPointRevealed(game, p)) revealed = true;
         if (p.x >= viewLeft - 80 && p.x <= right + 80 && p.y >= viewTop - 80 && p.y <= bottom + 80) {
@@ -1130,30 +1146,27 @@ export default class UI {
       }
       if (!visible || !revealed) continue;
 
-      const keep = [];
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        const prev = pts[Math.max(0, i - 1)];
-        const next = pts[Math.min(pts.length - 1, i + 1)];
-        keep.push(this._shouldDrawRiverPoint(world, prev, p, next));
-      }
-
       let drawing = false;
-      for (let i = 0; i < pts.length; i++) {
-        if (!keep[i]) {
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const next = pts[i + 1];
+        if (world._isRiverSegmentInOcean?.(a, b, next, 0.245)) {
           drawing = false;
           continue;
         }
-        const sx = x + (pts[i].x - viewLeft) * px;
-        const sy = y + (pts[i].y - viewTop) * py;
+        const sx = x + (a.x - viewLeft) * px;
+        const sy = y + (a.y - viewTop) * py;
+        const ex = x + (b.x - viewLeft) * px;
+        const ey = y + (b.y - viewTop) * py;
         if (!drawing) {
           ctx.beginPath();
           ctx.moveTo(sx, sy);
           drawing = true;
-        } else {
-          ctx.lineTo(sx, sy);
         }
-        const isLast = i === pts.length - 1 || !keep[i + 1];
+        ctx.lineTo(ex, ey);
+        const nextBlocked = i >= pts.length - 1 || world._isRiverSegmentInOcean?.(b, next || b, pts[i + 2], 0.245);
+        const isLast = i === pts.length - 1 || nextBlocked;
         if (isLast && drawing) {
           ctx.stroke();
           drawing = false;
@@ -1200,10 +1213,13 @@ export default class UI {
     ctx.lineJoin = "round";
 
     for (const road of world.roads || []) {
+      const pad = 40;
+      if ((road.maxX ?? Infinity) + pad < viewLeft || (road.minX ?? -Infinity) - pad > right || (road.maxY ?? Infinity) + pad < viewTop || (road.minY ?? -Infinity) - pad > bottom) continue;
       const pts = road.points;
       if (!pts || pts.length < 2) continue;
       let visible = false;
-      let revealed = false;
+      const revealRequired = opts.revealRequired !== false;
+      let revealed = !revealRequired;
       for (const p of pts) {
         if (!revealed && this._isMapPointRevealed(game, p)) revealed = true;
         if (p.x >= viewLeft - 40 && p.x <= right + 40 && p.y >= viewTop - 40 && p.y <= bottom + 40) {
@@ -1234,7 +1250,8 @@ export default class UI {
       if (bx < viewLeft - 40 || bx > right + 40 || by < viewTop - 40 || by > bottom + 40) continue;
       const path = bridge.path || [];
       if (path.length < 2) continue;
-      let revealed = this._isMapPointRevealed(game, bridge);
+      const revealRequired = opts.revealRequired !== false;
+      let revealed = !revealRequired || this._isMapPointRevealed(game, bridge);
       if (!revealed) {
         for (const p of path) {
           if (this._isMapPointRevealed(game, p)) {
@@ -1648,7 +1665,7 @@ export default class UI {
       textColor: "#9db2ca",
       font: "bold 10px 'Segoe UI', Arial",
     });
-    const info = dungeonMap ? null : game?.world?.getMapInfo?.();
+    const info = dungeonMap ? null : (game?.world?.peekMapInfo?.() || game?.world?.getMapInfo?.());
     const revealedRows = info?.revealed || [];
     let discovered = 0;
     let discoveredTotal = 0;
@@ -1674,12 +1691,13 @@ export default class UI {
     ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.strokeRect(mapX + 0.5, mapY + 0.5, mapW - 1, mapH - 1);
 
+    const worldMapCanvas = dungeonMap ? null : (game?.world?.peekMapCanvas?.() || game?.world?.peekMinimapCanvas?.() || this._mini);
     if (dungeonMap) {
       this._drawDungeonMapFrame(ctx, game, mapX, mapY, mapW, mapH, true);
+    } else if (worldMapCanvas?.width && worldMapCanvas?.height) {
+      this._drawBigMapFromCanvas(ctx, game, worldMapCanvas, info, mapX, mapY, mapW, mapH);
     } else if (info?.revealed?.length) {
       this._drawBigMapFromMapInfo(ctx, game, info, mapX, mapY, mapW, mapH);
-    } else if (this._mini) {
-      this._drawBigMapFromCanvas(ctx, game, this._mini, mapX, mapY, mapW, mapH);
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.05)";
       ctx.fillRect(mapX, mapY, mapW, mapH);
@@ -1756,7 +1774,87 @@ export default class UI {
     ctx.restore();
   }
 
-  _drawBigMapFromCanvas(ctx, game, mini, x, y, w, h) {
+  _drawPerfReadout(ctx, game) {
+    const fps = game?._fps || 0;
+    if (!(fps > 0)) return;
+    const enemies = game?.enemies?.length || 0;
+    const frameMs = game?._frameMs || 0;
+    const text = `${Math.round(fps)} FPS  ${frameMs.toFixed(1)}ms  E ${enemies}`;
+    const w = 164;
+    const h = 18;
+    const x = this.w - w - 14;
+    const y = this.h - h - 12;
+    this._drawPill(ctx, x, y, w, h, text, {
+      fill: "rgba(4,8,12,0.74)",
+      stroke: "rgba(143,216,255,0.18)",
+      textColor: frameMs <= 18 ? "#a8f0b0" : frameMs <= 28 ? "#ffe08a" : "#ff9d9d",
+      font: "bold 10px 'Segoe UI', Arial",
+    });
+  }
+
+  _drawProfilerPanel(ctx, game) {
+    if (!game?.dev?.showProfiler) {
+      this._profilerCopyRect = null;
+      return;
+    }
+    const perf = game.getPerfSnapshot?.();
+    if (!perf) return;
+    const world = perf.world || {};
+    const lines = [
+      `Frame ${perf.frameMs.toFixed(1)}ms  FPS ${Math.round(perf.fps || 0)}  Jank ${perf.frameJank.toFixed(1)}ms`,
+      `Enemies ${perf.visibleEnemies}/${perf.activeEnemies}/${perf.enemies}  Projectiles ${perf.visibleProjectiles}/${perf.projectiles}  Loot ${perf.visibleLoot}/${perf.loot}`,
+      `Roads ${world.visibleRoads || 0}/${world.roads || 0}  Road segs ${world.roadSegments || 0}  buckets ${world.roadBuckets || 0}`,
+      `Rivers ${world.rivers || 0}  River segs ${world.riverSegments || 0}  buckets ${world.riverBuckets || 0}  Bridges ${world.visibleBridges || 0}/${world.bridges || 0}`,
+      `Chunks terrain ${world.terrainChunks || 0}  props ${world.propChunks || 0}  bridge ${world.bridgeChunks || 0}`,
+      `Props trees ${world.trees || 0}  rocks ${world.rocks || 0}  clutter ${world.clutter || 0}  texts ${perf.floatingTexts || 0}`,
+    ];
+    const panelW = 370;
+    const panelH = 104;
+    const x = this.w - panelW - 14;
+    const y = this.h - panelH - 36;
+    this._drawPanel(ctx, x, y, panelW, panelH, { alpha: 0.9, accent: "rgba(118,200,255,0.38)" });
+    ctx.save();
+    ctx.fillStyle = "#eef4fb";
+    ctx.font = "bold 12px 'Segoe UI', Arial";
+    ctx.fillText("Profiler", x + 12, y + 18);
+
+    const buttonW = 54;
+    const buttonH = 16;
+    const buttonX = x + panelW - buttonW - 10;
+    const buttonY = y + 8;
+    this._profilerCopyRect = { x: buttonX, y: buttonY, w: buttonW, h: buttonH };
+    this._drawPill(ctx, buttonX, buttonY, buttonW, buttonH, "Copy", {
+      fill: "rgba(20,34,46,0.92)",
+      stroke: "rgba(143,216,255,0.24)",
+      textColor: "#d8efff",
+      font: "bold 10px 'Segoe UI', Arial",
+    });
+
+    ctx.font = "11px 'Segoe UI', Arial";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i === 0 ? "#bfe8ff" : "#dbe6f2";
+      this._drawFitText(ctx, lines[i], x + 12, y + 34 + i * 12, panelW - 24);
+    }
+    ctx.restore();
+  }
+
+  _copyProfilerText(game) {
+    const text = game?.getPerfSnapshotText?.();
+    if (!text) return;
+    const onSuccess = () => game?._msg?.("Profiler copied", 0.9);
+    const onFailure = () => game?._msg?.("Profiler copy failed", 1.1);
+    try {
+      if (globalThis.navigator?.clipboard?.writeText) {
+        Promise.resolve(globalThis.navigator.clipboard.writeText(text)).then(onSuccess, onFailure);
+      } else {
+        onFailure();
+      }
+    } catch (_) {
+      onFailure();
+    }
+  }
+
+  _drawBigMapFromCanvas(ctx, game, mini, info, x, y, w, h) {
     const zoom = clamp(game?.menu?.mapZoom || 1, 1, 8);
     const span = (game.world?.mapHalfSize || 5200) * 2;
     const half = span * 0.5;
@@ -1774,12 +1872,69 @@ export default class UI {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(mini, srcX, srcY, srcW, srcH, x, y, w, h);
     ctx.imageSmoothingEnabled = true;
+    this._drawBigMapFogMask(ctx, game, info, x, y, w, h, zoom);
     ctx.restore();
+
+    const viewSpan = span / zoom;
+    const viewLeft = clamp(game.hero.x - viewSpan * 0.5, -half, half - viewSpan);
+    const viewTop = clamp(game.hero.y - viewSpan * 0.5, -half, half - viewSpan);
+    this._drawMapWaterOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, {
+      color: "rgba(82,194,255,0.88)",
+      width: zoom > 2 ? 5.4 : 4.0,
+    });
+    this._drawMapRoadOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, {
+      roadBase: "rgba(66,39,18,0.70)",
+      roadTop: "rgba(224,194,142,0.96)",
+      roadBaseWidth: zoom > 2 ? 4.8 : 3.8,
+      roadTopWidth: zoom > 2 ? 2.2 : 1.5,
+      bridgeColor: "rgba(248,230,196,0.98)",
+      bridgeWidth: zoom > 2 ? 4.2 : 3.0,
+    });
+    this._drawMapPoiMarkers(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, zoom > 2 ? 4 : 3);
+    this._drawBigMapCoordinates(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, zoom);
 
     const hx = x + ((heroNormX * mini.width - srcX) / srcW) * w;
     const hy = y + ((heroNormY * mini.height - srcY) / srcH) * h;
 
-      this._drawHeroCrosshair(ctx, x, y, w, h, hx, hy);
+    this._drawHeroCrosshair(ctx, x, y, w, h, hx, hy);
+  }
+
+  _drawBigMapFogMask(ctx, game, info, x, y, w, h, zoom) {
+    const revealed = info?.revealed;
+    const rows = revealed?.length || 0;
+    const cols = revealed?.[0]?.length || 0;
+    if (!rows || !cols) return;
+
+    const mapHalf = game.world?.mapHalfSize || 5200;
+    const worldFull = mapHalf * 2;
+    const viewSpan = worldFull / zoom;
+    const halfView = viewSpan * 0.5;
+    const heroX = game.hero?.x || 0;
+    const heroY = game.hero?.y || 0;
+    const viewLeft = clamp(heroX - halfView, -mapHalf, mapHalf - viewSpan);
+    const viewTop = clamp(heroY - halfView, -mapHalf, mapHalf - viewSpan);
+    const cellWorldW = worldFull / cols;
+    const cellWorldH = worldFull / rows;
+    const c0 = clamp(Math.floor((viewLeft + mapHalf) / cellWorldW), 0, cols - 1);
+    const c1 = clamp(Math.ceil((viewLeft + viewSpan + mapHalf) / cellWorldW), 0, cols - 1);
+    const r0 = clamp(Math.floor((viewTop + mapHalf) / cellWorldH), 0, rows - 1);
+    const r1 = clamp(Math.ceil((viewTop + viewSpan + mapHalf) / cellWorldH), 0, rows - 1);
+    const pxPerWorldX = w / viewSpan;
+    const pxPerWorldY = h / viewSpan;
+
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (revealed[r]?.[c]) continue;
+        const wx = -mapHalf + c * cellWorldW;
+        const wy = -mapHalf + r * cellWorldH;
+        const sx = x + (wx - viewLeft) * pxPerWorldX;
+        const sy = y + (wy - viewTop) * pxPerWorldY;
+        const sw = Math.ceil(cellWorldW * pxPerWorldX) + 1;
+        const sh = Math.ceil(cellWorldH * pxPerWorldY) + 1;
+        ctx.fillStyle = "rgba(6,9,13,0.93)";
+        ctx.fillRect(sx, sy, sw, sh);
+      }
+    }
   }
 
   _drawBigMapFromMapInfo(ctx, game, info, x, y, w, h) {
@@ -1865,10 +2020,11 @@ export default class UI {
       }
     }
 
-    this._drawMapZoneWash(ctx, info, x, y, viewLeft, viewTop, pxPerWorldX, pxPerWorldY, mapHalf, cellWorldW, cellWorldH, c0, c1, r0, r1, 0.22);
-    this._drawMapFeatureContours(ctx, info, x, y, viewLeft, viewTop, pxPerWorldX, pxPerWorldY, mapHalf, cellWorldW, cellWorldH, c0, c1, r0, r1, 1);
-
     ctx.restore();
+    this._drawMapWaterOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, {
+      color: "rgba(82,194,255,0.88)",
+      width: zoom > 2 ? 5.6 : 4.2,
+    });
     this._drawMapRoadOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, {
       roadBase: "rgba(66,39,18,0.74)",
       roadTop: "rgba(224,194,142,0.94)",
@@ -2074,7 +2230,7 @@ export default class UI {
     ctx.restore();
   }
 
-  _drawMapPoiMarkers(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, radius = 3) {
+  _drawMapPoiMarkers(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, radius = 3, revealRequired = true) {
     const world = game?.world;
     if (!world) return;
 
@@ -2098,7 +2254,7 @@ export default class UI {
     for (const [arr, color, type] of sets) {
       for (const p of arr || []) {
         if (type === "secret" && !game?.progress?.discoveredSecrets?.has?.(String(p.id))) continue;
-        if (!this._isMapPointRevealed(game, p)) continue;
+        if (revealRequired && !this._isMapPointRevealed(game, p)) continue;
         const sx = x + (p.x - viewLeft) * px;
         const sy = y + (p.y - viewTop) * py;
         if (sx < x - 8 || sx > x + w + 8 || sy < y - 8 || sy > y + h + 8) continue;
@@ -2147,7 +2303,7 @@ export default class UI {
     }
 
     for (const b of world.bridges || []) {
-      if (!this._isMapPointRevealed(game, b)) continue;
+      if (revealRequired && !this._isMapPointRevealed(game, b)) continue;
       const sx = x + (b.cx - viewLeft) * px;
       const sy = y + (b.cy - viewTop) * py;
       if (sx < x - 8 || sx > x + w + 8 || sy < y - 8 || sy > y + h + 8) continue;
@@ -2201,7 +2357,7 @@ export default class UI {
   }
 
   _isMapPointRevealed(game, p) {
-    const info = game?.world?.getMapInfo?.();
+    const info = game?.world?.peekMapInfo?.();
     const revealed = info?.revealed;
     const rows = revealed?.length || 0;
     const cols = revealed?.[0]?.length || 0;

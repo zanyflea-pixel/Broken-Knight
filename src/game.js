@@ -17,7 +17,7 @@ import UI from "./ui.js";
 import Save from "./save.js";
 
 const DEV_RESET_CONFIRM_MS = 2500;
-const DEV_TOOL_ACTION_COUNT = 9;
+const DEV_TOOL_ACTION_COUNT = 10;
 const SHOP_ACTION_COUNT = 4;
 const TOWN_ACTION_COUNT = 9;
 const EQUIPMENT_SLOTS = ["weapon", "armor", "helm", "boots", "ring", "trinket"];
@@ -52,6 +52,8 @@ export default class Game {
     this.input = new Input(window);
     this.ui = new UI(canvas);
     this.save = new Save("broke-knight-save-v106");
+    this._bootSaveData = this.save.load?.() || this.save.read?.() || this.save.get?.() || null;
+    if (Number.isFinite(+this._bootSaveData?.seed)) this.seed = this._bootSaveData.seed | 0;
 
     this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
     this.hero = new Hero(this.world.spawn?.x ?? 0, this.world.spawn?.y ?? 0);
@@ -73,12 +75,12 @@ export default class Game {
     };
 
     this.perf = {
-      enemyUpdateRadius: 1040,
+      enemyUpdateRadius: 920,
       lootUpdateRadius: 760,
-      projectileUpdateRadius: 1320,
-      maxEnemies: 34,
-      maxLoot: 72,
-      maxProjectiles: 64,
+      projectileUpdateRadius: 1120,
+      maxEnemies: 30,
+      maxLoot: 60,
+      maxProjectiles: 56,
       maxFloatingTexts: 48,
       cleanupTimer: 0,
       cleanupEvery: 0.42,
@@ -87,6 +89,8 @@ export default class Game {
       spawnMaxDistance: 1360,
       worldSpawnSafeRadius: 760,
       campSafeRadius: 180,
+      enemyLogicRadius: 720,
+      projectileLogicRadius: 900,
     };
 
     this.time = 0;
@@ -98,6 +102,27 @@ export default class Game {
     this._zoneSampleT = 0;
     this._safetyCheckT = 0;
     this._bridgeDiscoveryT = 0;
+    this._worldRevealT = 0;
+    this._enemyCrowdResolveT = 0;
+    this._fps = 0;
+    this._frameMs = 0;
+    this._frameJank = 0;
+    this.renderScale = 1;
+    this._fpsAccum = 0;
+    this._fpsFrames = 0;
+    this._screenFxCache = null;
+    this._simPhase = 0;
+    this._activeEnemies = [];
+    this._activeEnemyRefreshT = 0;
+    this._needsInitialSpawn = true;
+    this._startupSpawnT = 0.18;
+    this._heroTerrainSampleT = 0;
+    this._heroTerrainSample = {
+      moveModifier: 1,
+      zone: "meadow",
+      x: this.hero.x,
+      y: this.hero.y,
+    };
 
     this.menu = { open: null, mapZoom: 1 };
     this.invIndex = 0;
@@ -210,6 +235,7 @@ export default class Game {
 
     this.dev = {
       godMode: false,
+      showProfiler: false,
     };
 
     this.trackedObjective = "story";
@@ -241,9 +267,9 @@ export default class Game {
     this.hero.state.poisonT = 0;
     this.hero.state.mountainPassAccess = !!this.progress?.storyMilestones?.mountainPassAccess;
 
-    this._spawnInitialEnemies();
     this._ensureHeroSafe(true);
-    this.world?.revealAround?.(this.hero.x, this.hero.y, 900);
+    this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
+    this._refreshHeroTerrainSample(true);
     if (this._worldBuildMigrated) this._saveGame();
   }
 
@@ -257,16 +283,24 @@ export default class Game {
   update(dt) {
     dt = Math.min(this._dtClamp, Math.max(0, dt || 0));
     this.time += dt;
+    this._simPhase = (this._simPhase + 1) & 7;
     if (this.touch) this.touch.recentT = Math.max(0, (this.touch.recentT || 0) - dt);
 
     this._tickMessages(dt);
     this._tickCooldowns(dt);
     this._tickVisualEffects(dt);
+    this.world?.setFocusPoint?.(this.hero.x, this.hero.y);
     this.world?.update?.(dt);
     this._updateMouseWorld();
+    this._updateHeroTerrainSample(dt);
     this._applyTerrainEffects(dt);
-    this.world?.revealAround?.(this.hero.x, this.hero.y, this.dungeon.active ? 460 : 720);
+    this._worldRevealT -= dt;
+    if (this._worldRevealT <= 0) {
+      this._worldRevealT = this.dungeon.active ? 0.18 : 0.24;
+      this.world?.revealAround?.(this.hero.x, this.hero.y, this.dungeon.active ? 460 : 720);
+    }
     this._updateNearbyPOIs(dt);
+    this._updateActiveEnemySet(dt);
 
     this._handleMenus();
 
@@ -303,6 +337,7 @@ export default class Game {
     this.ui.update?.(dt, this);
     this._spawnWorldEnemies(dt);
     this._respawnCampEnemies(dt);
+    this._runDeferredInitialSpawn(dt);
     this._cleanupFarEntities(dt);
 
     this._safetyCheckT -= dt;
@@ -348,7 +383,10 @@ export default class Game {
 
     for (const e of this.enemies) {
       if (!this._isVisibleWorldPoint(e?.x, e?.y, 150)) continue;
-      if (e?.alive) e.draw(ctx);
+      if (!e?.alive) continue;
+      const d2 = dist2(e.x, e.y, this.hero.x, this.hero.y);
+      if (!this.dungeon.active && d2 > 340 * 340) this._drawEnemyProxy(ctx, e);
+      else e.draw(ctx);
     }
 
     this.hero.draw(ctx);
@@ -406,13 +444,65 @@ export default class Game {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
-    const grd = ctx.createRadialGradient(this.w * 0.5, this.h * 0.48, Math.min(this.w, this.h) * 0.18, this.w * 0.5, this.h * 0.5, Math.max(this.w, this.h) * 0.62);
-    grd.addColorStop(0, "rgba(255,255,255,0)");
-    grd.addColorStop(1, this.dev?.godMode ? "rgba(120,190,255,0.12)" : "rgba(0,0,0,0.22)");
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, 0, this.w, this.h);
+    this._drawCachedScreenVignette(ctx);
 
     ctx.restore();
+  }
+
+  _drawEnemyProxy(ctx, e) {
+    const r = Math.max(5, Math.min(12, (e.radius || e.r || 10) * 0.65));
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.fillStyle = "rgba(0,0,0,0.16)";
+    ctx.beginPath();
+    ctx.ellipse(0, r + 2, r * 0.95, Math.max(3, r * 0.28), 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = e.colorB || "#5b6470";
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = e.colorA || "#d95b5b";
+    ctx.beginPath();
+    ctx.arc(0, -1, r * 0.76, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (e.elite || e.boss) {
+      ctx.strokeStyle = e.boss ? "rgba(255,150,150,0.48)" : "rgba(255,226,130,0.42)";
+      ctx.lineWidth = e.boss ? 2.4 : 1.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  _drawCachedScreenVignette(ctx) {
+    const key = `${this.w}x${this.h}:${this.dev?.godMode ? 1 : 0}`;
+    let cache = this._screenFxCache;
+    if (!cache || cache.key !== key) {
+      const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+      if (!canvas) return;
+      canvas.width = Math.max(1, this.w | 0);
+      canvas.height = Math.max(1, this.h | 0);
+      const fx = canvas.getContext("2d");
+      if (!fx) return;
+      const grd = fx.createRadialGradient(
+        this.w * 0.5,
+        this.h * 0.48,
+        Math.min(this.w, this.h) * 0.18,
+        this.w * 0.5,
+        this.h * 0.5,
+        Math.max(this.w, this.h) * 0.62
+      );
+      grd.addColorStop(0, "rgba(255,255,255,0)");
+      grd.addColorStop(1, this.dev?.godMode ? "rgba(120,190,255,0.12)" : "rgba(0,0,0,0.22)");
+      fx.fillStyle = grd;
+      fx.fillRect(0, 0, canvas.width, canvas.height);
+      cache = this._screenFxCache = { key, canvas };
+    }
+    ctx.drawImage(cache.canvas, 0, 0, this.w, this.h);
   }
 
   _bindMouse() {
@@ -654,6 +744,10 @@ export default class Game {
       this.menu.open = this.menu.open === "dev" ? null : "dev";
     }
 
+    if (this.input.wasPressed("F2")) {
+      this._toggleProfiler();
+    }
+
     if (this.input.wasPressed("Escape")) {
       if (this.menu.open) {
         this.menu.open = null;
@@ -769,8 +863,9 @@ export default class Game {
 
   _handleDevToolsInput() {
     this._handleDevToolsMouse();
-    for (let i = 1; i <= DEV_TOOL_ACTION_COUNT; i++) {
-      if (this.input.wasPressed(String(i))) this._runDevToolAction(i);
+    const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+    for (let i = 0; i < DEV_TOOL_ACTION_COUNT; i++) {
+      if (this.input.wasPressed(keys[i])) this._runDevToolAction(i + 1);
     }
   }
 
@@ -842,6 +937,14 @@ export default class Game {
       this._devResetConfirmAt = 0;
       this._devResetGame();
     }
+    if (action === 10) {
+      this._toggleProfiler();
+    }
+  }
+
+  _toggleProfiler() {
+    this.dev.showProfiler = !this.dev.showProfiler;
+    this._msg(this.dev.showProfiler ? "Dev: profiler ON" : "Dev: profiler OFF", 1.0);
   }
 
   getDevToolLines() {
@@ -855,6 +958,7 @@ export default class Game {
       `7 god mode ${this.dev?.godMode ? "ON" : "OFF"}`,
       "8 equip mythic best gear",
       this._isDevResetConfirmLive() ? "9 reset to a new game (press again now)" : "9 reset to a new game (confirm)",
+      `0 profiler ${this.dev?.showProfiler ? "ON" : "OFF"} (F2 quick toggle)`,
       `Explored cells: ${this.world?.exportDiscovery?.()?.length || 0}`,
       `World span: ${((this.world?.mapHalfSize || 0) * 2).toLocaleString()} units`,
     ];
@@ -862,7 +966,7 @@ export default class Game {
 
   getDevPanelLayout() {
     const w = Math.min(Math.max(this.w - 120, 430), 560);
-    const h = 340;
+    const h = 362;
     const x = ((this.w - w) / 2) | 0;
     const y = ((this.h - h) / 2) | 0;
     return {
@@ -1049,7 +1153,7 @@ export default class Game {
     }
 
     const move = norm(mx, my);
-    const speed = this.hero.getMoveSpeed(this);
+    const speed = this._getHeroMoveSpeed();
 
     this.hero.vx = move.x * speed;
     this.hero.vy = move.y * speed;
@@ -1073,8 +1177,7 @@ export default class Game {
     if (this._terrainFxT > 0) return;
     this._terrainFxT = 0.42;
 
-    const info = this.world.getZoneInfo?.(this.hero.x, this.hero.y);
-    const zone = String(info?.zone || info?.name || "").toLowerCase();
+    const zone = String(this._heroTerrainSample?.zone || "").toLowerCase();
     if (!zone) return;
 
     if (zone === "meadow" || zone === "whisper grass" || zone === "old fields") {
@@ -1127,6 +1230,120 @@ export default class Game {
       if (insideRect(door.blocker, 0)) return false;
     }
     return true;
+  }
+
+  noteFrame(frameDt) {
+    const dt = Math.max(0, frameDt || 0);
+    if (!(dt > 0)) return;
+    this._frameMs = dt * 1000;
+    this._frameJank = Math.max(0, this._frameMs - 16.67);
+    this._fpsAccum += dt;
+    this._fpsFrames += 1;
+    if (this._fpsAccum >= 0.25) {
+      this._fps = this._fpsFrames / this._fpsAccum;
+      this._fpsAccum = 0;
+      this._fpsFrames = 0;
+    }
+  }
+
+  _getHeroMoveSpeed() {
+    const st = this.hero.getStats();
+    let speed = 150 + st.move * 160;
+    if ((this.hero.state?.dashT || 0) > 0) speed *= 1.45;
+    if (this.hero.state?.sailing) speed *= 1.18;
+    speed *= this._heroTerrainSample?.moveModifier || 1;
+    return speed;
+  }
+
+  _updateHeroTerrainSample(dt) {
+    this._heroTerrainSampleT -= dt;
+    const sample = this._heroTerrainSample || {};
+    const moved = Math.abs((this.hero.x || 0) - (sample.x || 0)) + Math.abs((this.hero.y || 0) - (sample.y || 0));
+    if (this._heroTerrainSampleT > 0 && moved < 28) return;
+    this._refreshHeroTerrainSample(false);
+  }
+
+  _refreshHeroTerrainSample(force = false) {
+    if (!this.world || !this.hero) return;
+    const zoneInfo = this.world.getZoneInfo?.(this.hero.x, this.hero.y);
+    const moveModifier = this.world.getMoveModifier?.(this.hero.x, this.hero.y) ?? 1;
+    this._heroTerrainSample = {
+      moveModifier,
+      zone: String(zoneInfo?.zone || zoneInfo?.name || ""),
+      x: this.hero.x,
+      y: this.hero.y,
+    };
+    this._heroTerrainSampleT = force ? 0.08 : 0.12;
+  }
+
+  getPerfSnapshot() {
+    let visibleEnemies = 0;
+    let visibleProjectiles = 0;
+    let visibleLoot = 0;
+    for (const e of this.enemies || []) {
+      if (e?.alive && this._isVisibleWorldPoint(e.x, e.y, 150)) visibleEnemies++;
+    }
+    for (const p of this.projectiles || []) {
+      if (p?.alive && this._isVisibleWorldPoint(p.x, p.y, 120)) visibleProjectiles++;
+    }
+    for (const l of this.loot || []) {
+      if (l?.alive && this._isVisibleWorldPoint(l.x, l.y, 80)) visibleLoot++;
+    }
+    return {
+      fps: this._fps || 0,
+      frameMs: this._frameMs || 0,
+      frameJank: this._frameJank || 0,
+      renderScale: this.renderScale || 1,
+      enemies: this.enemies?.length || 0,
+      visibleEnemies,
+      activeEnemies: this._activeEnemies?.length || 0,
+      projectiles: this.projectiles?.length || 0,
+      visibleProjectiles,
+      loot: this.loot?.length || 0,
+      visibleLoot,
+      floatingTexts: this.floatingTexts?.length || 0,
+      world: this.world?.getPerfStats?.(this.camera) || null,
+    };
+  }
+
+  getPerfSnapshotText() {
+    const perf = this.getPerfSnapshot();
+    const world = perf.world || {};
+    return [
+      `FPS ${Math.round(perf.fps || 0)}  Frame ${perf.frameMs.toFixed(1)}ms  Jank ${perf.frameJank.toFixed(1)}ms`,
+      `Enemies visible/active/total ${perf.visibleEnemies}/${perf.activeEnemies}/${perf.enemies}`,
+      `Projectiles visible/total ${perf.visibleProjectiles}/${perf.projectiles}`,
+      `Loot visible/total ${perf.visibleLoot}/${perf.loot}  FloatingTexts ${perf.floatingTexts || 0}`,
+      `Roads visible/total ${world.visibleRoads || 0}/${world.roads || 0}  RoadSegs ${world.roadSegments || 0}  RoadBuckets ${world.roadBuckets || 0}`,
+      `Rivers ${world.rivers || 0}  RiverSegs ${world.riverSegments || 0}  RiverBuckets ${world.riverBuckets || 0}`,
+      `Bridges visible/total ${world.visibleBridges || 0}/${world.bridges || 0}  Docks ${world.docks || 0}`,
+      `Chunks terrain/props/bridge ${world.terrainChunks || 0}/${world.propChunks || 0}/${world.bridgeChunks || 0}`,
+      `Props trees/rocks/clutter ${world.trees || 0}/${world.rocks || 0}/${world.clutter || 0}`,
+      `Hero X ${Math.round(this.hero?.x || 0)}  Y ${Math.round(this.hero?.y || 0)}`,
+    ].join("\n");
+  }
+
+  _runDeferredInitialSpawn(dt) {
+    if (!this._needsInitialSpawn) return;
+    this._startupSpawnT -= dt;
+    if (this._startupSpawnT > 0) return;
+    this._needsInitialSpawn = false;
+    this._spawnInitialEnemies();
+  }
+
+  _updateActiveEnemySet(dt) {
+    this._activeEnemyRefreshT -= dt;
+    if (this._activeEnemyRefreshT > 0 && this._activeEnemies.length) return;
+    this._activeEnemyRefreshT = this.dungeon.active ? 0.08 : 0.12;
+    const logicD2 = this.dungeon.active ? Infinity : (this.perf.enemyLogicRadius || 720) ** 2;
+    const updateD2 = this.dungeon.active ? Infinity : (this.perf.enemyUpdateRadius || 920) ** 2;
+    const active = [];
+    for (const e of this.enemies) {
+      if (!e?.alive) continue;
+      const d2 = dist2(e.x, e.y, this.hero.x, this.hero.y);
+      if (d2 <= updateD2 || d2 <= logicD2) active.push(e);
+    }
+    this._activeEnemies = active;
   }
 
   _handleSkills() {
@@ -2165,7 +2382,11 @@ export default class Game {
       const d2 = dist2(this.hero.x, this.hero.y, p.x, p.y);
       return d2 > 520 * 520 && d2 < 1800 * 1800;
     });
-    if (!camp) return;
+    if (!camp) {
+      const roaming = this._spawnRoamingEnemyNearHero();
+      if (roaming) this.enemies.push(roaming);
+      return;
+    }
 
     let tries = 0;
     while (tries++ < 5 && this.enemies.length < this.perf.maxEnemies) {
@@ -2242,6 +2463,39 @@ export default class Game {
     return null;
   }
 
+  _spawnRoamingEnemyNearHero() {
+    const minDist = this.perf.spawnMinDistance || 840;
+    const maxDist = this.perf.spawnMaxDistance || 1360;
+    const enemySpacing2 = 170 * 170;
+    for (let tries = 0; tries < 10; tries++) {
+      const ang = Math.random() * Math.PI * 2;
+      const rr = minDist + Math.random() * (maxDist - minDist);
+      const x = this.hero.x + Math.cos(ang) * rr;
+      const y = this.hero.y + Math.sin(ang) * rr;
+      if (!this.world.canWalk?.(x, y)) continue;
+      if (dist2(x, y, this.world.spawn?.x || 0, this.world.spawn?.y || 0) < this.perf.worldSpawnSafeRadius ** 2) continue;
+      let tooClose = false;
+      for (const e of this.enemies) {
+        if (!e?.alive) continue;
+        if (dist2(x, y, e.x, e.y) < enemySpacing2) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (tooClose) continue;
+      const zone = this.world.getZoneName?.(x, y) || this.world.getZoneInfo?.(x, y)?.name || "";
+      const areaLevel = this.world.getDangerLevel?.(x, y) || 1;
+      const kind = this._pickEnemyKind(zone);
+      const eliteChance = areaLevel >= 4 ? 0.08 : areaLevel >= 3 ? 0.05 : 0.03;
+      const elite = Math.random() < eliteChance;
+      const level = Math.max(1, (this.hero.level || 1) + areaLevel - 1);
+      return this._applyEnemyAffix(
+        new Enemy(x, y, level, kind, hash2(x | 0, y | 0, this.seed + 911 + tries), elite, false)
+      );
+    }
+    return null;
+  }
+
   _applyEnemyAffix(e) {
     if (!e?.elite && !e?.boss) return e;
 
@@ -2267,10 +2521,63 @@ export default class Game {
   _updateEnemies(dt) {
     this._touchDamageCd = Math.max(0, this._touchDamageCd - dt);
     const updateD2 = this.dungeon.active ? Infinity : (this.perf.enemyUpdateRadius || 1200) ** 2;
+    const logicD2 = this.dungeon.active ? Infinity : (this.perf.enemyLogicRadius || 720) ** 2;
+    const closeD2 = this.dungeon.active ? Infinity : 220 ** 2;
+    const crowdHeavy = this.enemies.length > 16;
 
-    for (const e of this.enemies) {
+    for (let idx = 0; idx < this.enemies.length; idx++) {
+      const e = this.enemies[idx];
       if (!e?.alive) continue;
-      if (dist2(e.x, e.y, this.hero.x, this.hero.y) > updateD2) continue;
+      const heroD2 = dist2(e.x, e.y, this.hero.x, this.hero.y);
+      if (heroD2 > updateD2) continue;
+      if (heroD2 > logicD2) {
+        e.attackCd = Math.max(0, (e.attackCd || 0) - dt);
+        e.rangedCd = Math.max(0, (e.rangedCd || 0) - dt);
+        e.lungeT = Math.max(0, (e.lungeT || 0) - dt);
+        e.recoverT = Math.max(0, (e.recoverT || 0) - dt);
+        e.specialCd = Math.max(0, (e.specialCd || 0) - dt);
+        e.hitFlashT = Math.max(0, (e.hitFlashT || 0) - dt);
+        e.staggerT = Math.max(0, (e.staggerT || 0) - dt);
+        e.slowT = Math.max(0, (e.slowT || 0) - dt);
+        e.alertT = Math.max(0, (e.alertT || 0) - dt);
+        e.contactCd = Math.max(0, (e.contactCd || 0) - dt);
+        e.patrolTimer = Math.max(-0.5, (e.patrolTimer || 0) - dt);
+        continue;
+      }
+      if (!this.dungeon.active && heroD2 > closeD2) {
+        const midSkip = ((idx + this._simPhase) & 1) !== 0;
+        const farSkip = ((idx + this._simPhase) & 3) !== 0;
+        const shouldSkip =
+          heroD2 > logicD2 * 0.58
+            ? farSkip
+            : crowdHeavy && midSkip;
+        if (shouldSkip) {
+          e.attackCd = Math.max(0, (e.attackCd || 0) - dt);
+          e.rangedCd = Math.max(0, (e.rangedCd || 0) - dt);
+          e.lungeT = Math.max(0, (e.lungeT || 0) - dt);
+          e.recoverT = Math.max(0, (e.recoverT || 0) - dt);
+          e.specialCd = Math.max(0, (e.specialCd || 0) - dt);
+          e.hitFlashT = Math.max(0, (e.hitFlashT || 0) - dt);
+          e.staggerT = Math.max(0, (e.staggerT || 0) - dt);
+          e.slowT = Math.max(0, (e.slowT || 0) - dt);
+          e.alertT = Math.max(0, (e.alertT || 0) - dt);
+          e.contactCd = Math.max(0, (e.contactCd || 0) - dt);
+          continue;
+        }
+      }
+      if (crowdHeavy && heroD2 > 180 * 180 && ((idx + this._simPhase) & 1) !== 0) {
+        e.attackCd = Math.max(0, (e.attackCd || 0) - dt);
+        e.rangedCd = Math.max(0, (e.rangedCd || 0) - dt);
+        e.lungeT = Math.max(0, (e.lungeT || 0) - dt);
+        e.recoverT = Math.max(0, (e.recoverT || 0) - dt);
+        e.specialCd = Math.max(0, (e.specialCd || 0) - dt);
+        e.hitFlashT = Math.max(0, (e.hitFlashT || 0) - dt);
+        e.staggerT = Math.max(0, (e.staggerT || 0) - dt);
+        e.slowT = Math.max(0, (e.slowT || 0) - dt);
+        e.alertT = Math.max(0, (e.alertT || 0) - dt);
+        e.contactCd = Math.max(0, (e.contactCd || 0) - dt);
+        continue;
+      }
       e.update?.(dt, this.hero, this.world, this);
       this._resolveEnemyHeroHitbox(e);
       e.contactCd = Math.max(0, (e.contactCd || 0) - dt);
@@ -2286,8 +2593,19 @@ export default class Game {
       }
     }
 
-    this._resolveEnemyCrowding();
-    this.enemies = this.enemies.filter((e) => e.alive);
+    this._enemyCrowdResolveT -= dt;
+    if (this._enemyCrowdResolveT <= 0) {
+      this._enemyCrowdResolveT = this.enemies.length > 14 ? 0.18 : 0.12;
+      this._resolveEnemyCrowding();
+    }
+
+    let write = 0;
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e?.alive) continue;
+      this.enemies[write++] = e;
+    }
+    this.enemies.length = write;
   }
 
   _resolveEnemyHeroHitbox(e) {
@@ -2311,7 +2629,7 @@ export default class Game {
   }
 
   _resolveEnemyCrowding() {
-    const alive = this.enemies.filter((e) => e?.alive);
+    const alive = this._activeEnemies?.length ? this._activeEnemies : this.enemies.filter((e) => e?.alive);
     const limit = Math.min(alive.length, 34);
     for (let i = 0; i < limit; i++) {
       const a = alive[i];
@@ -2387,9 +2705,18 @@ export default class Game {
 
   _updateProjectiles(dt) {
     const updateD2 = this.dungeon.active ? Infinity : (this.perf.projectileUpdateRadius || 1400) ** 2;
-    for (const p of this.projectiles) {
+    const logicD2 = this.dungeon.active ? Infinity : (this.perf.projectileLogicRadius || 900) ** 2;
+    const targetEnemies = this._activeEnemies?.length ? this._activeEnemies : this.enemies;
+    for (let idx = 0; idx < this.projectiles.length; idx++) {
+      const p = this.projectiles[idx];
       if (!p?.alive) continue;
-      if (dist2(p.x, p.y, this.hero.x, this.hero.y) > updateD2) {
+      const heroD2 = dist2(p.x, p.y, this.hero.x, this.hero.y);
+      if (heroD2 > updateD2) {
+        p.life -= dt;
+        if (p.life <= 0) p.alive = false;
+        continue;
+      }
+      if (!this.dungeon.active && heroD2 > logicD2 * 0.8 && ((idx + this._simPhase) & 1) !== 0) {
         p.life -= dt;
         if (p.life <= 0) p.alive = false;
         continue;
@@ -2407,12 +2734,15 @@ export default class Game {
         continue;
       }
 
+      if (heroD2 > logicD2) continue;
+
       if (p.friendly) {
         if (p.nova && !p._hitEnemies) p._hitEnemies = new Set();
 
-        for (const e of this.enemies) {
+        for (const e of targetEnemies) {
           if (!e?.alive) continue;
           if (p.nova && p._hitEnemies.has(e)) continue;
+          if (Math.abs(e.x - p.x) > 140 || Math.abs(e.y - p.y) > 140) continue;
 
           const rr = (p.hitRadius || p.radius || 4) + (e.radius || e.r || 12);
           if (dist2(p.x, p.y, e.x, e.y) <= rr * rr) {
@@ -2464,7 +2794,13 @@ export default class Game {
       }
     }
 
-    this.projectiles = this.projectiles.filter((p) => p.alive);
+    let write = 0;
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (!p?.alive) continue;
+      this.projectiles[write++] = p;
+    }
+    this.projectiles.length = write;
   }
 
   _dropEnemyLoot(e) {
@@ -2544,7 +2880,13 @@ export default class Game {
       }
     }
 
-    this.loot = this.loot.filter((l) => l.alive);
+    let write = 0;
+    for (let i = 0; i < this.loot.length; i++) {
+      const l = this.loot[i];
+      if (!l?.alive) continue;
+      this.loot[write++] = l;
+    }
+    this.loot.length = write;
   }
 
   _pickupLoot(l) {
@@ -2586,7 +2928,7 @@ export default class Game {
   _updateNearbyPOIs(dt) {
     this._nearbyPoiTimer -= dt;
     if (this._nearbyPoiTimer > 0) return;
-    this._nearbyPoiTimer = 0.12;
+    this._nearbyPoiTimer = 0.22;
 
     this._cachedNearbyCamp = null;
     this._cachedNearbyDock = null;
@@ -4042,7 +4384,7 @@ export default class Game {
 
     const zone = this.dungeon.active
       ? "Dungeon"
-      : (this.world.getZoneName?.(this.hero.x, this.hero.y) || "");
+      : (this._heroTerrainSample?.zone || this.world.getZoneName?.(this.hero.x, this.hero.y) || "");
 
     if (zone && zone !== this._lastZoneName) {
       this._lastZoneName = zone;
@@ -4438,6 +4780,7 @@ export default class Game {
 
   _drawFloatingTexts(ctx) {
     for (const f of this.floatingTexts) {
+      if (!this._isVisibleWorldPoint(f.x, f.y, 80)) continue;
       ctx.save();
       ctx.globalAlpha = f.a;
       ctx.fillStyle = f.color || "#fff";
@@ -4490,9 +4833,29 @@ export default class Game {
     const maxLootD2 = (this.perf.lootUpdateRadius + 420) ** 2;
     const maxProjD2 = (this.perf.projectileUpdateRadius + 260) ** 2;
 
-    this.enemies = this.enemies.filter((e) => e?.alive && dist2(e.x, e.y, this.hero.x, this.hero.y) < maxEnemyD2);
-    this.loot = this.loot.filter((l) => l?.alive && dist2(l.x, l.y, this.hero.x, this.hero.y) < maxLootD2);
-    this.projectiles = this.projectiles.filter((p) => p?.alive && dist2(p.x, p.y, this.hero.x, this.hero.y) < maxProjD2);
+    let ew = 0;
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e?.alive || dist2(e.x, e.y, this.hero.x, this.hero.y) >= maxEnemyD2) continue;
+      this.enemies[ew++] = e;
+    }
+    this.enemies.length = ew;
+
+    let lw = 0;
+    for (let i = 0; i < this.loot.length; i++) {
+      const l = this.loot[i];
+      if (!l?.alive || dist2(l.x, l.y, this.hero.x, this.hero.y) >= maxLootD2) continue;
+      this.loot[lw++] = l;
+    }
+    this.loot.length = lw;
+
+    let pw = 0;
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (!p?.alive || dist2(p.x, p.y, this.hero.x, this.hero.y) >= maxProjD2) continue;
+      this.projectiles[pw++] = p;
+    }
+    this.projectiles.length = pw;
     if (this.loot.length > this.perf.maxLoot) this.loot.splice(0, this.loot.length - this.perf.maxLoot);
     if (this.projectiles.length > this.perf.maxProjectiles) this.projectiles.splice(0, this.projectiles.length - this.perf.maxProjectiles);
     if (this.floatingTexts.length > this.perf.maxFloatingTexts) this.floatingTexts.splice(0, this.floatingTexts.length - this.perf.maxFloatingTexts);
@@ -4598,7 +4961,8 @@ export default class Game {
 
   _loadGame() {
     try {
-      const data = this.save.load?.() || this.save.read?.() || this.save.get?.();
+      const data = this._bootSaveData || this.save.load?.() || this.save.read?.() || this.save.get?.();
+      this._bootSaveData = null;
       if (!data) return;
 
       const currentWorldBuild = this.world?.buildId || "rpg-v109";

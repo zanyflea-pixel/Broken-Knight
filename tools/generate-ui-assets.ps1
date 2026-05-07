@@ -600,6 +600,84 @@ function Save-MountainEdgeSprite {
   $bmp.Dispose()
 }
 
+function Save-MountainPeakSprite {
+  $path = Join-Path $outDir "mountain-peak-sprite.png"
+  $bmp = New-Object System.Drawing.Bitmap 160, 128
+  $g = New-Graphics $bmp
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $shadowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 33, 38, 44))
+  $midBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(238, 87, 95, 106))
+  $lightBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(228, 140, 151, 163))
+  $snowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(214, 245, 249, 252))
+  $ridgePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(170, 244, 248, 252), 2)
+
+  $shadow = @(
+    [System.Drawing.PointF]::new(10, 114),
+    [System.Drawing.PointF]::new(38, 78),
+    [System.Drawing.PointF]::new(60, 92),
+    [System.Drawing.PointF]::new(83, 26),
+    [System.Drawing.PointF]::new(108, 74),
+    [System.Drawing.PointF]::new(126, 58),
+    [System.Drawing.PointF]::new(150, 114)
+  )
+  $g.FillPolygon($shadowBrush, $shadow)
+
+  $mid = @(
+    [System.Drawing.PointF]::new(16, 114),
+    [System.Drawing.PointF]::new(46, 82),
+    [System.Drawing.PointF]::new(66, 90),
+    [System.Drawing.PointF]::new(84, 36),
+    [System.Drawing.PointF]::new(100, 68),
+    [System.Drawing.PointF]::new(118, 60),
+    [System.Drawing.PointF]::new(142, 114)
+  )
+  $g.FillPolygon($midBrush, $mid)
+
+  $light = @(
+    [System.Drawing.PointF]::new(22, 114),
+    [System.Drawing.PointF]::new(52, 88),
+    [System.Drawing.PointF]::new(70, 92),
+    [System.Drawing.PointF]::new(84, 44),
+    [System.Drawing.PointF]::new(94, 66),
+    [System.Drawing.PointF]::new(110, 72),
+    [System.Drawing.PointF]::new(128, 114)
+  )
+  $g.FillPolygon($lightBrush, $light)
+
+  $snow = @(
+    [System.Drawing.PointF]::new(76, 52),
+    [System.Drawing.PointF]::new(84, 36),
+    [System.Drawing.PointF]::new(91, 54),
+    [System.Drawing.PointF]::new(86, 67),
+    [System.Drawing.PointF]::new(80, 62)
+  )
+  $g.FillPolygon($snowBrush, $snow)
+
+  $g.DrawLine($ridgePen, 84, 36, 70, 92)
+  $g.DrawLine($ridgePen, 84, 36, 102, 72)
+  $g.DrawLine($ridgePen, 84, 36, 58, 78)
+
+  $mistBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    [System.Drawing.Point]::new(0, 90),
+    [System.Drawing.Point]::new(0, 127),
+    [System.Drawing.Color]::FromArgb(0, 255, 255, 255),
+    [System.Drawing.Color]::FromArgb(54, 225, 233, 240)
+  )
+  $g.FillRectangle($mistBrush, 0, 86, 160, 42)
+
+  $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+  $mistBrush.Dispose()
+  $ridgePen.Dispose()
+  $snowBrush.Dispose()
+  $lightBrush.Dispose()
+  $midBrush.Dispose()
+  $shadowBrush.Dispose()
+  $g.Dispose()
+  $bmp.Dispose()
+}
+
 function Save-DockBoatSprite {
   $path = Join-Path $outDir "dock-boat-sprite.png"
   $bmp = New-Object System.Drawing.Bitmap 96, 48
@@ -1103,6 +1181,7 @@ Save-TreeAltSprite
 Save-MountainTexture
 Save-RockSprite
 Save-MountainEdgeSprite
+Save-MountainPeakSprite
 Save-DockBoatSprite
 Save-ShrineSprite
 Save-CacheSprite

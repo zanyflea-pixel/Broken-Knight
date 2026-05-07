@@ -33,7 +33,7 @@ function quadPoint(ax, ay, bx, by, cx, cy, t) {
 
 export default class World {
   constructor(seed = 12345, opts = {}) {
-    this.buildId = "rpg-v161";
+    this.buildId = "rpg-v162";
     this.seed = (seed | 0) || 12345;
 
     this.tileSize = opts.tileSize || 24;
@@ -72,6 +72,8 @@ export default class World {
     this._clutterBuckets = new Map();
     this._clutterBuildState = null;
     this._warmupTasks = [];
+    this._poiSpriteCache = new Map();
+    this._mountainTileSpriteCache = new Map();
 
     this._rng = new RNG(this.seed ^ 0x51f15eed);
     this._assets = this._loadWorldAssets();
@@ -79,22 +81,55 @@ export default class World {
     this._mapCanvas = null;
     this._mapInfo = null;
     this._mapDirty = true;
-    this._mapSize = 128;
-    this._mapPreviewSize = 48;
+    this._mapSize = 104;
+    this._mapPreviewSize = 96;
+    this._terrainTileSize = 56;
+    this._terrainChunkTiles = 10;
+    this._terrainChunkSize = this._terrainTileSize * this._terrainChunkTiles;
+    this._terrainChunkCache = new Map();
+    this._terrainChunkOrder = [];
+    this._terrainChunkLimit = 160;
+    this._propChunkCache = new Map();
+    this._propChunkOrder = [];
+    this._propChunkLimit = 160;
+    this._bridgeChunkCache = new Map();
+    this._bridgeChunkOrder = [];
+    this._bridgeChunkLimit = 160;
+    this._sceneChunkCache = new Map();
+    this._sceneChunkOrder = [];
+    this._sceneChunkLimit = 160;
     this._discoveryExportCache = null;
     this._revealed = null;
     this._mapBuildQueued = false;
     this._mapBuildState = null;
+    this._mapBuildTargetSize = 0;
     this._pendingDiscoveryCells = [];
     this._pendingRevealCircles = [];
     this._riverWaterLimit = 1.42;
+    this._riverBucketSize = 512;
+    this._riverSegmentBuckets = new Map();
+    this._riverSegmentCount = 0;
+    this._roadBucketSize = 512;
+    this._roadSegmentBuckets = new Map();
+    this._roadSegmentCount = 0;
+    this._groundCache = new Map();
+    this._moistureCache = new Map();
+    this._runtimeRawSampleCache = new Map();
+    this._runtimeCellCache = new Map();
+    this._groundCacheLimit = 24000;
+    this._moistureCacheLimit = 18000;
+    this._runtimeRawSampleCacheLimit = 12000;
+    this._runtimeCellCacheLimit = 12000;
 
     this._spawnSafeRadius = 620;
     this._spawnRoadRadius = 900;
     this._roadWalkRadius = 26;
     this._riverAvoidSpawnRadius = 1650;
+    this._focusX = 0;
+    this._focusY = 0;
 
     this._riverBands = this._makeRiverBands();
+    this._buildRiverCaches();
     this._mountainRanges = this._makeMountainRanges();
     this._mountainPasses = this._makeMountainPasses();
     this._mountainRenderData = [];
@@ -104,9 +139,27 @@ export default class World {
     this._buildPOIs();
     this._buildRoadNetwork();
     this._finalizeBridges();
+    this._buildRoadCaches();
     this._ensureSpawnSafety();
     this._bootRawSampleCache = null;
     this._queueWarmupTasks();
+  }
+
+  _clearPropChunkCache() {
+    this._propChunkCache.clear();
+    this._propChunkOrder.length = 0;
+    this._clearSceneChunkCache();
+  }
+
+  _clearBridgeChunkCache() {
+    this._bridgeChunkCache.clear();
+    this._bridgeChunkOrder.length = 0;
+    this._clearSceneChunkCache();
+  }
+
+  _clearSceneChunkCache() {
+    this._sceneChunkCache.clear();
+    this._sceneChunkOrder.length = 0;
   }
 
   setViewSize(w, h) {
@@ -116,6 +169,13 @@ export default class World {
 
   update() {
     this._runWarmupTasks();
+    this._prewarmFocusChunks();
+  }
+
+  setFocusPoint(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this._focusX = x;
+    this._focusY = y;
   }
 
   _loadWorldAssets() {
@@ -124,6 +184,7 @@ export default class World {
       treeSpriteAlt: this._loadWorldImage("tree-sprite-alt.png"),
       mountainTexture: this._loadWorldImage("mountain-texture.png"),
       mountainEdgeSprite: this._loadWorldImage("mountain-edge-sprite.png"),
+      mountainPeakSprite: this._loadWorldImage("mountain-peak-sprite.png"),
       rockSprite: this._loadWorldImage("rock-sprite.png"),
       dockBoatSprite: this._loadWorldImage("dock-boat-sprite.png"),
       shrineSprite: this._loadWorldImage("shrine-sprite.png"),
@@ -138,6 +199,44 @@ export default class World {
       ashShrubSprite: this._loadWorldImage("ash-shrub-sprite.png"),
       ashDeadBrushSprite: this._loadWorldImage("ash-dead-brush-sprite.png"),
     };
+  }
+
+  _getPoiSprite(key, width, height, drawFn) {
+    let sprite = this._poiSpriteCache.get(key);
+    if (sprite) return sprite;
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    drawFn(ctx, width, height);
+    sprite = canvas;
+    this._poiSpriteCache.set(key, sprite);
+    if (this._poiSpriteCache.size > 64) {
+      const staleKey = this._poiSpriteCache.keys().next().value;
+      this._poiSpriteCache.delete(staleKey);
+    }
+    return sprite;
+  }
+
+  _getMountainTileSprite(key, width, height, drawFn) {
+    let sprite = this._mountainTileSpriteCache.get(key);
+    if (sprite) return sprite;
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    drawFn(ctx, width, height);
+    sprite = canvas;
+    this._mountainTileSpriteCache.set(key, sprite);
+    if (this._mountainTileSpriteCache.size > 256) {
+      const staleKey = this._mountainTileSpriteCache.keys().next().value;
+      this._mountainTileSpriteCache.delete(staleKey);
+    }
+    return sprite;
   }
 
   _loadWorldImage(name) {
@@ -157,24 +256,27 @@ export default class World {
   }
 
   getMapInfo() {
-    if (!this._mapInfo) this._buildMapPreview();
-    if (this._mapDirty || !this._mapInfo) this._queueMapBuild();
+    this._ensurePreviewPlaceholder();
+    this._queuePreviewBuild();
+    if (this._mapDirty || !this._mapInfo || this._isPreviewMapActive()) this._queueMapBuild(this._mapSize);
     return this._mapInfo || { size: this._mapSize || 320, colors: [], tiles: [], zones: [], revealed: [] };
   }
 
   peekMapInfo() {
-    if (!this._mapInfo) this._buildMapPreview();
+    this._ensurePreviewPlaceholder();
+    this._queuePreviewBuild();
     return this._mapInfo || { size: this._mapSize || 320, colors: [], tiles: [], zones: [], revealed: [] };
   }
 
   getMinimapCanvas() {
-    if (!this._mapCanvas) this._buildMapPreview();
-    if (this._mapDirty || !this._mapCanvas) this._queueMapBuild();
+    this._ensurePreviewPlaceholder();
+    this._queuePreviewBuild();
     return this._mapCanvas;
   }
 
   peekMinimapCanvas() {
-    if (!this._mapCanvas) this._buildMapPreview();
+    this._ensurePreviewPlaceholder();
+    this._queuePreviewBuild();
     return this._mapCanvas;
   }
 
@@ -193,6 +295,34 @@ export default class World {
   _queueRevealCircle(x, y, radius) {
     this._pendingRevealCircles.push({ x, y, radius });
     if (this._pendingRevealCircles.length > 96) this._pendingRevealCircles.shift();
+  }
+
+  _ensurePreviewPlaceholder() {
+    if (!this._mapCanvas && typeof document !== "undefined") {
+      const canvas = document.createElement("canvas");
+      const size = this._mapPreviewSize || 48;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        const bg = ctx.createLinearGradient(0, 0, 0, size);
+        bg.addColorStop(0, "rgba(10,15,21,1)");
+        bg.addColorStop(1, "rgba(3,6,10,1)");
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, size, size);
+      }
+      this._mapCanvas = canvas;
+    }
+    if (!this._mapInfo) {
+      const size = this._mapPreviewSize || 48;
+      this._mapInfo = { size, colors: [], tiles: [], zones: [], revealed: [] };
+    }
+  }
+
+  _queuePreviewBuild() {
+    if (this._mapInfo?.colors?.length) return;
+    if (this._mapBuildQueued || this._mapBuildState) return;
+    this._queueMapBuild(this._mapPreviewSize || 48);
   }
 
   _queueDiscoveryCells(cells) {
@@ -272,10 +402,11 @@ export default class World {
 
   revealAround(x, y, radius = 620) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-    if (!this._mapInfo) this._buildMapPreview();
+    this._ensurePreviewPlaceholder();
+    this._queuePreviewBuild();
     if (this._mapDirty || this._isPreviewMapActive()) {
       this._queueRevealCircle(x, y, radius);
-      this._queueMapBuild();
+      if (!this._isPreviewMapActive()) this._queueMapBuild(this._mapSize);
       return false;
     }
     const changed = this._applyRevealCircle(x, y, radius);
@@ -285,7 +416,7 @@ export default class World {
 
   revealAll() {
     if (this._mapDirty || !this._mapInfo) {
-      this._queueMapBuild();
+      this._queueMapBuild(this._mapSize);
       return;
     }
     for (const row of this._mapInfo.revealed || []) row.fill(true);
@@ -294,7 +425,7 @@ export default class World {
 
   exportDiscovery() {
     if (this._mapDirty || !this._mapInfo) {
-      this._queueMapBuild();
+      this._queueMapBuild(this._mapSize);
       return [];
     }
     this._flushPendingDiscovery();
@@ -316,12 +447,12 @@ export default class World {
     if (!Array.isArray(cells)) return;
     if (this._mapDirty || !this._mapInfo) {
       this._queueDiscoveryCells(cells);
-      this._queueMapBuild();
+      this._queueMapBuild(this._mapSize);
       return;
     }
     if (this._isPreviewMapActive()) {
       this._queueDiscoveryCells(cells);
-      this._queueMapBuild();
+      this._queueMapBuild(this._mapSize);
       return;
     }
     const changed = this._applyDiscoveryCells(cells);
@@ -411,17 +542,212 @@ export default class World {
   }
 
   draw(ctx, camera, hero) {
-    const size = 56;
+    const left = camera.x - this.viewW * 0.5 - 20;
+    const top = camera.y - this.viewH * 0.5 - 20;
+    const right = camera.x + this.viewW * 0.5 + 20;
+    const bottom = camera.y + this.viewH * 0.5 + 20;
 
-    const left = camera.x - this.viewW * 0.5 - 28;
-    const top = camera.y - this.viewH * 0.5 - 28;
-    const right = camera.x + this.viewW * 0.5 + 28;
-    const bottom = camera.y + this.viewH * 0.5 + 28;
+    this._drawSceneChunks(ctx, left, top, right, bottom);
+    this._drawPOIs(ctx, camera);
+  }
 
-    const startX = Math.floor(left / size) * size;
-    const startY = Math.floor(top / size) * size;
+  _drawSceneChunks(ctx, left, top, right, bottom) {
+    const chunkSize = this._terrainChunkSize || 448;
+    const startCX = Math.floor(left / chunkSize);
+    const endCX = Math.floor((right - 1) / chunkSize);
+    const startCY = Math.floor(top / chunkSize);
+    const endCY = Math.floor((bottom - 1) / chunkSize);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    for (let cy = startCY; cy <= endCY; cy++) {
+      for (let cx = startCX; cx <= endCX; cx++) {
+        const chunk = this._getSceneChunk(cx, cy);
+        if (!chunk) continue;
+        ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+      }
+    }
+    ctx.restore();
+  }
+
+  _drawTerrainChunks(ctx, left, top, right, bottom) {
+    const chunkSize = this._terrainChunkSize || 448;
+    const startCX = Math.floor(left / chunkSize);
+    const endCX = Math.floor((right - 1) / chunkSize);
+    const startCY = Math.floor(top / chunkSize);
+    const endCY = Math.floor((bottom - 1) / chunkSize);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    for (let cy = startCY; cy <= endCY; cy++) {
+      for (let cx = startCX; cx <= endCX; cx++) {
+        const chunk = this._getTerrainChunk(cx, cy);
+        if (!chunk) continue;
+        ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+      }
+    }
+    ctx.restore();
+  }
+
+  _drawPropChunks(ctx, left, top, right, bottom) {
+    const chunkSize = this._terrainChunkSize || 448;
+    const startCX = Math.floor(left / chunkSize);
+    const endCX = Math.floor((right - 1) / chunkSize);
+    const startCY = Math.floor(top / chunkSize);
+    const endCY = Math.floor((bottom - 1) / chunkSize);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    for (let cy = startCY; cy <= endCY; cy++) {
+      for (let cx = startCX; cx <= endCX; cx++) {
+        const chunk = this._getPropChunk(cx, cy);
+        if (!chunk) continue;
+        ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+      }
+    }
+    ctx.restore();
+  }
+
+  _drawBridgeChunks(ctx, left, top, right, bottom) {
+    const chunkSize = this._terrainChunkSize || 448;
+    const startCX = Math.floor(left / chunkSize);
+    const endCX = Math.floor((right - 1) / chunkSize);
+    const startCY = Math.floor(top / chunkSize);
+    const endCY = Math.floor((bottom - 1) / chunkSize);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    for (let cy = startCY; cy <= endCY; cy++) {
+      for (let cx = startCX; cx <= endCX; cx++) {
+        const chunk = this._getBridgeChunk(cx, cy);
+        if (!chunk) continue;
+        ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+      }
+    }
+    ctx.restore();
+  }
+
+  _getTerrainChunk(chunkX, chunkY) {
+    const key = `${chunkX},${chunkY}`;
+    let chunk = this._terrainChunkCache.get(key);
+    if (chunk) return chunk;
+
+    chunk = this._renderTerrainChunk(chunkX, chunkY);
+    if (!chunk) return null;
+    this._terrainChunkCache.set(key, chunk);
+    this._terrainChunkOrder.push(key);
+    if (this._terrainChunkOrder.length > this._terrainChunkLimit) {
+      const oldest = this._terrainChunkOrder.shift();
+      if (oldest) this._terrainChunkCache.delete(oldest);
+    }
+    return chunk;
+  }
+
+  _getPropChunk(chunkX, chunkY) {
+    const key = `${chunkX},${chunkY}`;
+    let chunk = this._propChunkCache.get(key);
+    if (chunk) return chunk;
+
+    chunk = this._renderPropChunk(chunkX, chunkY);
+    if (!chunk) return null;
+    this._propChunkCache.set(key, chunk);
+    this._propChunkOrder.push(key);
+    if (this._propChunkOrder.length > this._propChunkLimit) {
+      const oldest = this._propChunkOrder.shift();
+      if (oldest) this._propChunkCache.delete(oldest);
+    }
+    return chunk;
+  }
+
+  _getBridgeChunk(chunkX, chunkY) {
+    const key = `${chunkX},${chunkY}`;
+    let chunk = this._bridgeChunkCache.get(key);
+    if (chunk) return chunk;
+
+    chunk = this._renderBridgeChunk(chunkX, chunkY);
+    if (!chunk) return null;
+    this._bridgeChunkCache.set(key, chunk);
+    this._bridgeChunkOrder.push(key);
+    if (this._bridgeChunkOrder.length > this._bridgeChunkLimit) {
+      const oldest = this._bridgeChunkOrder.shift();
+      if (oldest) this._bridgeChunkCache.delete(oldest);
+    }
+    return chunk;
+  }
+
+  _getSceneChunk(chunkX, chunkY) {
+    const key = `${chunkX},${chunkY}`;
+    let chunk = this._sceneChunkCache.get(key);
+    if (chunk) return chunk;
+
+    chunk = this._renderSceneChunk(chunkX, chunkY);
+    if (!chunk) return null;
+    this._sceneChunkCache.set(key, chunk);
+    this._sceneChunkOrder.push(key);
+    if (this._sceneChunkOrder.length > this._sceneChunkLimit) {
+      const oldest = this._sceneChunkOrder.shift();
+      if (oldest) this._sceneChunkCache.delete(oldest);
+    }
+    return chunk;
+  }
+
+  _prewarmFocusChunks() {
+    const chunkSize = this._terrainChunkSize || 560;
+    const cx = Math.floor((this._focusX || 0) / chunkSize);
+    const cy = Math.floor((this._focusY || 0) / chunkSize);
+    const targets = [];
+    for (let r = 0; r <= 2; r++) {
+      for (let oy = -r; oy <= r; oy++) {
+        for (let ox = -r; ox <= r; ox++) {
+          if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+          targets.push([cx + ox, cy + oy]);
+        }
+      }
+    }
+
+    let sceneBudget = 4;
+    for (const [tx, ty] of targets) {
+      if (sceneBudget > 0 && !this._sceneChunkCache.has(`${tx},${ty}`)) {
+        this._getSceneChunk(tx, ty);
+        sceneBudget--;
+      }
+      if (sceneBudget <= 0) break;
+    }
+  }
+
+  _renderSceneChunk(chunkX, chunkY) {
+    if (typeof document === "undefined") return null;
+    const chunkSize = this._terrainChunkSize || 448;
+    const canvas = document.createElement("canvas");
+    canvas.width = chunkSize;
+    canvas.height = chunkSize;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    const terrain = this._getTerrainChunk(chunkX, chunkY);
+    const props = this._getPropChunk(chunkX, chunkY);
+    const bridges = this._getBridgeChunk(chunkX, chunkY);
+    if (terrain) ctx.drawImage(terrain, 0, 0);
+    if (props) ctx.drawImage(props, 0, 0);
+    if (bridges) ctx.drawImage(bridges, 0, 0);
+    return canvas;
+  }
+
+  _renderTerrainChunk(chunkX, chunkY) {
+    if (typeof document === "undefined") return null;
+
+    const canvas = document.createElement("canvas");
+    const chunkSize = this._terrainChunkSize || 448;
+    const tileSize = this._terrainTileSize || 56;
+    const tilesPerChunk = this._terrainChunkTiles || 8;
+    canvas.width = chunkSize;
+    canvas.height = chunkSize;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    const worldX = chunkX * chunkSize;
+    const worldY = chunkY * chunkSize;
     const cellCache = new Map();
-
     const getCell = (x, y) => {
       const key = `${x}|${y}`;
       let cell = cellCache.get(key);
@@ -432,38 +758,250 @@ export default class World {
       return cell;
     };
 
-    for (let x = startX; x < right; x += size) {
-      for (let y = startY; y < bottom; y += size) {
+    for (let tx = 0; tx < tilesPerChunk; tx++) {
+      for (let ty = 0; ty < tilesPerChunk; ty++) {
+        const x = worldX + tx * tileSize;
+        const y = worldY + ty * tileSize;
         const s = getCell(x, y);
 
-        const tint = (hash2((x / size) | 0, (y / size) | 0, this.seed + 808) / 4294967296 - 0.5) * 0.12;
+        const tint = (hash2((x / tileSize) | 0, (y / tileSize) | 0, this.seed + 808) / 4294967296 - 0.5) * 0.12;
         const tileColor = s.bridge || (s.isRiver && !s.isLake) ? s.landColor || s.color : s.color;
         ctx.fillStyle = this._shadeColor(tileColor, tint);
-        ctx.fillRect(x, y, size + 1, size + 1);
+        ctx.fillRect(tx * tileSize, ty * tileSize, tileSize + 1, tileSize + 1);
 
         const relief = clamp((s.ground - 0.48) * 1.7, -0.28, 0.28);
-        const cellX = (x / size) | 0;
-        const cellY = (y / size) | 0;
+        const cellX = (x / tileSize) | 0;
+        const cellY = (y / tileSize) | 0;
         const parity = (cellX + cellY) % 11;
         if (parity % 2 === 0) {
           if (relief > 0.10) {
             ctx.fillStyle = `rgba(255,255,255,${Math.min(0.035, relief * 0.09)})`;
-            ctx.fillRect(x, y, size + 1, 3);
+            ctx.fillRect(tx * tileSize, ty * tileSize, tileSize + 1, 3);
           } else if (relief < -0.11 && !s.isWater) {
             ctx.fillStyle = `rgba(20,38,30,${Math.min(0.045, Math.abs(relief) * 0.09)})`;
-            ctx.fillRect(x + size - 4, y + size - 4, size + 1, 4);
+            ctx.fillRect(tx * tileSize + tileSize - 4, ty * tileSize + tileSize - 4, tileSize + 1, 4);
           }
         }
 
-        this._drawTileScenery(ctx, x, y, size, s, parity, relief, cellX, cellY, getCell);
+        ctx.save();
+        ctx.translate(-(x - tx * tileSize), -(y - ty * tileSize));
+        this._drawTileScenery(ctx, x, y, tileSize, s, parity, relief, cellX, cellY, getCell);
+        ctx.restore();
       }
     }
 
-    this._drawWorldAtmosphere(ctx, left, top, right, bottom);
-    this._drawRiverOverlays(ctx, left, top, right, bottom);
-    this._drawRoads(ctx, left, top, right, bottom);
-    this._drawBridges(ctx, left, top, right, bottom);
-    this._drawPOIs(ctx, camera);
+    this._drawChunkAtmosphere(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+    this._drawChunkRiverBase(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+    this._drawChunkRoadBase(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+
+    return canvas;
+  }
+
+  _drawChunkAtmosphere(ctx, left, top, right, bottom) {
+    const step = 420;
+    const startX = Math.floor(left / step) * step;
+    const startY = Math.floor(top / step) * step;
+
+    ctx.save();
+    for (let x = startX; x < right; x += step) {
+      for (let y = startY; y < bottom; y += step) {
+        const ground = this._groundAt(x + step * 0.5, y + step * 0.5);
+        const shade = clamp((ground - 0.66) * 0.20, 0, 0.045);
+        const light = clamp((0.38 - ground) * 0.10, 0, 0.025);
+
+        if (shade > 0.012) {
+          ctx.fillStyle = `rgba(18,26,22,${shade})`;
+          ctx.beginPath();
+          ctx.ellipse(x - left + step * 0.58, y - top + step * 0.66, step * 0.50, step * 0.24, -0.35, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (light > 0.01) {
+          ctx.fillStyle = `rgba(215,226,185,${light})`;
+          ctx.beginPath();
+          ctx.ellipse(x - left + step * 0.42, y - top + step * 0.34, step * 0.42, step * 0.22, -0.45, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  _renderPropChunk(chunkX, chunkY) {
+    if (typeof document === "undefined") return null;
+
+    const canvas = document.createElement("canvas");
+    const chunkSize = this._terrainChunkSize || 448;
+    canvas.width = chunkSize;
+    canvas.height = chunkSize;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    const worldX = chunkX * chunkSize;
+    const worldY = chunkY * chunkSize;
+    ctx.save();
+    ctx.translate(-worldX, -worldY);
+    this._drawRocks(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+    this._drawClutter(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+    this._drawTrees(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+    ctx.restore();
+    return canvas;
+  }
+
+  _renderBridgeChunk(chunkX, chunkY) {
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    const chunkSize = this._terrainChunkSize || 448;
+    canvas.width = chunkSize;
+    canvas.height = chunkSize;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    const worldX = chunkX * chunkSize;
+    const worldY = chunkY * chunkSize;
+    ctx.save();
+    ctx.translate(-worldX, -worldY);
+    this._drawBridges(ctx, worldX, worldY, worldX + chunkSize, worldY + chunkSize);
+    ctx.restore();
+    return canvas;
+  }
+
+  _drawChunkRoadBase(ctx, left, top, right, bottom) {
+    if (!this.showRoads || !this.roads?.length) return;
+    const visibleRoads = this._getVisibleRoads(left, top, right, bottom, 50);
+    if (!visibleRoads.length) return;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    this._strokeRoadCollection(ctx, visibleRoads, "#5c3f22", 32, left, top);
+    this._strokeRoadCollection(ctx, visibleRoads, "#c4a066", 23, left, top);
+    ctx.restore();
+  }
+
+  _drawChunkRiverBase(ctx, left, top, right, bottom) {
+    if (!this._riverBands?.length) return;
+    const oceanCutoff = 0.245;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const band of this._riverBands) {
+      const pts = this._riverPath(band);
+      if (pts.length < 2 || !this._pathNearViewport(pts, left, top, right, bottom, 220)) continue;
+
+      const width = this._riverVisualWidth(band);
+      const layers = [
+        ["rgba(58,96,76,0.08)", width + 10],
+        ["rgba(35,127,178,0.90)", width],
+        ["rgba(91,190,216,0.18)", Math.max(24, width * 0.62)],
+      ];
+      for (const [color, lineWidth] of layers) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        let started = false;
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1];
+          const b = pts[i];
+          const next = pts[i + 1];
+          if (this._isRiverSegmentInOcean(a, b, next, oceanCutoff)) {
+            started = false;
+            continue;
+          }
+          if (!started) {
+            ctx.beginPath();
+            ctx.moveTo(a.x - left, a.y - top);
+            started = true;
+          }
+          ctx.lineTo(b.x - left, b.y - top);
+          const nextMidOcean = next ? this._isRiverSegmentInOcean(b, next, pts[i + 2], oceanCutoff) : true;
+          if (!next || nextMidOcean) {
+            ctx.stroke();
+            started = false;
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  _drawWorldProps(ctx, left, top, right, bottom) {
+    this._drawRocks(ctx, left, top, right, bottom);
+    this._drawClutter(ctx, left, top, right, bottom);
+    this._drawTrees(ctx, left, top, right, bottom);
+  }
+
+  _getVisibleRoads(left, top, right, bottom, pad = 46) {
+    const visibleRoads = [];
+    for (const road of this.roads || []) {
+      if (road.visible === false) continue;
+      if ((road.maxX ?? Infinity) + pad < left || (road.minX ?? -Infinity) - pad > right || (road.maxY ?? Infinity) + pad < top || (road.minY ?? -Infinity) - pad > bottom) continue;
+      visibleRoads.push(road);
+    }
+    return visibleRoads;
+  }
+
+  getPerfStats(camera = null) {
+    const stats = {
+      roads: this.roads?.length || 0,
+      roadSegments: this._roadSegmentCount || 0,
+      roadBuckets: this._roadSegmentBuckets?.size || 0,
+      rivers: this._riverBands?.length || 0,
+      riverSegments: this._riverSegmentCount || 0,
+      riverBuckets: this._riverSegmentBuckets?.size || 0,
+      bridges: this.bridges?.length || 0,
+      docks: this.docks?.length || 0,
+      trees: this._trees?.length || 0,
+      rocks: this._rocks?.length || 0,
+      clutter: this._clutter?.length || 0,
+      terrainChunks: this._terrainChunkCache?.size || 0,
+      propChunks: this._propChunkCache?.size || 0,
+      bridgeChunks: this._bridgeChunkCache?.size || 0,
+      visibleRoads: 0,
+      visibleBridges: 0,
+    };
+
+    if (!camera) return stats;
+    const left = camera.x - this.viewW * 0.5;
+    const top = camera.y - this.viewH * 0.5;
+    const right = left + this.viewW;
+    const bottom = top + this.viewH;
+    stats.visibleRoads = this._getVisibleRoads(left, top, right, bottom, 50).length;
+    stats.visibleBridges = this._countVisibleBridges(left, top, right, bottom, 96);
+    return stats;
+  }
+
+  _countVisibleBridges(left, top, right, bottom, pad = 64) {
+    let count = 0;
+    for (const bridge of this.bridges || []) {
+      const path = bridge?.path || [];
+      if (path.length < 2) continue;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of path) {
+        if (!p) continue;
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      if (maxX + pad < left || minX - pad > right || maxY + pad < top || minY - pad > bottom) continue;
+      count++;
+    }
+    return count;
+  }
+
+  _strokeRoadCollection(ctx, roads, strokeStyle, lineWidth, offsetX = 0, offsetY = 0) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    for (const road of roads) {
+      const pts = road.points;
+      if (!pts || pts.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x - offsetX, pts[0].y - offsetY);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - offsetX, pts[i].y - offsetY);
+      ctx.stroke();
+    }
   }
 
   _drawTileScenery(ctx, x, y, size, s, parity, relief, cellX, cellY, getCell = null) {
@@ -658,7 +1196,7 @@ export default class World {
       ctx.globalAlpha = 0.94;
       ctx.drawImage(treeSprite, -w * 0.5, -h, w, h);
       ctx.restore();
-      if (((seed >>> 22) & 3) >= 2 && this._hasWorldImage(ashDeadBrushSprite)) {
+      if (((seed >>> 22) & 3) === 3 && this._hasWorldImage(ashDeadBrushSprite)) {
         const sw = 14 + (((seed >>> 18) & 3) * 2);
         const sh = 10 + (((seed >>> 20) & 3) * 2);
         ctx.save();
@@ -679,7 +1217,7 @@ export default class World {
       ctx.globalAlpha = 0.92;
       ctx.drawImage(ashShrubSprite, -w * 0.5, -h, w, h);
       ctx.restore();
-      if (((seed >>> 19) & 1) === 0 && this._hasWorldImage(ashDeadBrushSprite)) {
+      if (((seed >>> 19) & 3) === 0 && this._hasWorldImage(ashDeadBrushSprite)) {
         const bw = 12 + (((seed >>> 21) & 3) * 2);
         const bh = 8 + (((seed >>> 24) & 1) * 2);
         ctx.save();
@@ -693,7 +1231,7 @@ export default class World {
     if (roll >= 9 && roll <= 12 && this._hasWorldImage(ashDeadBrushSprite)) {
       const baseX = x + 11 + ((seed >>> 3) & 14);
       const baseY = y + 19 + ((seed >>> 7) & 6);
-      const count = ((seed >>> 16) & 1) ? 2 : 3;
+      const count = ((seed >>> 16) & 1) ? 1 : 2;
       for (let i = 0; i < count; i++) {
         const localSeed = (seed + i * 977) >>> 0;
         const bw = 11 + ((localSeed >>> 18) & 3) * 2;
@@ -750,6 +1288,7 @@ export default class World {
     const right = x + size - 1;
     const shoulderL = x + 10 + ((seed >>> 7) & 6);
     const shoulderR = x + size - 12 - ((seed >>> 14) & 5);
+    const peakSprite = this._assets?.mountainPeakSprite;
 
     ctx.fillStyle = "rgba(18,22,26,0.18)";
     ctx.beginPath();
@@ -856,6 +1395,23 @@ export default class World {
       ctx.fill();
     }
 
+    if (this._hasWorldImage(peakSprite) && (steep || parity === 7 || parity === 9)) {
+      const spriteW = Math.round(size * 0.86);
+      const spriteH = Math.round(size * 0.76);
+      const spriteX = Math.round(x + size * 0.5 - spriteW * 0.5);
+      const spriteY = Math.round(y + size * 0.08);
+      ctx.save();
+      ctx.globalAlpha = steep ? 0.92 : 0.78;
+      if (((seed >>> 21) & 1) === 1) {
+        ctx.translate(spriteX + spriteW, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(peakSprite, 0, spriteY, spriteW, spriteH);
+      } else {
+        ctx.drawImage(peakSprite, spriteX, spriteY, spriteW, spriteH);
+      }
+      ctx.restore();
+    }
+
     const pass = this._mountainPassInfluenceAt(x + size * 0.5, y + size * 0.5);
     if (pass > 0.6) this._drawMountainPathHighlight(ctx, x, y, size, seed);
   }
@@ -878,13 +1434,64 @@ export default class World {
     const south = isMountainAt(x, y + size);
     const west = isMountainAt(x - size, y);
     const east = isMountainAt(x + size, y);
+    const pass = this._mountainPassInfluenceAt(x + size * 0.5, y + size * 0.5);
+    const hasPass = pass > 0.6;
+    const variantA = (seed >>> 3) & 3;
+    const variantB = (seed >>> 8) & 3;
+    const variantC = (seed >>> 11) & 3;
+    const flipPeak = (seed >>> 19) & 1;
+    const spriteKey = `mtn:${size}:${north ? 1 : 0}${south ? 1 : 0}${west ? 1 : 0}${east ? 1 : 0}:${variantA}${variantB}${variantC}:${flipPeak}:${hasPass ? 1 : 0}`;
+    const sprite = this._getMountainTileSprite(spriteKey, size, size, (spriteCtx) => {
+      this._paintMountainWallTile(spriteCtx, 0, 0, size, {
+        north,
+        south,
+        west,
+        east,
+        hasPass,
+        variantA,
+        variantB,
+        variantC,
+        flipPeak,
+      });
+    });
+    if (sprite) {
+      ctx.drawImage(sprite, x, y);
+      return;
+    }
 
-    const crestY = north ? y + 16 : y + 10 + ((seed >>> 3) & 3);
-    const peakA = crestY - (north ? 7 : 16) - ((seed >>> 8) & 3);
-    const peakB = crestY - (north ? 5 : 12) - ((seed >>> 11) & 3);
+    this._paintMountainWallTile(ctx, x, y, size, {
+      north,
+      south,
+      west,
+      east,
+      hasPass,
+      variantA,
+      variantB,
+      variantC,
+      flipPeak,
+    });
+  }
+
+  _paintMountainWallTile(ctx, x, y, size, info = {}) {
+    const {
+      north = false,
+      south = false,
+      west = false,
+      east = false,
+      hasPass = false,
+      variantA = 0,
+      variantB = 0,
+      variantC = 0,
+      flipPeak = 0,
+    } = info;
+
+    const crestY = north ? y + 16 : y + 10 + variantA;
+    const peakA = crestY - (north ? 7 : 16) - variantB;
+    const peakB = crestY - (north ? 5 : 12) - variantC;
     const peakAX = x + size * 0.28;
     const peakBX = x + size * 0.72;
     const edgeSprite = this._assets?.mountainEdgeSprite;
+    const peakSprite = this._assets?.mountainPeakSprite;
 
     ctx.fillStyle = "#5b6169";
     ctx.beginPath();
@@ -974,6 +1581,23 @@ export default class World {
       }
     }
 
+    if (this._hasWorldImage(peakSprite)) {
+      const spriteW = Math.round(size * 0.92);
+      const spriteH = Math.round(size * 0.82);
+      const spriteX = Math.round(x + size * 0.5 - spriteW * 0.5);
+      const spriteY = Math.round(y + 2);
+      ctx.save();
+      ctx.globalAlpha = north ? 0.52 : 0.88;
+      if (flipPeak === 1) {
+        ctx.translate(spriteX + spriteW, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(peakSprite, 0, spriteY, spriteW, spriteH);
+      } else {
+        ctx.drawImage(peakSprite, spriteX, spriteY, spriteW, spriteH);
+      }
+      ctx.restore();
+    }
+
     if (!west) {
       ctx.fillStyle = "rgba(34,39,45,0.38)";
       ctx.beginPath();
@@ -1045,8 +1669,7 @@ export default class World {
       }
     }
 
-    const pass = this._mountainPassInfluenceAt(x + size * 0.5, y + size * 0.5);
-    if (pass > 0.6) this._drawMountainPathHighlight(ctx, x, y, size, seed);
+    if (hasPass) this._drawMountainPathHighlight(ctx, x, y, size, 0);
   }
 
   _drawMountainRanges(ctx, left, top, right, bottom) {
@@ -1169,7 +1792,7 @@ export default class World {
   }
 
   _drawWorldAtmosphere(ctx, left, top, right, bottom) {
-    const step = 320;
+    const step = 420;
     const startX = Math.floor(left / step) * step;
     const startY = Math.floor(top / step) * step;
 
@@ -1423,7 +2046,7 @@ export default class World {
         if (this._isRiverSegmentInOcean(a, b, pts[i + 1], oceanCutoff)) continue;
         const nx = -dy / len;
         const ny = dx / len;
-        const foamCount = Math.max(1, Math.floor(len / 420));
+        const foamCount = Math.max(1, Math.floor(len / 560));
         for (let j = 0; j < foamCount; j++) {
           const t = (j + 0.5) / foamCount;
           const px = a.x + dx * t;
@@ -1456,6 +2079,15 @@ export default class World {
     const mx = (a.x + b.x) * 0.5;
     const my = (a.y + b.y) * 0.5;
     if (this._groundAt(mx, my) >= oceanCutoff) return false;
+
+    const coastChecks = [
+      [96, 0], [-96, 0], [0, 96], [0, -96],
+      [144, 0], [-144, 0], [0, 144], [0, -144],
+      [84, 84], [-84, 84], [84, -84], [-84, -84],
+    ];
+    for (const [ox, oy] of coastChecks) {
+      if (this._groundAt(mx + ox, my + oy) >= oceanCutoff) return false;
+    }
 
     const dx = (next?.x ?? b.x) - a.x;
     const dy = (next?.y ?? b.y) - a.y;
@@ -1574,6 +2206,29 @@ export default class World {
 
   _nearestRiverInfo(x, y) {
     let best = null;
+    const candidates = this._getRiverSegmentCandidates(x, y, 240);
+    if (candidates.length) {
+      for (const { band, seg } of candidates) {
+        const t = clamp(((x - seg.ax) * seg.dx + (y - seg.ay) * seg.dy) / seg.len2, 0, 1);
+        const qx = seg.ax + seg.dx * t;
+        const qy = seg.ay + seg.dy * t;
+        const ox = x - qx;
+        const oy = y - qy;
+        const dist2 = ox * ox + oy * oy;
+        if (!best || dist2 < best.dist2) {
+          best = {
+            band,
+            dist2,
+            dist: Math.sqrt(dist2),
+            x: qx,
+            y: qy,
+            tangent: seg.angle,
+          };
+        }
+      }
+      return best;
+    }
+
     for (const band of this._riverBands || []) {
       const segments = this._riverSegments(band);
       for (const seg of segments) {
@@ -1629,7 +2284,7 @@ export default class World {
 
   _drawPOIs(ctx, camera) {
     const tNow = performance.now() * 0.001;
-    const cullDist = Math.max(this.viewW, this.viewH) * 0.68 + 320;
+    const cullDist = Math.max(this.viewW, this.viewH) * 0.48 + 210;
 
     const drawIfNear = (p) => {
       if (!camera) return true;
@@ -1657,74 +2312,75 @@ export default class World {
     // === MUCH BIGGER STARTING TOWN (kept exactly as you liked) ===
     if (this.startTown && drawIfNear(this.startTown)) {
       const t = this.startTown;
+      const startTownSprite = this._getPoiSprite("start-town", 360, 320, (spriteCtx) => {
+        const ox = 180;
+        const oy = 160;
+        spriteCtx.fillStyle = "rgba(110,90,70,0.78)";
+        spriteCtx.strokeStyle = "#3d2a1c";
+        spriteCtx.lineWidth = 14;
+        spriteCtx.beginPath();
+        spriteCtx.rect(ox - 138, oy - 108, 276, 216);
+        spriteCtx.fill();
+        spriteCtx.stroke();
+
+        spriteCtx.strokeStyle = "#d3aa68";
+        spriteCtx.lineWidth = 4;
+        spriteCtx.beginPath();
+        spriteCtx.rect(ox - 126, oy - 96, 252, 192);
+        spriteCtx.stroke();
+
+        const bigBuildings = [
+          ...(t.buildings || []),
+          { x: -22, y: 72, w: 46, h: 32, color: "#6a5744" },
+          { x: 78, y: 68, w: 36, h: 38, color: "#8b6f52" },
+          { x: -98, y: -18, w: 28, h: 30, color: "#5b4b3f" },
+          { x: 112, y: 22, w: 30, h: 32, color: "#4a5260" },
+          { x: -48, y: -48, w: 26, h: 28, color: "#6a5744" },
+          { x: 68, y: -68, w: 28, h: 30, color: "#8b6f52" },
+          { x: -8, y: -12, w: 24, h: 26, color: "#5b4b3f" },
+          { x: 18, y: 48, w: 22, h: 24, color: "#4a5260" },
+        ];
+        for (const building of bigBuildings) {
+          const bx = ox + building.x;
+          const by = oy + building.y;
+          const bw = building.w;
+          const bh = building.h;
+          spriteCtx.fillStyle = building.color;
+          spriteCtx.fillRect(bx, by, bw, bh);
+          spriteCtx.fillStyle = "#d3aa68";
+          spriteCtx.beginPath();
+          spriteCtx.moveTo(bx - 6, by);
+          spriteCtx.lineTo(bx + bw * 0.5, by - 18);
+          spriteCtx.lineTo(bx + bw + 6, by);
+          spriteCtx.closePath();
+          spriteCtx.fill();
+          spriteCtx.fillStyle = "rgba(255,232,156,0.78)";
+          spriteCtx.fillRect(bx + bw * 0.22, by + 8, 7, 7);
+          spriteCtx.fillRect(bx + bw * 0.62, by + 8, 7, 7);
+          spriteCtx.fillStyle = "#3f2c1f";
+          spriteCtx.fillRect(bx + bw * 0.5 - 4, by + bh - 12, 8, 12);
+        }
+
+        spriteCtx.fillStyle = "rgba(180,160,120,0.28)";
+        spriteCtx.beginPath();
+        spriteCtx.arc(ox, oy + 12, 68, 0, Math.PI * 2);
+        spriteCtx.fill();
+
+        spriteCtx.fillStyle = "#a8c0d8";
+        spriteCtx.beginPath();
+        spriteCtx.arc(ox, oy + 8, 22, 0, Math.PI * 2);
+        spriteCtx.fill();
+        spriteCtx.fillStyle = "#6a8fb8";
+        spriteCtx.fillRect(ox - 4, oy - 18, 8, 32);
+        spriteCtx.fillStyle = "#d3e0f0";
+        spriteCtx.beginPath();
+        spriteCtx.arc(ox, oy + 4, 12, 0, Math.PI * 2);
+        spriteCtx.fill();
+      });
 
       this._drawBeacon(ctx, t.x, t.y - 22, "#ffd700", 138, 48, 0.22);
-
       this._drawDropShadow(ctx, t.x, t.y + 48, 92, 22, 0.38);
-
-      ctx.fillStyle = "rgba(110,90,70,0.78)";
-      ctx.strokeStyle = "#3d2a1c";
-      ctx.lineWidth = 14;
-      ctx.beginPath();
-      ctx.rect(t.x - 138, t.y - 108, 276, 216);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.strokeStyle = "#d3aa68";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.rect(t.x - 126, t.y - 96, 252, 192);
-      ctx.stroke();
-
-      const bigBuildings = [
-        ...(t.buildings || []),
-        { x: -22, y: 72, w: 46, h: 32, color: "#6a5744" },
-        { x: 78, y: 68, w: 36, h: 38, color: "#8b6f52" },
-        { x: -98, y: -18, w: 28, h: 30, color: "#5b4b3f" },
-        { x: 112, y: 22, w: 30, h: 32, color: "#4a5260" },
-        { x: -48, y: -48, w: 26, h: 28, color: "#6a5744" },
-        { x: 68, y: -68, w: 28, h: 30, color: "#8b6f52" },
-        { x: -8, y: -12, w: 24, h: 26, color: "#5b4b3f" },
-        { x: 18, y: 48, w: 22, h: 24, color: "#4a5260" },
-      ];
-      for (const building of bigBuildings) {
-        const ox = building.x;
-        const oy = building.y;
-        const bw = building.w;
-        const bh = building.h;
-        const color = building.color;
-        ctx.fillStyle = color;
-        ctx.fillRect(t.x + ox, t.y + oy, bw, bh);
-        ctx.fillStyle = "#d3aa68";
-        ctx.beginPath();
-        ctx.moveTo(t.x + ox - 6, t.y + oy);
-        ctx.lineTo(t.x + ox + bw * 0.5, t.y + oy - 18);
-        ctx.lineTo(t.x + ox + bw + 6, t.y + oy);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = "rgba(255,232,156,0.78)";
-        ctx.fillRect(t.x + ox + bw * 0.22, t.y + oy + 8, 7, 7);
-        ctx.fillRect(t.x + ox + bw * 0.62, t.y + oy + 8, 7, 7);
-        ctx.fillStyle = "#3f2c1f";
-        ctx.fillRect(t.x + ox + bw * 0.5 - 4, t.y + oy + bh - 12, 8, 12);
-        if (building.name) drawText(building.name, t.x + ox + bw * 0.5, t.y + oy - 14, 9, "#f5e8c4");
-      }
-
-      ctx.fillStyle = "rgba(180,160,120,0.28)";
-      ctx.beginPath();
-      ctx.arc(t.x, t.y + 12, 68, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#a8c0d8";
-      ctx.beginPath();
-      ctx.arc(t.x, t.y + 8, 22, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#6a8fb8";
-      ctx.fillRect(t.x - 4, t.y - 18, 8, 32);
-      ctx.fillStyle = "#d3e0f0";
-      ctx.beginPath();
-      ctx.arc(t.x, t.y + 4, 12, 0, Math.PI * 2);
-      ctx.fill();
+      if (startTownSprite) ctx.drawImage(startTownSprite, t.x - 180, t.y - 160);
 
       drawText(t.name || "Crossroads Haven", t.x, t.y - 148, 22, "#fff8d0");
       drawText("Inn  Smithy  Vendor  Stable", t.x, t.y + 126, 11, "#ecd7aa");
@@ -1732,54 +2388,60 @@ export default class World {
 
     for (const t of this.towns || []) {
       if (!drawIfNear(t)) continue;
+      const townSprite = this._getPoiSprite(`town|${t.name}`, 92, 96, (spriteCtx) => {
+        const ox = 46;
+        const oy = 48;
+        const buildings = [
+          [-18, -8, 18, 20, "#5b4b3f"],
+          [4, -14, 22, 24, "#4a5260"],
+          [-4, 12, 26, 18, "#6a5744"],
+        ];
+        for (const [bx0, by0, bw, bh, color] of buildings) {
+          const bx = ox + bx0;
+          const by = oy + by0;
+          spriteCtx.fillStyle = color;
+          spriteCtx.fillRect(bx, by, bw, bh);
+          spriteCtx.fillStyle = "#d3aa68";
+          spriteCtx.beginPath();
+          spriteCtx.moveTo(bx - 3, by);
+          spriteCtx.lineTo(bx + bw * 0.5, by - 10);
+          spriteCtx.lineTo(bx + bw + 3, by);
+          spriteCtx.closePath();
+          spriteCtx.fill();
+          spriteCtx.fillStyle = "rgba(255,232,156,0.72)";
+          spriteCtx.fillRect(bx + bw * 0.45, by + bh - 8, 5, 8);
+        }
+
+        spriteCtx.strokeStyle = "rgba(150,130,92,0.42)";
+        spriteCtx.lineWidth = 3;
+        spriteCtx.beginPath();
+        spriteCtx.moveTo(ox - 32, oy + 22);
+        spriteCtx.lineTo(ox + 34, oy + 22);
+        spriteCtx.stroke();
+        spriteCtx.strokeStyle = "rgba(255,236,190,0.18)";
+        spriteCtx.lineWidth = 1;
+        spriteCtx.beginPath();
+        spriteCtx.moveTo(ox - 28, oy + 22);
+        spriteCtx.lineTo(ox + 30, oy + 22);
+        spriteCtx.stroke();
+
+        spriteCtx.fillStyle = "rgba(82,116,62,0.24)";
+        spriteCtx.beginPath();
+        spriteCtx.arc(ox - 30, oy + 10, 6, 0, Math.PI * 2);
+        spriteCtx.arc(ox + 31, oy + 9, 6, 0, Math.PI * 2);
+        spriteCtx.fill();
+
+        spriteCtx.strokeStyle = "rgba(139,235,255,0.56)";
+        spriteCtx.lineWidth = 2;
+        spriteCtx.strokeRect(ox - 28.5, oy - 28.5, 57, 57);
+      });
       this._drawBeacon(ctx, t.x, t.y - 8, "#8be9ff", 64, 22, 0.10);
       this._drawDropShadow(ctx, t.x, t.y + 18, 34, 10, 0.24);
       ctx.fillStyle = "rgba(117,211,224,0.13)";
       ctx.beginPath();
       ctx.arc(t.x, t.y, 38, 0, Math.PI * 2);
       ctx.fill();
-
-      const buildings = [
-        [-18, -8, 18, 20, "#5b4b3f"],
-        [4, -14, 22, 24, "#4a5260"],
-        [-4, 12, 26, 18, "#6a5744"],
-      ];
-      for (const [ox, oy, bw, bh, color] of buildings) {
-        ctx.fillStyle = color;
-        ctx.fillRect(t.x + ox, t.y + oy, bw, bh);
-        ctx.fillStyle = "#d3aa68";
-        ctx.beginPath();
-        ctx.moveTo(t.x + ox - 3, t.y + oy);
-        ctx.lineTo(t.x + ox + bw * 0.5, t.y + oy - 10);
-        ctx.lineTo(t.x + ox + bw + 3, t.y + oy);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = "rgba(255,232,156,0.72)";
-        ctx.fillRect(t.x + ox + bw * 0.45, t.y + oy + bh - 8, 5, 8);
-      }
-
-      ctx.strokeStyle = "rgba(150,130,92,0.42)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(t.x - 32, t.y + 22);
-      ctx.lineTo(t.x + 34, t.y + 22);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255,236,190,0.18)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(t.x - 28, t.y + 22);
-      ctx.lineTo(t.x + 30, t.y + 22);
-      ctx.stroke();
-
-      ctx.fillStyle = "rgba(82,116,62,0.24)";
-      ctx.beginPath();
-      ctx.arc(t.x - 30, t.y + 10, 6, 0, Math.PI * 2);
-      ctx.arc(t.x + 31, t.y + 9, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(139,235,255,0.56)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(t.x - 28.5, t.y - 28.5, 57, 57);
+      if (townSprite) ctx.drawImage(townSprite, t.x - 46, t.y - 48);
 
       drawText(t.name || "Town", t.x, t.y - 42, 11, "#dffbff");
     }
@@ -1793,29 +2455,34 @@ export default class World {
         c.type === "stone" ? ["#4b5260", "#c8c0a2", "rgba(200,192,162,0.16)"] :
         c.type === "wild" ? ["#345538", "#8fde7a", "rgba(143,222,122,0.16)"] :
         ["#4e3724", "#ffcf58", "rgba(255,206,84,0.16)"];
+      const campBodySprite = this._getPoiSprite(`camp|${c.type}`, 56, 48, (spriteCtx) => {
+        const ox = 28;
+        const oy = 24;
+        if (this._hasWorldImage(campSprite)) {
+          spriteCtx.save();
+          spriteCtx.translate(ox, oy + 5);
+          spriteCtx.globalAlpha = 0.96;
+          spriteCtx.drawImage(campSprite, -22, -26, 44, 34);
+          spriteCtx.restore();
+        } else {
+          spriteCtx.fillStyle = campStyle[0];
+          spriteCtx.fillRect(ox - 10, oy + 3, 20, 8);
+          spriteCtx.fillStyle = campStyle[1];
+          spriteCtx.beginPath();
+          spriteCtx.arc(ox, oy, 7, 0, Math.PI * 2);
+          spriteCtx.fill();
+          spriteCtx.fillStyle = "#fff0a6";
+          spriteCtx.beginPath();
+          spriteCtx.arc(ox - 2, oy - 2, 3, 0, Math.PI * 2);
+          spriteCtx.fill();
+        }
+      });
       this._drawDropShadow(ctx, c.x, c.y + 10, 20, 7, 0.22);
       ctx.fillStyle = campStyle[2];
       ctx.beginPath();
       ctx.arc(c.x, c.y, 18, 0, Math.PI * 2);
       ctx.fill();
-      if (this._hasWorldImage(campSprite)) {
-        ctx.save();
-        ctx.translate(c.x, c.y + 5);
-        ctx.globalAlpha = 0.96;
-        ctx.drawImage(campSprite, -22, -26, 44, 34);
-        ctx.restore();
-      } else {
-        ctx.fillStyle = campStyle[0];
-        ctx.fillRect(c.x - 10, c.y + 3, 20, 8);
-        ctx.fillStyle = campStyle[1];
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, 7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#fff0a6";
-        ctx.beginPath();
-        ctx.arc(c.x - 2, c.y - 2, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      if (campBodySprite) ctx.drawImage(campBodySprite, c.x - 28, c.y - 24);
       ctx.fillStyle = campStyle[2];
       ctx.beginPath();
       ctx.arc(c.x, c.y, 28, 0, Math.PI * 2);
@@ -2214,6 +2881,13 @@ export default class World {
   }
 
   _sampleCell(x, y) {
+    const qx = Math.round(x / 12);
+    const qy = Math.round(y / 12);
+    const cacheKey = `${qx}|${qy}`;
+    const cached = this._runtimeCellCache.get(cacheKey);
+    if (cached) return cached;
+    x = qx * 12;
+    y = qy * 12;
     const ground = this._groundAt(x, y);
     const river = this._riverAt(x, y);
     const road = this._roadAt(x, y);
@@ -2304,7 +2978,7 @@ export default class World {
 
     const isMountainWall = mountainBody && !road && !bridge;
 
-    return {
+    return this._rememberLimited(this._runtimeCellCache, cacheKey, {
       ground,
       river,
       moisture,
@@ -2319,7 +2993,7 @@ export default class World {
       zone,
       color,
       landColor,
-    };
+    }, this._runtimeCellCacheLimit);
   }
 
   _sampleMapCell(x, y) {
@@ -2383,19 +3057,29 @@ export default class World {
       color = "#aa8f62";
     }
 
+    const landColor = color;
     const road = this._roadAt(x, y);
     const bridge = this._bridgeAt(x, y);
     if (road && !isWater && !bridge && !mountainBase) {
       zone = "road";
-      color = "#cfb27a";
+      color = landColor;
     }
 
     if (bridge) {
       zone = "bridge";
-      color = "#dfc194";
+      color = landColor;
     }
 
-    return { color, zone, isWater };
+    return { color, zone, isWater, landColor };
+  }
+
+  _rememberLimited(cache, key, value, limit = 8192) {
+    cache.set(key, value);
+    if (cache.size > limit) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    return value;
   }
 
   _nearRiverConfluence(x, y) {
@@ -2421,45 +3105,68 @@ export default class World {
   }
 
   _groundAt(x, y) {
+    const qx = Math.round(x / 12);
+    const qy = Math.round(y / 12);
+    const key = `${qx}|${qy}`;
+    const cached = this._groundCache.get(key);
+    if (cached != null) return cached;
+    x = qx * 12;
+    y = qy * 12;
     const base = fbm(x * 0.00042, y * 0.00042, this.seed, 5);
     const detail = fbm(x * 0.0012, y * 0.0012, this.seed + 77, 3);
     const d = Math.hypot(x, y);
     const mainland = clamp(1 - d / 4200, 0, 1) * 0.14;
     const farRidges = fbm(x * 0.00018 + 40, y * 0.00018 - 17, this.seed + 404, 3) * 0.10;
     const wildCoast = clamp((d - 9000) / 2600, 0, 1) * 0.035;
-    return base * 0.76 + detail * 0.17 + mainland + farRidges - wildCoast;
+    return this._rememberLimited(
+      this._groundCache,
+      key,
+      base * 0.76 + detail * 0.17 + mainland + farRidges - wildCoast,
+      this._groundCacheLimit
+    );
   }
 
   _moistureAt(x, y) {
+    const qx = Math.round(x / 16);
+    const qy = Math.round(y / 16);
+    const key = `${qx}|${qy}`;
+    const cached = this._moistureCache.get(key);
+    if (cached != null) return cached;
+    x = qx * 16;
+    y = qy * 16;
     const a = fbm(x * 0.0007, y * 0.0007, this.seed + 200, 4);
     const b = fbm(x * 0.0015, y * 0.0015, this.seed + 311, 2);
-    return a * 0.8 + b * 0.2;
+    return this._rememberLimited(this._moistureCache, key, a * 0.8 + b * 0.2, this._moistureCacheLimit);
   }
 
   _makeRiverBands() {
     const bands = [];
-    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south"];
-    const mainCount = 10;
+    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south"];
+    const mainCount = 18;
 
     for (let i = 0; i < mainCount; i++) {
       const side = sides[i % sides.length];
       const coast = this._makeRiverCoastTarget(side, i);
       const source = this._makeRiverSourceTarget(side, coast, i);
-      const coastAnchor = this._findCoastAnchorNear(coast.x, coast.y, 1800) || coast;
+      const coastAnchor =
+        this._findOceanShoreAnchor(side, coast, 2400) ||
+        this._findOceanCoastAnchorNear(coast.x, coast.y, 1800) ||
+        this._findCoastAnchorNear(coast.x, coast.y, 1800) ||
+        coast;
       const sourceAnchor = this._findRiverSourceNear(source.x, source.y, 2200) || source;
       bands.push({
         ax: sourceAnchor.x,
         ay: sourceAnchor.y,
         bx: coastAnchor.x,
         by: coastAnchor.y,
-        width: this._rng.range(0.64, 1.02),
-        bends: 42 + ((i % 4) * 8),
-        amplitude: this._rng.range(520, 980),
+        width: this._rng.range(0.76, 1.20),
+        bends: 64 + ((i % 4) * 12),
+        amplitude: this._rng.range(760, 1480),
         seed: hash2(this.seed, 101 + i * 17),
       });
     }
 
-    const tributaryCount = 14;
+    const tributaryCount = 32;
     for (let i = 0; i < tributaryCount; i++) {
       const main = bands[i % bands.length];
       const joinT = this._rng.range(0.28, 0.74);
@@ -2474,8 +3181,8 @@ export default class World {
       const ny = dx / len;
       const side = (i % 2 === 0 ? 1 : -1);
       const source = {
-        x: join.x + nx * side * this._rng.range(1400, 4600) + dx / len * this._rng.range(-1200, 1200),
-        y: join.y + ny * side * this._rng.range(1400, 4600) + dy / len * this._rng.range(-1200, 1200),
+        x: join.x + nx * side * this._rng.range(1200, 5000) + dx / len * this._rng.range(-1600, 1600),
+        y: join.y + ny * side * this._rng.range(1200, 5000) + dy / len * this._rng.range(-1600, 1600),
       };
       const sourceAnchor = this._findRiverSourceNear(source.x, source.y, 1800) || source;
       bands.push({
@@ -2483,9 +3190,9 @@ export default class World {
         ay: sourceAnchor.y,
         joinBand: main,
         joinT,
-        width: this._rng.range(0.36, 0.68),
-        bends: 30 + ((i % 3) * 6),
-        amplitude: this._rng.range(260, 520),
+        width: this._rng.range(0.46, 0.82),
+        bends: 44 + ((i % 3) * 10),
+        amplitude: this._rng.range(360, 860),
         seed: hash2(this.seed, 401 + i * 29),
       });
     }
@@ -2509,6 +3216,55 @@ export default class World {
     if (side === "south") return { x: coast.x + lateral, y: coast.y - inland - index * 120 };
     if (side === "east") return { x: coast.x - inland - index * 120, y: coast.y + lateral };
     return { x: coast.x + inland + index * 120, y: coast.y + lateral };
+  }
+
+  _findOceanShoreAnchor(side, target, maxDepth = 2400) {
+    if (!target) return null;
+    const step = 48;
+    const oceanCutoff = 0.245;
+    const lateralDir =
+      side === "north" || side === "south"
+        ? { x: 1, y: 0 }
+        : { x: 0, y: 1 };
+
+    for (let lateral = 0; lateral <= 1600; lateral += 96) {
+      const offsets = lateral === 0 ? [0] : [lateral, -lateral];
+      for (const offset of offsets) {
+        let prev = {
+          x: target.x + lateralDir.x * offset,
+          y: target.y + lateralDir.y * offset,
+        };
+        let prevWater = this._groundAt(prev.x, prev.y) < oceanCutoff;
+
+        for (let dist = step; dist <= maxDepth; dist += step) {
+          const p =
+            side === "north" ? { x: prev.x, y: target.y + dist } :
+            side === "south" ? { x: prev.x, y: target.y - dist } :
+            side === "east" ? { x: target.x - dist, y: prev.y } :
+            { x: target.x + dist, y: prev.y };
+          const water = this._groundAt(p.x, p.y) < oceanCutoff;
+          if (!water && prevWater) {
+            const coast = this._coastIntersectionPoint(p, prev, oceanCutoff);
+            if (this._isOceanCoastalLandPoint(coast.x, coast.y)) return coast;
+          }
+          prev = p;
+          prevWater = water;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  _findOceanCoastAnchorNear(x, y, radius = 1600) {
+    for (let r = 0; r <= radius; r += 80) {
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 16) {
+        const px = x + Math.cos(a) * r;
+        const py = y + Math.sin(a) * r;
+        if (this._isOceanCoastalLandPoint(px, py)) return { x: px, y: py };
+      }
+    }
+    return null;
   }
 
   _makeMountainRanges() {
@@ -2732,14 +3488,151 @@ export default class World {
     return effectiveRidge > 0.24 || (effectiveRidge > 0.14 && highland > 0.52);
   }
 
+  _buildRiverCaches() {
+    this._riverSegmentBuckets = new Map();
+    this._riverSegmentCount = 0;
+    let segId = 1;
+    for (const band of this._riverBands || []) {
+      const segments = this._riverSegments(band);
+      for (const seg of segments) {
+        this._riverSegmentCount++;
+        seg._id = segId++;
+        const pad = 140;
+        const minBX = Math.floor((seg.minX - pad) / this._riverBucketSize);
+        const maxBX = Math.floor((seg.maxX + pad) / this._riverBucketSize);
+        const minBY = Math.floor((seg.minY - pad) / this._riverBucketSize);
+        const maxBY = Math.floor((seg.maxY + pad) / this._riverBucketSize);
+        for (let by = minBY; by <= maxBY; by++) {
+          for (let bx = minBX; bx <= maxBX; bx++) {
+            const key = `${bx},${by}`;
+            let bucket = this._riverSegmentBuckets.get(key);
+            if (!bucket) {
+              bucket = [];
+              this._riverSegmentBuckets.set(key, bucket);
+            }
+            bucket.push({ band, seg });
+          }
+        }
+      }
+    }
+  }
+
+  _getRiverSegmentCandidates(x, y, pad = 160) {
+    const size = this._riverBucketSize || 512;
+    const minBX = Math.floor((x - pad) / size);
+    const maxBX = Math.floor((x + pad) / size);
+    const minBY = Math.floor((y - pad) / size);
+    const maxBY = Math.floor((y + pad) / size);
+    const out = [];
+    const seen = new Set();
+    for (let by = minBY; by <= maxBY; by++) {
+      for (let bx = minBX; bx <= maxBX; bx++) {
+        const bucket = this._riverSegmentBuckets.get(`${bx},${by}`);
+        if (!bucket) continue;
+        for (const item of bucket) {
+          const id = item.seg?._id;
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          out.push(item);
+        }
+      }
+    }
+    return out;
+  }
+
+  _buildRoadCaches() {
+    this._roadSegmentBuckets = new Map();
+    this._roadSegmentCount = 0;
+    let segId = 1;
+    for (const road of this.roads || []) {
+      const pts = road?.points || [];
+      road._segments = [];
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const seg = {
+          _id: segId++,
+          ax: a.x,
+          ay: a.y,
+          bx: b.x,
+          by: b.y,
+          dx,
+          dy,
+          len2: dx * dx + dy * dy || 1,
+          minX: Math.min(a.x, b.x),
+          maxX: Math.max(a.x, b.x),
+          minY: Math.min(a.y, b.y),
+          maxY: Math.max(a.y, b.y),
+        };
+        road._segments.push(seg);
+        this._roadSegmentCount++;
+        const pad = ((road.width || 20) * 0.5 + this._roadWalkRadius + 16);
+        const minBX = Math.floor((seg.minX - pad) / this._roadBucketSize);
+        const maxBX = Math.floor((seg.maxX + pad) / this._roadBucketSize);
+        const minBY = Math.floor((seg.minY - pad) / this._roadBucketSize);
+        const maxBY = Math.floor((seg.maxY + pad) / this._roadBucketSize);
+        for (let by = minBY; by <= maxBY; by++) {
+          for (let bx = minBX; bx <= maxBX; bx++) {
+            const key = `${bx},${by}`;
+            let bucket = this._roadSegmentBuckets.get(key);
+            if (!bucket) {
+              bucket = [];
+              this._roadSegmentBuckets.set(key, bucket);
+            }
+            bucket.push({ road, seg });
+          }
+        }
+      }
+    }
+  }
+
+  _getRoadSegmentCandidates(x, y, pad = 96) {
+    const size = this._roadBucketSize || 512;
+    const minBX = Math.floor((x - pad) / size);
+    const maxBX = Math.floor((x + pad) / size);
+    const minBY = Math.floor((y - pad) / size);
+    const maxBY = Math.floor((y + pad) / size);
+    const out = [];
+    const seen = new Set();
+    for (let by = minBY; by <= maxBY; by++) {
+      for (let bx = minBX; bx <= maxBX; bx++) {
+        const bucket = this._roadSegmentBuckets.get(`${bx},${by}`);
+        if (!bucket) continue;
+        for (const item of bucket) {
+          const id = item.seg?._id;
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          out.push(item);
+        }
+      }
+    }
+    return out;
+  }
+
   _riverAt(x, y) {
     let best = 999;
     const bands = this._riverBands || [];
     if (!bands.length) return best;
 
+    const candidates = this._getRiverSegmentCandidates(x, y, 220);
+    if (candidates.length) {
+      const seen = new Set();
+      for (const item of candidates) {
+        const band = item.band;
+        if (!band || seen.has(band)) continue;
+        seen.add(band);
+        const dist = this._distancePointToRiverPath(x, y, this._riverPath(band), this._riverSegments(band));
+        const widthPx = this._riverCollisionWidth(band, x, y);
+        const v = dist / Math.max(12, widthPx);
+        if (v < best) best = v;
+      }
+      return best;
+    }
+
     for (const band of bands) {
       const dist = this._distancePointToRiverPath(x, y, this._riverPath(band), this._riverSegments(band));
-
       const widthPx = this._riverCollisionWidth(band, x, y);
       const v = dist / Math.max(12, widthPx);
       if (v < best) best = v;
@@ -2758,7 +3651,7 @@ export default class World {
     const len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len;
     const ny = dx / len;
-    const count = Math.max(24, band.bends || 48);
+    const count = Math.max(40, band.bends || 64);
     const pts = [];
 
     for (let i = 0; i <= count; i++) {
@@ -2768,14 +3661,14 @@ export default class World {
       const baseY = start.y + dy * t;
       const phaseA = (band.seed % 628) * 0.01;
       const phaseB = (band.seed % 991) * 0.008;
-      const waveA = Math.sin(t * Math.PI * 13 + phaseA);
-      const waveB = Math.sin(t * Math.PI * 23 + phaseB) * 0.42;
-      const waveC = Math.sin(t * Math.PI * 37 + phaseA * 0.7) * 0.18;
-      const noise = (fbm(baseX * 0.00115, baseY * 0.00115, band.seed, 3) - 0.5) * 1.1;
+      const waveA = Math.sin(t * Math.PI * 4.5 + phaseA);
+      const waveB = Math.sin(t * Math.PI * 8.5 + phaseB) * 0.36;
+      const waveC = Math.sin(t * Math.PI * 13.5 + phaseA * 0.7) * 0.14;
+      const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
       const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
-      const bankWobble = Math.sin(t * Math.PI * 31 + phaseB) * 95 * ease;
-      const wanderX = (fbm(baseX * 0.0018 + 13, baseY * 0.0018 - 7, band.seed + 41, 2) - 0.5) * 130 * ease;
-      const wanderY = (fbm(baseX * 0.0018 - 19, baseY * 0.0018 + 23, band.seed + 61, 2) - 0.5) * 130 * ease;
+      const bankWobble = Math.sin(t * Math.PI * 17 + phaseB) * 68 * ease;
+      const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
+      const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
 
       let px = baseX + nx * (bend + bankWobble) + wanderX;
       let py = baseY + ny * (bend + bankWobble) + wanderY;
@@ -2891,7 +3784,25 @@ export default class World {
   _shorelinePointAlongLine(ax, ay, bx, by, waterCutoff = 0.245) {
     const startWet = this._groundAt(ax, ay) < waterCutoff;
     const endWet = this._groundAt(bx, by) < waterCutoff;
-    if (!endWet) return { x: bx, y: by };
+    if (!endWet) {
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      let lx = bx;
+      let ly = by;
+      for (let dist = 64; dist <= 3200; dist += 64) {
+        const px = bx + ux * dist;
+        const py = by + uy * dist;
+        if (this._groundAt(px, py) < waterCutoff) {
+          return this._coastIntersectionPoint({ x: lx, y: ly }, { x: px, y: py }, waterCutoff);
+        }
+        lx = px;
+        ly = py;
+      }
+      return { x: bx, y: by };
+    }
     if (startWet) return { x: bx, y: by };
 
     let lx = ax;
@@ -2975,6 +3886,25 @@ export default class World {
       if (this._sampleCellRaw(x + ox, y + oy).isWater) waterCount++;
     }
     return waterCount >= 1;
+  }
+
+  _isOceanCoastalLandPoint(x, y) {
+    const here = this._sampleCellRaw(x, y);
+    if (here.isWater || here.isMountain) return false;
+    const checks = [
+      [72, 0], [-72, 0], [0, 72], [0, -72],
+      [56, 56], [-56, 56], [56, -56], [-56, -56],
+    ];
+    const oceanCutoff = 0.245;
+    for (const [ox, oy] of checks) {
+      const wx = x + ox;
+      const wy = y + oy;
+      if (this._groundAt(wx, wy) >= oceanCutoff) continue;
+      const fx = x + ox * 2.6;
+      const fy = y + oy * 2.6;
+      if (this._groundAt(fx, fy) < oceanCutoff) return true;
+    }
+    return false;
   }
 
   _pointOnRiverPath(pts, t = 0.5) {
@@ -3436,10 +4366,19 @@ export default class World {
 
   _roadAt(x, y) {
     if (!this.roads?.length) return false;
+    const limitPad = this._roadWalkRadius + 40;
+    const candidates = this._getRoadSegmentCandidates(x, y, limitPad);
+    if (candidates.length) {
+      for (const { road, seg } of candidates) {
+        const d = distToSeg(x, y, seg.ax, seg.ay, seg.bx, seg.by);
+        if (d <= ((road.width || 20) * 0.5 + this._roadWalkRadius)) return true;
+      }
+      return false;
+    }
     for (const road of this.roads) {
-      const pts = road.points;
-      for (let i = 1; i < pts.length; i++) {
-        const d = distToSeg(x, y, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+      const segs = road._segments || this._segmentsFromPoints(road.points || []);
+      for (const seg of segs) {
+        const d = distToSeg(x, y, seg.ax, seg.ay, seg.bx, seg.by);
         if (d <= ((road.width || 20) * 0.5 + this._roadWalkRadius)) return true;
       }
     }
@@ -3517,8 +4456,7 @@ export default class World {
           const angle = Math.atan2(dy, dx);
           const baseSpan = Math.hypot(dx, dy);
           const riverWidth = river?.band ? this._riverVisualWidth(river.band) : baseSpan;
-          const tooLongForBridge = baseSpan > 300 || riverWidth > 228;
-          const shouldCreatePassage = baseSpan > 420 || riverWidth > 310;
+          const shouldCreatePassage = baseSpan > 620 || riverWidth > 420;
 
           if (shouldCreatePassage) {
             this._ensureRoadsidePassage(enterShore, exitShore);
@@ -3582,13 +4520,14 @@ export default class World {
     const merged = this._dedupeBridgeClusters(this._mergeBridgeCandidates(repaired));
     this.bridges = this._appendManualBridges(merged);
     this._ensureEndpointDockAccess();
+    this._cleanupBridgeDockConflicts();
     this._mapDirty = true;
   }
 
   _repairMissingBridges(candidates) {
     const out = [...(candidates || [])];
-    const bridgeGapLimit = 248;
-    const hardBridgeGapLimit = 300;
+    const bridgeGapLimit = 340;
+    const hardBridgeGapLimit = 420;
     const nearBridge = (x, y, radius = 88) =>
       out.some((b) => Math.hypot((b.cx || 0) - x, (b.cy || 0) - y) < radius);
     const sampleWaterCrossing = (ax, ay, bx, by) => {
@@ -3709,8 +4648,8 @@ export default class World {
   }
 
   _ensureEndpointDockAccess() {
-    const endpointBridgeGap = 220;
-    const endpointPassageGap = 320;
+    const endpointBridgeGap = 320;
+    const endpointPassageGap = 480;
     for (const road of this.roads || []) {
       const pts = road?.points;
       if (!pts || pts.length < 2) continue;
@@ -3725,11 +4664,11 @@ export default class World {
         if (this.getBridgeAt?.(p.x, p.y)) continue;
         const water = this._nearestWaterFromRoadEnd(p, end.other);
         if (!water) continue;
-        if (water.gap <= endpointBridgeGap) {
+        if (water.hasFarShore && water.gap <= endpointBridgeGap) {
           const dx = water.shoreB.x - water.shoreA.x;
           const dy = water.shoreB.y - water.shoreA.y;
           const span = Math.hypot(dx, dy);
-          if (span >= 24 && span <= 248) {
+          if (span >= 24 && span <= 340) {
             const angle = Math.atan2(dy, dx);
             const dirX = span > 0 ? dx / span : 1;
             const dirY = span > 0 ? dy / span : 0;
@@ -3740,7 +4679,7 @@ export default class World {
               y: water.shoreB.y - dirY * shoreInset,
             };
             const bridgeSpan = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
-            if (bridgeSpan >= 20 && bridgeSpan <= 242) {
+            if (bridgeSpan >= 20 && bridgeSpan <= 334) {
               this.bridges.push({
                 cx: (start.x + endPoint.x) * 0.5,
                 cy: (start.y + endPoint.y) * 0.5,
@@ -3761,6 +4700,10 @@ export default class World {
             }
           }
         }
+        if (!water.hasFarShore) {
+          this._ensureTravelDockAt({ x: water.shoreA.x, y: water.shoreA.y });
+          continue;
+        }
         if (water.gap > endpointPassageGap) {
           this._ensureTravelDockAt({ x: water.shoreA.x, y: water.shoreA.y });
           this._ensureTravelDockAt({ x: water.shoreB.x, y: water.shoreB.y });
@@ -3774,7 +4717,7 @@ export default class World {
     const angle = Math.atan2(point.y - otherPoint.y, point.x - otherPoint.x);
     const dirX = Math.cos(angle);
     const dirY = Math.sin(angle);
-    const search = 220;
+    const search = 420;
     const step = 8;
     let firstWater = null;
     let lastWater = null;
@@ -3792,8 +4735,17 @@ export default class World {
           shoreA: { x: point.x, y: point.y },
           shoreB: { x: px, y: py },
           gap,
+          hasFarShore: true,
         };
       }
+    }
+    if (firstWater && lastWater) {
+      return {
+        shoreA: { x: point.x, y: point.y },
+        shoreB: { x: lastWater.x, y: lastWater.y },
+        gap: Math.max(18, lastWater.dist - firstWater.dist + step),
+        hasFarShore: false,
+      };
     }
     return null;
   }
@@ -3802,12 +4754,37 @@ export default class World {
     if (!p) return;
     const nearby = (this.docks || []).some((d) => Math.hypot(d.x - p.x, d.y - p.y) < 120);
     if (nearby) return;
+    const nearBridge = (this.bridges || []).some((bridge) => {
+      if (Math.hypot((bridge.cx || 0) - p.x, (bridge.cy || 0) - p.y) < 120) return true;
+      const path = bridge.path || [];
+      for (let i = 1; i < path.length; i++) {
+        if (distToSeg(p.x, p.y, path[i - 1].x, path[i - 1].y, path[i].x, path[i].y) < 56) return true;
+      }
+      return false;
+    });
+    if (nearBridge) return;
 
     const safe = this._findShorePatchNear(p.x, p.y, 120) || this._findSafeLandPatchNear(p.x, p.y, 90);
     if (!safe) return;
 
     const nextId = ((this.docks || []).reduce((m, d) => Math.max(m, d.id || 0), 0)) + 1;
     this.docks.push({ id: nextId, x: safe.x, y: safe.y, generatedPassage: true });
+  }
+
+  _cleanupBridgeDockConflicts() {
+    if (!this.docks?.length || !this.bridges?.length) return;
+    this.docks = this.docks.filter((dock) => {
+      if (!dock?.generatedPassage) return true;
+      const overlapsBridge = this.bridges.some((bridge) => {
+        if (Math.hypot((bridge.cx || 0) - dock.x, (bridge.cy || 0) - dock.y) < 120) return true;
+        const path = bridge.path || [];
+        for (let i = 1; i < path.length; i++) {
+          if (distToSeg(dock.x, dock.y, path[i - 1].x, path[i - 1].y, path[i].x, path[i].y) < 64) return true;
+        }
+        return false;
+      });
+      return !overlapsBridge;
+    });
   }
 
   _manualBridgeSeeds() {
@@ -4203,7 +5180,13 @@ export default class World {
       return sample;
     }
 
-    return this._sampleCellRawUncached(x, y);
+    const qx = Math.round(x / 12);
+    const qy = Math.round(y / 12);
+    const key = `${qx}|${qy}`;
+    const runtimeCached = this._runtimeRawSampleCache.get(key);
+    if (runtimeCached) return runtimeCached;
+    const sample = this._sampleCellRawUncached(qx * 12, qy * 12);
+    return this._rememberLimited(this._runtimeRawSampleCache, key, sample, this._runtimeRawSampleCacheLimit);
   }
 
   _sampleCellRawUncached(x, y) {
@@ -4296,11 +5279,16 @@ export default class World {
     return false;
   }
 
-  _queueMapBuild() {
-    if (!this._mapDirty && this._mapInfo) return;
+  _queueMapBuild(sizeOverride = null) {
+    const fullSize = this._mapSize || 60;
+    const requestedSize = Math.max(1, Math.round(sizeOverride || this._mapBuildTargetSize || fullSize));
+    this._mapBuildTargetSize = Math.max(this._mapBuildTargetSize || 0, requestedSize);
+    const currentSize = this._mapInfo?.size || 0;
+    const hasRequestedMap = !!this._mapInfo && currentSize >= requestedSize && (!this._mapDirty || currentSize !== requestedSize);
+    if (hasRequestedMap && (!this._isPreviewMapActive() || requestedSize < fullSize) && !this._mapBuildState) return;
     if (this._mapBuildQueued) return;
     if (typeof window === "undefined" || typeof performance === "undefined") {
-      this._buildMapInfo();
+      this._buildMapInfo(requestedSize);
       return;
     }
 
@@ -4328,7 +5316,7 @@ export default class World {
       return;
     }
 
-    const end = performance.now() + 0.8;
+    const end = performance.now() + 0.45;
     while (this._warmupTasks.length && performance.now() < end) {
       if (this._warmupTasks[0]()) this._warmupTasks.shift();
       else break;
@@ -4347,15 +5335,11 @@ export default class World {
 
   _buildMapPreview() {
     if (this._mapInfo && this._mapCanvas) return;
-    const originalSize = this._mapSize;
-    this._mapSize = this._mapPreviewSize || 40;
-    this._buildMapInfo();
-    this._mapSize = originalSize;
-    this._mapDirty = true;
+    this._buildMapInfo(this._mapPreviewSize || 40);
   }
 
   _buildMapInfoChunk() {
-    const size = this._mapSize || 60;
+    const size = this._mapBuildState?.size || this._mapBuildTargetSize || this._mapSize || 60;
     if (!this._mapBuildState) {
       const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
       if (canvas) {
@@ -4384,18 +5368,19 @@ export default class World {
     }
 
     const state = this._mapBuildState;
-    const budgetEnd = performance.now() + 8;
+    const buildSize = state.size;
+    const budgetEnd = performance.now() + 4;
 
-    while (state.row < state.size && performance.now() < budgetEnd) {
+    while (state.row < buildSize && performance.now() < budgetEnd) {
       const r = state.row++;
       const colorRow = [];
       const revRow = [];
       const tileRow = [];
       const zoneRow = [];
 
-      for (let c = 0; c < state.size; c++) {
-        const wx = -this.mapHalfSize + (c + 0.5) * ((this.mapHalfSize * 2) / state.size);
-        const wy = -this.mapHalfSize + (r + 0.5) * ((this.mapHalfSize * 2) / state.size);
+      for (let c = 0; c < buildSize; c++) {
+        const wx = -this.mapHalfSize + (c + 0.5) * ((this.mapHalfSize * 2) / buildSize);
+        const wy = -this.mapHalfSize + (r + 0.5) * ((this.mapHalfSize * 2) / buildSize);
         const s = this._sampleMapCell(wx, wy);
 
         colorRow.push(s.color);
@@ -4417,23 +5402,24 @@ export default class World {
 
     this._mapCanvas = state.canvas;
     this._mapInfo = {
-      size,
+      size: buildSize,
       colors: state.colors,
       tiles: state.tiles,
       zones: state.zones,
       revealed: state.revealed,
     };
 
-    if (state.row < state.size) {
+    if (state.row < buildSize) {
       this._mapBuildQueued = false;
-      this._queueMapBuild();
+      this._queueMapBuild(buildSize);
       return;
     }
 
     const { canvas, ctx } = state;
+    const pendingTarget = this._mapBuildTargetSize || 0;
     this._mapCanvas = canvas;
     this._mapInfo = {
-      size,
+      size: buildSize,
       colors: state.colors,
       tiles: state.tiles,
       zones: state.zones,
@@ -4441,13 +5427,15 @@ export default class World {
     };
     this._mapBuildState = null;
     this._discoveryExportCache = null;
-    this._mapDirty = false;
+    this._mapBuildTargetSize = 0;
+    this._mapDirty = buildSize !== (this._mapSize || buildSize);
     this._mapBuildQueued = false;
     this._flushPendingDiscovery();
+    if (pendingTarget > buildSize) this._queueMapBuild(pendingTarget);
   }
 
-  _buildMapInfo() {
-    const size = this._mapSize || 60;
+  _buildMapInfo(sizeOverride = null) {
+    const size = Math.max(1, Math.round(sizeOverride || this._mapBuildTargetSize || this._mapSize || 60));
     const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
     if (canvas) {
       canvas.width = size;
@@ -4491,7 +5479,8 @@ export default class World {
     this._mapCanvas = canvas;
     this._mapInfo = { size, colors, tiles, zones, revealed };
     this._discoveryExportCache = null;
-    this._mapDirty = false;
+    this._mapBuildTargetSize = 0;
+    this._mapDirty = size !== (this._mapSize || size);
     this._flushPendingDiscovery();
   }
 
@@ -4578,6 +5567,7 @@ export default class World {
 
     if (state.index >= state.count) {
       this._treeBuildState = null;
+      this._clearPropChunkCache();
       return true;
     }
     return false;
@@ -4635,6 +5625,7 @@ export default class World {
 
     if (state.index >= state.count) {
       this._rockBuildState = null;
+      this._clearPropChunkCache();
       return true;
     }
     return false;
@@ -4677,7 +5668,9 @@ export default class World {
         type = this._rng.next() < 0.74 ? "bush" : "log";
       } else if (s.zone === "meadow" || s.zone === "old fields" || s.zone === "highlands" || s.zone === "whisper grass") {
         type = this._rng.next() < 0.55 ? "bush" : "log";
-      } else if (s.zone === "ashlands" || s.zone === "ash fields" || s.zone === "stone flats") {
+      } else if (s.zone === "ashlands" || s.zone === "ash fields") {
+        if (this._rng.next() < 0.22) type = "log";
+      } else if (s.zone === "stone flats") {
         type = "log";
       }
       if (!type) continue;
@@ -4705,6 +5698,7 @@ export default class World {
 
     if (state.index >= state.count) {
       this._clutterBuildState = null;
+      this._clearPropChunkCache();
       return true;
     }
     return false;
@@ -4762,6 +5756,9 @@ export default class World {
     const cullRight = right + 30;
     const cullTop = top - 30;
     const cullBottom = bottom + 30;
+    const centerX = (left + right) * 0.5;
+    const centerY = (top + bottom) * 0.5;
+    const farTreeDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.42;
 
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
@@ -4775,6 +5772,13 @@ export default class World {
         if (!bucket) continue;
         for (const t of bucket) {
           if (t.x < cullLeft || t.x > cullRight || t.y < cullTop || t.y > cullBottom) continue;
+          const dx = t.x - centerX;
+          const dy = t.y - centerY;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 > farTreeDist2) {
+            if (t.scale < 0.4 && (t.seed & 1) === 0) continue;
+            if (t.scale < 0.3 && (t.seed & 3) !== 0) continue;
+          }
           if (this._isNearBridgeDeck(t.x, t.y, 26)) continue;
           this._drawTree(ctx, t.x, t.y, t.seed, t.scale);
         }
@@ -4787,6 +5791,9 @@ export default class World {
     const cullRight = right + 24;
     const cullTop = top - 24;
     const cullBottom = bottom + 24;
+    const centerX = (left + right) * 0.5;
+    const centerY = (top + bottom) * 0.5;
+    const farClutterDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.30;
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
     const bx1 = Math.floor(cullRight / bucketSize);
@@ -4799,6 +5806,13 @@ export default class World {
         if (!bucket) continue;
         for (const item of bucket) {
           if (item.x < cullLeft || item.x > cullRight || item.y < cullTop || item.y > cullBottom) continue;
+          const dx = item.x - centerX;
+          const dy = item.y - centerY;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 > farClutterDist2) {
+            if ((item.seed & 1) === 0) continue;
+            if (item.scale < 0.5 && (item.seed & 3) !== 0) continue;
+          }
           if (this._isNearBridgeDeck(item.x, item.y, 22)) continue;
           this._drawClutterItem(ctx, item);
         }
@@ -4930,6 +5944,9 @@ export default class World {
     const cullRight = right + 30;
     const cullTop = top - 30;
     const cullBottom = bottom + 30;
+    const centerX = (left + right) * 0.5;
+    const centerY = (top + bottom) * 0.5;
+    const farRockDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.34;
 
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
@@ -4943,6 +5960,10 @@ export default class World {
         if (!bucket) continue;
         for (const r of bucket) {
           if (r.x < cullLeft || r.x > cullRight || r.y < cullTop || r.y > cullBottom) continue;
+          const dx = r.x - centerX;
+          const dy = r.y - centerY;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 > farRockDist2 && r.scale < 0.7 && (r.seed & 1) === 0) continue;
           this._drawRock(ctx, r.x, r.y, r.seed, r.scale, r.zone);
         }
       }

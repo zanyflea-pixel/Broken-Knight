@@ -87,6 +87,212 @@ function mixColor(a, b, t = 0.5) {
   return `rgb(${r},${g},${b2})`;
 }
 
+const enemyBodySpriteCache = new Map();
+const projectileSpriteCache = new Map();
+const lootSpriteCache = new Map();
+
+function createScratchCanvas(size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  return canvas;
+}
+
+function getEnemyBodySprite(enemy) {
+  const key = `${enemy.kind}|${enemy.radius}|${enemy.colorA}|${enemy.colorB}`;
+  let sprite = enemyBodySpriteCache.get(key);
+  if (sprite) return sprite;
+
+  const pad = Math.max(24, enemy.radius * 2 + 12);
+  const size = Math.ceil((enemy.radius + pad) * 2);
+  const canvas = createScratchCanvas(size);
+  const ctx = canvas.getContext("2d");
+  ctx.translate(size * 0.5, size * 0.5);
+  enemy._drawBodyShape(ctx, (enemy.seed % 997) * 0.001 + 0.75);
+  sprite = { canvas, size };
+  enemyBodySpriteCache.set(key, sprite);
+  if (enemyBodySpriteCache.size > 96) {
+    const staleKey = enemyBodySpriteCache.keys().next().value;
+    enemyBodySpriteCache.delete(staleKey);
+  }
+  return sprite;
+}
+
+function getProjectileSprite(projectile) {
+  const key = `${projectile.nova ? "nova" : "shot"}|${projectile.color}|${projectile.radius}|${projectile.hitRadius}`;
+  let sprite = projectileSpriteCache.get(key);
+  if (sprite) return sprite;
+
+  const size = Math.ceil(Math.max(projectile.hitRadius * 2.8, projectile.radius * 8 + 10));
+  const canvas = createScratchCanvas(size);
+  const ctx = canvas.getContext("2d");
+  ctx.translate(size * 0.5, size * 0.5);
+  if (projectile.nova) {
+    ctx.strokeStyle = projectile.color;
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, projectile.hitRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = projectile.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, projectile.hitRadius * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = projectile.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, projectile.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath();
+    ctx.arc(-projectile.radius * 0.25, -projectile.radius * 0.25, projectile.radius * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  sprite = { canvas, size };
+  projectileSpriteCache.set(key, sprite);
+  if (projectileSpriteCache.size > 48) {
+    const staleKey = projectileSpriteCache.keys().next().value;
+    projectileSpriteCache.delete(staleKey);
+  }
+  return sprite;
+}
+
+function getLootSprite(loot) {
+  const key =
+    loot.kind === "potion"
+      ? `potion|${loot.data?.potionType === "mana" ? "mana" : "hp"}`
+      : loot.kind === "gear"
+        ? `gear|${loot.data?.rarity || "common"}|${loot.data?.color || "#d9dee8"}`
+        : loot.kind;
+  let sprite = lootSpriteCache.get(key);
+  if (sprite) return sprite;
+
+  const size = loot.kind === "gear" ? 72 : 56;
+  const canvas = createScratchCanvas(size);
+  const ctx = canvas.getContext("2d");
+  ctx.translate(size * 0.5, size * 0.5);
+
+  if (loot.kind === "gold") {
+    ctx.fillStyle = "rgba(255,210,92,0.16)";
+    ctx.beginPath();
+    ctx.arc(0, 0, 10.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#efc24a";
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,244,170,0.55)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#fff0a8";
+    ctx.beginPath();
+    ctx.arc(-1.5, -1.5, 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (loot.kind === "potion") {
+    const mana = loot.data?.potionType === "mana";
+    ctx.fillStyle = mana ? "rgba(136,207,255,0.18)" : "rgba(255,143,160,0.18)";
+    ctx.beginPath();
+    ctx.arc(0, 2, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = mana ? "#6aa6ff" : "#df5b72";
+    ctx.beginPath();
+    ctx.arc(0, 2, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = mana ? "rgba(206,232,255,0.62)" : "rgba(255,221,227,0.56)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0, 2, 8.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#d8cdb6";
+    ctx.fillRect(-2, -6, 4, 5);
+  } else if (loot.kind === "key") {
+    ctx.fillStyle = "rgba(139,233,255,0.20)";
+    ctx.beginPath();
+    ctx.arc(0, 1, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#8be9ff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(-2, 0, 4.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(2, 0);
+    ctx.lineTo(10, 0);
+    ctx.lineTo(10, 3);
+    ctx.lineTo(7, 3);
+    ctx.moveTo(8, 0);
+    ctx.lineTo(8, -3);
+    ctx.stroke();
+  } else if (loot.kind === "gear") {
+    const color = loot.data?.color || "#d9dee8";
+    const rarity = loot.data?.rarity || "common";
+    const beamAlpha = rarity === "epic" ? 0.24 : rarity === "rare" ? 0.18 : rarity === "uncommon" ? 0.12 : 0;
+    if (beamAlpha > 0) {
+      const beam = ctx.createLinearGradient(0, -38, 0, 20);
+      beam.addColorStop(0, alphaColor(color, 0));
+      beam.addColorStop(0.3, alphaColor(color, beamAlpha));
+      beam.addColorStop(1, alphaColor(color, 0));
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(-8, 14);
+      ctx.lineTo(-18, -34);
+      ctx.lineTo(18, -34);
+      ctx.lineTo(8, 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = rarity === "epic" ? 0.34 : rarity === "rare" ? 0.25 : 0.18;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(0, 0, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = alphaColor(color, 0.14);
+    ctx.beginPath();
+    ctx.arc(0, 0, 11.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = alphaColor(color, rarity === "epic" ? 0.80 : 0.52);
+    ctx.lineWidth = rarity === "epic" ? 2.2 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(0, 12);
+    ctx.moveTo(-12, 0);
+    ctx.lineTo(12, 0);
+    ctx.stroke();
+    ctx.strokeStyle = rarity === "epic" ? "rgba(255,240,170,0.88)" : "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#f8fbff";
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(4, 0);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-4, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  sprite = { canvas, size };
+  lootSpriteCache.set(key, sprite);
+  if (lootSpriteCache.size > 64) {
+    const staleKey = lootSpriteCache.keys().next().value;
+    lootSpriteCache.delete(staleKey);
+  }
+  return sprite;
+}
+
 export function makeGear(slot, level = 1, rarity = "common", seed = 1) {
   const scale =
     rarity === "epic" ? 1.9 :
@@ -1135,19 +1341,8 @@ export class Enemy {
       ctx.fill();
     }
 
-    if (this.kind === "wolf") this._drawWolf(ctx);
-    else if (this.kind === "brute") this._drawBrute(ctx);
-    else if (this.kind === "caster") this._drawCaster(ctx, t);
-    else if (this.kind === "scout") this._drawScout(ctx);
-    else if (this.kind === "stalker") this._drawStalker(ctx);
-    else if (this.kind === "ashling") this._drawAshling(ctx, t);
-    else if (this.kind === "wisp") this._drawWisp(ctx, t);
-    else if (this.kind === "sentinel") this._drawSentinel(ctx, t);
-    else if (this.kind === "thorn") this._drawThorn(ctx, t);
-    else if (this.kind === "duelist") this._drawDuelist(ctx, t);
-    else if (this.kind === "mender") this._drawMender(ctx, t);
-    else if (this.kind === "dragon") this._drawDragon(ctx, t);
-    else this._drawBlob(ctx, t);
+    const sprite = getEnemyBodySprite(this);
+    ctx.drawImage(sprite.canvas, -sprite.size * 0.5, -sprite.size * 0.5);
 
     if ((this.lungeT || 0) > 0) {
       ctx.strokeStyle = "rgba(255,210,130,0.55)";
@@ -1235,6 +1430,22 @@ export class Enemy {
     }
 
     ctx.restore();
+  }
+
+  _drawBodyShape(ctx, t) {
+    if (this.kind === "wolf") this._drawWolf(ctx);
+    else if (this.kind === "brute") this._drawBrute(ctx);
+    else if (this.kind === "caster") this._drawCaster(ctx, t);
+    else if (this.kind === "scout") this._drawScout(ctx);
+    else if (this.kind === "stalker") this._drawStalker(ctx);
+    else if (this.kind === "ashling") this._drawAshling(ctx, t);
+    else if (this.kind === "wisp") this._drawWisp(ctx, t);
+    else if (this.kind === "sentinel") this._drawSentinel(ctx, t);
+    else if (this.kind === "thorn") this._drawThorn(ctx, t);
+    else if (this.kind === "duelist") this._drawDuelist(ctx, t);
+    else if (this.kind === "mender") this._drawMender(ctx, t);
+    else if (this.kind === "dragon") this._drawDragon(ctx, t);
+    else this._drawBlob(ctx, t);
   }
 
   _ambientAuraColor() {
@@ -1668,32 +1879,9 @@ export class Projectile {
 
     ctx.save();
     ctx.translate(this.x, this.y);
-
-    if (this.nova) {
-      const alpha = clamp(this.life / this.maxLife, 0, 1);
-      ctx.strokeStyle = this.color;
-      ctx.globalAlpha = alpha * 0.9;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.hitRadius, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.globalAlpha = alpha * 0.22;
-      ctx.fillStyle = this.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.hitRadius * 0.7, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = this.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(255,255,255,0.35)";
-      ctx.beginPath();
-      ctx.arc(-this.radius * 0.25, -this.radius * 0.25, this.radius * 0.45, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const sprite = getProjectileSprite(this);
+    ctx.globalAlpha = this.nova ? clamp(this.life / this.maxLife, 0, 1) : 1;
+    ctx.drawImage(sprite.canvas, -sprite.size * 0.5, -sprite.size * 0.5);
 
     ctx.restore();
   }
@@ -1743,28 +1931,13 @@ export class Loot {
     ctx.ellipse(0, 10, 8, 4, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    const sprite = getLootSprite(this);
+    ctx.save();
+    ctx.scale(pulse, pulse);
+    ctx.drawImage(sprite.canvas, -sprite.size * 0.5, -sprite.size * 0.5);
+    ctx.restore();
+
     if (this.kind === "gold") {
-      ctx.fillStyle = "rgba(255,210,92,0.16)";
-      ctx.beginPath();
-      ctx.arc(0, 0, 10.5 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#efc24a";
-      ctx.beginPath();
-      ctx.arc(0, 0, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(255,244,170,0.55)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = "#fff0a8";
-      ctx.beginPath();
-      ctx.arc(-1.5, -1.5, 2, 0, Math.PI * 2);
-      ctx.fill();
-
       const amount = this.data?.amount || 0;
       if (amount >= 10) {
         ctx.fillStyle = "rgba(5,8,12,0.70)";
@@ -1776,25 +1949,6 @@ export class Loot {
       }
     } else if (this.kind === "potion") {
       const mana = this.data?.potionType === "mana";
-      ctx.fillStyle = mana ? "rgba(136,207,255,0.18)" : "rgba(255,143,160,0.18)";
-      ctx.beginPath();
-      ctx.arc(0, 2, 11 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = mana ? "#6aa6ff" : "#df5b72";
-      ctx.beginPath();
-      ctx.arc(0, 2, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = mana ? "rgba(206,232,255,0.62)" : "rgba(255,221,227,0.56)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(0, 2, 8.5, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = "#d8cdb6";
-      ctx.fillRect(-2, -6, 4, 5);
-
       ctx.fillStyle = "rgba(5,8,12,0.68)";
       ctx.fillRect(-14, -22, 28, 11);
       ctx.fillStyle = mana ? "#d7ebff" : "#ffd3d7";
@@ -1802,25 +1956,6 @@ export class Loot {
       ctx.textAlign = "center";
       ctx.fillText(mana ? "MANA" : "HP", 0, -14);
     } else if (this.kind === "key") {
-      ctx.fillStyle = "rgba(139,233,255,0.20)";
-      ctx.beginPath();
-      ctx.arc(0, 1, 11 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "#8be9ff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(-2, 0, 4.5, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(2, 0);
-      ctx.lineTo(10, 0);
-      ctx.lineTo(10, 3);
-      ctx.lineTo(7, 3);
-      ctx.moveTo(8, 0);
-      ctx.lineTo(8, -3);
-      ctx.stroke();
-
       ctx.fillStyle = "rgba(5,8,12,0.68)";
       ctx.fillRect(-18, -22, 36, 11);
       ctx.fillStyle = "#dff8ff";
@@ -1830,63 +1965,6 @@ export class Loot {
     } else if (this.kind === "gear") {
       const color = this.data?.color || "#d9dee8";
       const rarity = this.data?.rarity || "common";
-      const beamAlpha = rarity === "epic" ? 0.24 : rarity === "rare" ? 0.18 : rarity === "uncommon" ? 0.12 : 0;
-      if (beamAlpha > 0) {
-        const beam = ctx.createLinearGradient(0, -38, 0, 20);
-        beam.addColorStop(0, alphaColor(color, 0));
-        beam.addColorStop(0.3, alphaColor(color, beamAlpha));
-        beam.addColorStop(1, alphaColor(color, 0));
-        ctx.fillStyle = beam;
-        ctx.beginPath();
-        ctx.moveTo(-8, 14);
-        ctx.lineTo(-18, -34);
-        ctx.lineTo(18, -34);
-        ctx.lineTo(8, 14);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.globalAlpha = rarity === "epic" ? 0.34 : rarity === "rare" ? 0.25 : 0.18;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(0, 0, 18 * pulse, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-
-      ctx.fillStyle = alphaColor(color, 0.14);
-      ctx.beginPath();
-      ctx.arc(0, 0, 11.5 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = alphaColor(color, rarity === "epic" ? 0.80 : 0.52);
-      ctx.lineWidth = rarity === "epic" ? 2.2 : 1.5;
-      ctx.beginPath();
-      ctx.moveTo(0, -12);
-      ctx.lineTo(0, 12);
-      ctx.moveTo(-12, 0);
-      ctx.lineTo(12, 0);
-      ctx.stroke();
-
-      ctx.strokeStyle = rarity === "epic" ? "rgba(255,240,170,0.88)" : "rgba(255,255,255,0.5)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = "#f8fbff";
-      ctx.beginPath();
-      ctx.moveTo(0, -4);
-      ctx.lineTo(4, 0);
-      ctx.lineTo(0, 4);
-      ctx.lineTo(-4, 0);
-      ctx.closePath();
-      ctx.fill();
-
       if (rarity === "epic" || rarity === "rare" || rarity === "uncommon") {
         ctx.fillStyle = "rgba(5,8,12,0.72)";
         ctx.fillRect(-24, -27, 48, 13);

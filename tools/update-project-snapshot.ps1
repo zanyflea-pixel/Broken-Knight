@@ -33,6 +33,15 @@ foreach ($rel in $files) {
 }
 
 $text = $builder.ToString().TrimEnd()
-[System.IO.File]::WriteAllText($outPath, $text, $utf8NoBom)
 
-Write-Host "Updated $outPath"
+$existing = ""
+if (Test-Path -LiteralPath $outPath -PathType Leaf) {
+  $existing = [System.IO.File]::ReadAllText($outPath)
+}
+
+if ($existing -ne $text) {
+  [System.IO.File]::WriteAllText($outPath, $text, $utf8NoBom)
+  Write-Host "Updated $outPath"
+} else {
+  Write-Host "No snapshot changes for $outPath"
+}

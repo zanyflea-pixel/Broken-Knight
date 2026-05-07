@@ -25,6 +25,9 @@ let lastTime = performance.now();
 let accumulator = 0;
 let resumeTimer = 0;
 let resizeQueued = false;
+let renderScale = 1;
+let frameEmaMs = 16.67;
+let dynamicScaleCooldown = 0;
 
 const STEP = 1 / 60;
 const MAX_FRAME = 0.05;
@@ -60,7 +63,8 @@ function setupCanvasElement() {
 }
 
 function getDPR() {
-  return Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const device = Math.max(1, window.devicePixelRatio || 1);
+  return device;
 }
 
 function getCssSize() {
@@ -81,6 +85,7 @@ function applyCanvasSize(cssW, cssH, dpr) {
     canvas.height = pixelH;
   }
 
+  canvas.style.imageRendering = "auto";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = true;
 }
@@ -162,6 +167,10 @@ function tick(now) {
 
   frame = Math.min(MAX_FRAME, frame);
   accumulator += frame;
+  const frameMs = frame * 1000;
+  frameEmaMs = frameEmaMs * 0.88 + frameMs * 0.12;
+  dynamicScaleCooldown = Math.max(0, dynamicScaleCooldown - frame);
+  game?.noteFrame?.(frame);
 
   try {
     let steps = 0;
@@ -176,9 +185,18 @@ function tick(now) {
     }
 
     render();
+    maybeAdjustRenderScale();
   } catch (err) {
     showFatalError(err);
   }
+}
+
+function maybeAdjustRenderScale() {
+  if (renderScale !== 1) {
+    renderScale = 1;
+    resizeCanvas();
+  }
+  if (game) game.renderScale = 1;
 }
 
 function startLoop() {
@@ -186,6 +204,8 @@ function startLoop() {
   running = true;
   lastTime = performance.now();
   accumulator = 0;
+  frameEmaMs = 16.67;
+  if (game) game.renderScale = renderScale;
   rafId = requestAnimationFrame(tick);
 }
 
