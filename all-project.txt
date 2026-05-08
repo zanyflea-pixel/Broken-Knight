@@ -944,9 +944,15 @@ export class Hero {
     ctx.save();
     ctx.translate(this.x, this.y + bob);
 
-    // NEW: draw boat when sailing (under the hero)
     if (this.state?.sailing) {
       this._drawSailingBoat(ctx);
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.beginPath();
+      ctx.ellipse(-16, 9, 8, 2.4, -0.18, 0, Math.PI * 2);
+      ctx.ellipse(16, 9, 8, 2.4, 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.18)";
@@ -2365,6 +2371,7 @@ export default class Game {
     this.ui = new UI(canvas);
     this.save = new Save("broke-knight-save-v106");
     this._bootSaveData = this.save.load?.() || this.save.read?.() || this.save.get?.() || null;
+    this._hadBootSave = !!this._bootSaveData;
     if (Number.isFinite(+this._bootSaveData?.seed)) this.seed = this._bootSaveData.seed | 0;
 
     this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
@@ -2460,6 +2467,7 @@ export default class Game {
     this._cachedNearbyCache = null;
     this._cachedNearbySecret = null;
     this._cachedNearbyTown = null;
+    this._cachedNearbyTownDoor = null;
     this._cachedNearbyDragonLair = null;
     this._cachedNearbyHerb = null;
     this.inventoryView = "list";
@@ -2523,6 +2531,7 @@ export default class Game {
       crossedBridges: new Set(),
       herbs: 0,
       pickedHerbs: new Set(),
+      materials: { scrap: 0, ore: 0, hide: 0, essence: 0 },
     };
 
     this.shop = {
@@ -2578,6 +2587,7 @@ export default class Game {
     this.hero.state.slowT = 0;
     this.hero.state.poisonT = 0;
     this.hero.state.mountainPassAccess = !!this.progress?.storyMilestones?.mountainPassAccess;
+    if (!this._hadBootSave) this.menu.open = "class-select";
 
     this._ensureHeroSafe(true);
     this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
@@ -3028,6 +3038,12 @@ export default class Game {
   }
 
   _handleMenus() {
+    if (this.menu.open === "class-select") {
+      this._handleClassSelectInput();
+      if (this.menu.open) this._clearTouchState();
+      return;
+    }
+
     if (this.input.wasPressed("m") || this.input.wasPressed("M")) {
       this.menu.open = this.menu.open === "map" ? null : "map";
     }
@@ -3070,6 +3086,27 @@ export default class Game {
 
     if (this.menu.open) this._clearTouchState();
     if (this.menu.open === "dev") this._handleDevToolsInput();
+  }
+
+  _handleClassSelectInput() {
+    const choices = ["knight", "ranger", "arcanist", "raider"];
+    for (let i = 0; i < choices.length; i++) {
+      if (this.input.wasPressed(String(i + 1))) {
+        this._chooseClass(choices[i]);
+        return;
+      }
+    }
+    if (!this.mouse.clicked) return;
+    const layout = this.getClassPanelLayout();
+    const mx = this.mouse.x;
+    const my = this.mouse.y;
+    for (let i = 0; i < choices.length; i++) {
+      const card = layout.cards[i];
+      if (mx >= card.x && mx <= card.x + card.w && my >= card.y && my <= card.y + card.h) {
+        this._chooseClass(choices[i]);
+        return;
+      }
+    }
   }
 
   _handleQuestInput() {
@@ -3336,7 +3373,7 @@ export default class Game {
 
   getSkillPanelLayout() {
     const w = Math.min(Math.max(this.w - 110, 520), 620);
-    const h = Math.min(Math.max(this.h - 120, 360), 400);
+    const h = Math.min(Math.max(this.h - 110, 388), 432);
     const x = ((this.w - w) / 2) | 0;
     const y = ((this.h - h) / 2) | 0;
     return {
@@ -3345,10 +3382,44 @@ export default class Game {
       x,
       y,
       rowStart: 98,
-      rowStep: 74,
-      rowHeight: 58,
+      rowStep: 82,
+      rowHeight: 66,
       rowInset: 18,
     };
+  }
+
+  getClassPanelLayout() {
+    const w = Math.min(Math.max(this.w - 120, 640), 820);
+    const h = Math.min(Math.max(this.h - 120, 360), 450);
+    const x = ((this.w - w) / 2) | 0;
+    const y = ((this.h - h) / 2) | 0;
+    const gap = 16;
+    const cardW = Math.floor((w - 36 - gap) / 2);
+    const cardH = 124;
+    return {
+      w, h, x, y,
+      cards: [
+        { x: x + 18, y: y + 94, w: cardW, h: cardH },
+        { x: x + 18 + cardW + gap, y: y + 94, w: cardW, h: cardH },
+        { x: x + 18, y: y + 94 + cardH + gap, w: cardW, h: cardH },
+        { x: x + 18 + cardW + gap, y: y + 94 + cardH + gap, w: cardW, h: cardH },
+      ],
+    };
+  }
+
+  getClassPanelData() {
+    return [
+      { id: "knight", key: "1", name: "Knight", color: "#8fd8ff", body: "Durable frontline fighter. Longer blink guard and steadier survivability.", perks: ["Higher armor feel", "Safer blink finish", "Balanced damage"] },
+      { id: "ranger", key: "2", name: "Ranger", color: "#9fe48d", body: "Fast roaming skirmisher. Better spark speed and longer movement lines.", perks: ["Faster projectiles", "Longer blink distance", "Best travel tempo"] },
+      { id: "arcanist", key: "3", name: "Arcanist", color: "#d8a8ff", body: "High-output caster. Bigger nova and stronger spell damage.", perks: ["Stronger spark/orb", "Largest nova radius", "Mana-heavy"] },
+      { id: "raider", key: "4", name: "Raider", color: "#ffd38a", body: "Aggressive striker. Fast blink, fast orb, and sharp melee pacing.", perks: ["Longest blink", "Faster orb", "High pressure"] },
+    ];
+  }
+
+  _chooseClass(classId) {
+    this.hero.classId = classId || "knight";
+    this.menu.open = null;
+    this._msg(`${this._className(classId)} chosen`, 1.2);
   }
 
   getSpellBarLayout() {
@@ -3423,10 +3494,11 @@ export default class Game {
       crossedBridges: new Set(),
       herbs: 0,
       pickedHerbs: new Set(),
+      materials: { scrap: 0, ore: 0, hide: 0, essence: 0 },
     };
     this.hero.classId = "knight";
     this.dungeon = { active: false, floor: 0, origin: null, room: null, roomIndex: 0, totalRooms: 0, roomRewarded: false, layout: null, currentRoomId: null, keys: 0, roomClearT: 0 };
-    this.menu.open = null;
+    this.menu.open = "class-select";
     this.menu.mapZoom = 1;
     this.trackedObjective = "story";
     this._cachedNearbyCamp = null;
@@ -8369,6 +8441,7 @@ export default class UI {
     if (open === "map") this._drawMap(ctx, game);
     else if (open === "inventory") this._drawInventoryPanel(ctx, game);
     else if (open === "skills") this._drawSkillsPanel(ctx, game);
+    else if (open === "class-select") this._drawClassPanel(ctx, game);
     else if (open === "shop") this._drawShopPanel(ctx, game);
     else if (open === "quests") this._drawQuestPanel(ctx, game);
     else if (open === "town") this._drawTownPanel(ctx, game);
@@ -9367,6 +9440,9 @@ export default class UI {
     const bottom = viewTop + viewSpan;
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = opts.color || "rgba(84,198,255,0.72)";
@@ -9450,6 +9526,9 @@ export default class UI {
     const bottom = viewTop + viewSpan;
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -10989,21 +11068,62 @@ export default class UI {
       });
 
       ctx.fillStyle = "rgba(255,255,255,0.08)";
-      ctx.fillRect(xpLeft, sy + 11, xpW, 9);
+      ctx.fillRect(xpLeft, sy + 13, xpW, 9);
       ctx.fillStyle = row.color;
-      ctx.fillRect(xpLeft, sy + 11, Math.max(6, (xpW * row.xpFrac) | 0), 9);
+      ctx.fillRect(xpLeft, sy + 13, Math.max(6, (xpW * row.xpFrac) | 0), 9);
 
       ctx.fillStyle = "#dce6f4";
       ctx.font = "12px Arial";
-      this._drawFitText(ctx, row.xpText, xpLeft, sy + 25, xpW, 8);
+      this._drawFitText(ctx, row.xpText, xpLeft, sy + 32, xpW, 8);
 
       ctx.fillStyle = "#8ea1b8";
       ctx.font = "11px Arial";
-      this._drawFitText(ctx, row.infoText, rowLeft + 12, sy + 42, rowW - 24, 8);
+      this._drawFitText(ctx, row.infoText, rowLeft + 12, sy + 52, rowW - 24, 8);
 
       sy += layout.rowStep;
     }
 
+    ctx.restore();
+  }
+
+  _drawClassPanel(ctx, game) {
+    const layout = game?.getClassPanelLayout?.();
+    const classes = game?.getClassPanelData?.() || [];
+    if (!layout) return;
+    const { x, y, w, h, cards } = layout;
+
+    ctx.save();
+    this._drawPanel(ctx, x, y, w, h, { alpha: 0.94, accent: UI_PURPLE });
+    ctx.fillStyle = "#eef4fb";
+    ctx.font = "bold 22px Arial";
+    ctx.fillText("Choose Your Class", x + 18, y + 30);
+    ctx.fillStyle = "#95a7bd";
+    ctx.font = "13px Arial";
+    this._drawFitText(ctx, "Pick a starting class. Town sanctums can change your oath later, but this sets your early game feel.", x + 18, y + 52, w - 36, 9);
+
+    for (let i = 0; i < classes.length; i++) {
+      const cls = classes[i];
+      const card = cards[i];
+      if (!card || !cls) continue;
+      ctx.fillStyle = "rgba(255,255,255,0.05)";
+      ctx.fillRect(card.x, card.y, card.w, card.h);
+      ctx.strokeStyle = cls.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(card.x + 0.5, card.y + 0.5, card.w - 1, card.h - 1);
+      ctx.fillStyle = cls.color;
+      ctx.font = "bold 18px Arial";
+      ctx.fillText(`${cls.key}. ${cls.name}`, card.x + 14, card.y + 24);
+      ctx.fillStyle = "#dce6f4";
+      ctx.font = "12px Arial";
+      this._drawFitText(ctx, cls.body, card.x + 14, card.y + 46, card.w - 28, 8);
+      ctx.fillStyle = "#9cb0c9";
+      ctx.font = "11px Arial";
+      let py = card.y + 78;
+      for (const perk of cls.perks || []) {
+        this._drawFitText(ctx, `• ${perk}`, card.x + 14, py, card.w - 28, 8);
+        py += 16;
+      }
+    }
     ctx.restore();
   }
 
@@ -11808,16 +11928,16 @@ export default class World {
     this._terrainChunkSize = this._terrainTileSize * this._terrainChunkTiles;
     this._terrainChunkCache = new Map();
     this._terrainChunkOrder = [];
-    this._terrainChunkLimit = 160;
+    this._terrainChunkLimit = 240;
     this._propChunkCache = new Map();
     this._propChunkOrder = [];
-    this._propChunkLimit = 160;
+    this._propChunkLimit = 240;
     this._bridgeChunkCache = new Map();
     this._bridgeChunkOrder = [];
-    this._bridgeChunkLimit = 160;
+    this._bridgeChunkLimit = 240;
     this._sceneChunkCache = new Map();
     this._sceneChunkOrder = [];
-    this._sceneChunkLimit = 160;
+    this._sceneChunkLimit = 240;
     this._discoveryExportCache = null;
     this._revealed = null;
     this._mapBuildQueued = false;
@@ -14079,6 +14199,8 @@ export default class World {
           spriteCtx.fillRect(bx + bw * 0.62, by + 8, 7, 7);
           spriteCtx.fillStyle = "#3f2c1f";
           spriteCtx.fillRect(bx + bw * 0.5 - 4, by + bh - 12, 8, 12);
+          spriteCtx.fillStyle = "rgba(255,233,175,0.88)";
+          spriteCtx.fillRect(bx + bw * 0.5 - 5, by + bh - 14, 10, 3);
         }
 
         spriteCtx.fillStyle = "rgba(180,160,120,0.28)";
@@ -14103,7 +14225,7 @@ export default class World {
       if (startTownSprite) ctx.drawImage(startTownSprite, t.x - 180, t.y - 160);
 
       drawText(t.name || "Crossroads Haven", t.x, t.y - 148, 22, "#fff8d0");
-      drawText("Inn  Smithy  Vendor  Stable", t.x, t.y + 126, 11, "#ecd7aa");
+      drawText("Inn  Forge  Vendor  Stable  Guildhall  Sanctum", t.x, t.y + 126, 11, "#ecd7aa");
     }
 
     for (const t of this.towns || []) {
@@ -15751,12 +15873,14 @@ export default class World {
         isStarting: true,
         npcs: ["Innkeeper", "Smith", "Vendor", "Stablemaster", "Healer", "Warden", "Cartographer"],
         buildings: [
-          { name: "Inn", x: -94, y: -82, w: 52, h: 48, color: "#6c5847" },
-          { name: "Smithy", x: 22, y: -90, w: 54, h: 54, color: "#505866" },
-          { name: "Vendor", x: -74, y: 12, w: 48, h: 40, color: "#7b654f" },
-          { name: "Stable", x: 48, y: 18, w: 52, h: 46, color: "#8b6f52" },
-          { name: "Healer", x: -118, y: 46, w: 36, h: 36, color: "#5f5244" },
-          { name: "Cartography", x: 84, y: -44, w: 38, h: 42, color: "#4b5464" },
+          { name: "Inn", service: "inn", x: -122, y: -96, w: 58, h: 52, color: "#6c5847" },
+          { name: "Forge", service: "forge", x: 28, y: -104, w: 60, h: 58, color: "#505866" },
+          { name: "Vendor", service: "vendor", x: -92, y: 4, w: 50, h: 42, color: "#7b654f" },
+          { name: "Stable", service: "stable", x: 54, y: 12, w: 56, h: 50, color: "#8b6f52" },
+          { name: "Healer", service: "healer", x: -136, y: 56, w: 40, h: 40, color: "#5f5244" },
+          { name: "Cartography", service: "cartography", x: 98, y: -52, w: 42, h: 46, color: "#4b5464" },
+          { name: "Guildhall", service: "guild", x: -14, y: 76, w: 62, h: 46, color: "#645241" },
+          { name: "Sanctum", service: "sanctum", x: 112, y: 52, w: 38, h: 42, color: "#4f4a62" },
         ],
       };
 

@@ -169,6 +169,14 @@ export default class Save {
         storyMilestones: this._object(progressSrc.storyMilestones),
         visitedTowns: this._stringArray(progressSrc.visitedTowns),
         crossedBridges: this._stringArray(progressSrc.crossedBridges),
+        herbs: this._int(progressSrc.herbs, 0, 0, 999999),
+        pickedHerbs: this._stringArray(progressSrc.pickedHerbs),
+        materials: {
+          scrap: this._int(progressSrc?.materials?.scrap, 0, 0, 999999),
+          ore: this._int(progressSrc?.materials?.ore, 0, 0, 999999),
+          hide: this._int(progressSrc?.materials?.hide, 0, 0, 999999),
+          essence: this._int(progressSrc?.materials?.essence, 0, 0, 999999),
+        },
         exploredCells: this._stringArray(progressSrc.exploredCells).slice(0, 120000),
       },
 
@@ -295,6 +303,7 @@ export default class Save {
       "map",
       "inventory",
       "skills",
+      "class-select",
       "quests",
       "shop",
       "town",

@@ -88,16 +88,16 @@ export default class World {
     this._terrainChunkSize = this._terrainTileSize * this._terrainChunkTiles;
     this._terrainChunkCache = new Map();
     this._terrainChunkOrder = [];
-    this._terrainChunkLimit = 160;
+    this._terrainChunkLimit = 240;
     this._propChunkCache = new Map();
     this._propChunkOrder = [];
-    this._propChunkLimit = 160;
+    this._propChunkLimit = 240;
     this._bridgeChunkCache = new Map();
     this._bridgeChunkOrder = [];
-    this._bridgeChunkLimit = 160;
+    this._bridgeChunkLimit = 240;
     this._sceneChunkCache = new Map();
     this._sceneChunkOrder = [];
-    this._sceneChunkLimit = 160;
+    this._sceneChunkLimit = 240;
     this._discoveryExportCache = null;
     this._revealed = null;
     this._mapBuildQueued = false;
@@ -2359,6 +2359,8 @@ export default class World {
           spriteCtx.fillRect(bx + bw * 0.62, by + 8, 7, 7);
           spriteCtx.fillStyle = "#3f2c1f";
           spriteCtx.fillRect(bx + bw * 0.5 - 4, by + bh - 12, 8, 12);
+          spriteCtx.fillStyle = "rgba(255,233,175,0.88)";
+          spriteCtx.fillRect(bx + bw * 0.5 - 5, by + bh - 14, 10, 3);
         }
 
         spriteCtx.fillStyle = "rgba(180,160,120,0.28)";
@@ -2383,7 +2385,7 @@ export default class World {
       if (startTownSprite) ctx.drawImage(startTownSprite, t.x - 180, t.y - 160);
 
       drawText(t.name || "Crossroads Haven", t.x, t.y - 148, 22, "#fff8d0");
-      drawText("Inn  Smithy  Vendor  Stable", t.x, t.y + 126, 11, "#ecd7aa");
+      drawText("Inn  Forge  Vendor  Stable  Guildhall  Sanctum", t.x, t.y + 126, 11, "#ecd7aa");
     }
 
     for (const t of this.towns || []) {
@@ -3304,7 +3306,7 @@ export default class World {
       const ty = dy / len;
       const nx = -ty;
       const ny = tx;
-      const passCount = 1;
+      const passCount = 2;
 
       for (let i = 0; i < passCount; i++) {
         const t = passCount === 1
@@ -4031,12 +4033,14 @@ export default class World {
         isStarting: true,
         npcs: ["Innkeeper", "Smith", "Vendor", "Stablemaster", "Healer", "Warden", "Cartographer"],
         buildings: [
-          { name: "Inn", x: -94, y: -82, w: 52, h: 48, color: "#6c5847" },
-          { name: "Smithy", x: 22, y: -90, w: 54, h: 54, color: "#505866" },
-          { name: "Vendor", x: -74, y: 12, w: 48, h: 40, color: "#7b654f" },
-          { name: "Stable", x: 48, y: 18, w: 52, h: 46, color: "#8b6f52" },
-          { name: "Healer", x: -118, y: 46, w: 36, h: 36, color: "#5f5244" },
-          { name: "Cartography", x: 84, y: -44, w: 38, h: 42, color: "#4b5464" },
+          { name: "Inn", service: "inn", x: -122, y: -96, w: 58, h: 52, color: "#6c5847" },
+          { name: "Forge", service: "forge", x: 28, y: -104, w: 60, h: 58, color: "#505866" },
+          { name: "Vendor", service: "vendor", x: -92, y: 4, w: 50, h: 42, color: "#7b654f" },
+          { name: "Stable", service: "stable", x: 54, y: 12, w: 56, h: 50, color: "#8b6f52" },
+          { name: "Healer", service: "healer", x: -136, y: 56, w: 40, h: 40, color: "#5f5244" },
+          { name: "Cartography", service: "cartography", x: 98, y: -52, w: 42, h: 46, color: "#4b5464" },
+          { name: "Guildhall", service: "guild", x: -14, y: 76, w: 62, h: 46, color: "#645241" },
+          { name: "Sanctum", service: "sanctum", x: 112, y: 52, w: 38, h: 42, color: "#4f4a62" },
         ],
       };
 

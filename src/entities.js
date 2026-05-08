@@ -633,9 +633,15 @@ export class Hero {
     ctx.save();
     ctx.translate(this.x, this.y + bob);
 
-    // NEW: draw boat when sailing (under the hero)
     if (this.state?.sailing) {
       this._drawSailingBoat(ctx);
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.beginPath();
+      ctx.ellipse(-16, 9, 8, 2.4, -0.18, 0, Math.PI * 2);
+      ctx.ellipse(16, 9, 8, 2.4, 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.18)";

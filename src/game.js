@@ -53,6 +53,7 @@ export default class Game {
     this.ui = new UI(canvas);
     this.save = new Save("broke-knight-save-v106");
     this._bootSaveData = this.save.load?.() || this.save.read?.() || this.save.get?.() || null;
+    this._hadBootSave = !!this._bootSaveData;
     if (Number.isFinite(+this._bootSaveData?.seed)) this.seed = this._bootSaveData.seed | 0;
 
     this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
@@ -148,9 +149,11 @@ export default class Game {
     this._cachedNearbyCache = null;
     this._cachedNearbySecret = null;
     this._cachedNearbyTown = null;
+    this._cachedNearbyTownDoor = null;
     this._cachedNearbyDragonLair = null;
     this._cachedNearbyHerb = null;
     this.inventoryView = "list";
+    this._townServiceFocus = "";
 
     this._rng = new RNG(hash2(this.seed, 9001));
 
@@ -211,6 +214,7 @@ export default class Game {
       crossedBridges: new Set(),
       herbs: 0,
       pickedHerbs: new Set(),
+      materials: { scrap: 0, ore: 0, hide: 0, essence: 0 },
     };
 
     this.shop = {
@@ -266,6 +270,7 @@ export default class Game {
     this.hero.state.slowT = 0;
     this.hero.state.poisonT = 0;
     this.hero.state.mountainPassAccess = !!this.progress?.storyMilestones?.mountainPassAccess;
+    if (!this._hadBootSave) this.menu.open = "class-select";
 
     this._ensureHeroSafe(true);
     this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
@@ -716,6 +721,12 @@ export default class Game {
   }
 
   _handleMenus() {
+    if (this.menu.open === "class-select") {
+      this._handleClassSelectInput();
+      if (this.menu.open) this._clearTouchState();
+      return;
+    }
+
     if (this.input.wasPressed("m") || this.input.wasPressed("M")) {
       this.menu.open = this.menu.open === "map" ? null : "map";
     }
@@ -751,6 +762,7 @@ export default class Game {
     if (this.input.wasPressed("Escape")) {
       if (this.menu.open) {
         this.menu.open = null;
+        this._townServiceFocus = "";
       } else if (this.dungeon.active) {
         this._leaveDungeon();
       }
@@ -758,6 +770,27 @@ export default class Game {
 
     if (this.menu.open) this._clearTouchState();
     if (this.menu.open === "dev") this._handleDevToolsInput();
+  }
+
+  _handleClassSelectInput() {
+    const choices = ["knight", "ranger", "arcanist", "raider"];
+    for (let i = 0; i < choices.length; i++) {
+      if (this.input.wasPressed(String(i + 1))) {
+        this._chooseClass(choices[i]);
+        return;
+      }
+    }
+    if (!this.mouse.clicked) return;
+    const layout = this.getClassPanelLayout();
+    const mx = this.mouse.x;
+    const my = this.mouse.y;
+    for (let i = 0; i < choices.length; i++) {
+      const card = layout.cards[i];
+      if (mx >= card.x && mx <= card.x + card.w && my >= card.y && my <= card.y + card.h) {
+        this._chooseClass(choices[i]);
+        return;
+      }
+    }
   }
 
   _handleQuestInput() {
@@ -1024,7 +1057,7 @@ export default class Game {
 
   getSkillPanelLayout() {
     const w = Math.min(Math.max(this.w - 110, 520), 620);
-    const h = Math.min(Math.max(this.h - 120, 360), 400);
+    const h = Math.min(Math.max(this.h - 110, 388), 432);
     const x = ((this.w - w) / 2) | 0;
     const y = ((this.h - h) / 2) | 0;
     return {
@@ -1033,10 +1066,44 @@ export default class Game {
       x,
       y,
       rowStart: 98,
-      rowStep: 74,
-      rowHeight: 58,
+      rowStep: 82,
+      rowHeight: 66,
       rowInset: 18,
     };
+  }
+
+  getClassPanelLayout() {
+    const w = Math.min(Math.max(this.w - 120, 640), 820);
+    const h = Math.min(Math.max(this.h - 120, 360), 450);
+    const x = ((this.w - w) / 2) | 0;
+    const y = ((this.h - h) / 2) | 0;
+    const gap = 16;
+    const cardW = Math.floor((w - 36 - gap) / 2);
+    const cardH = 124;
+    return {
+      w, h, x, y,
+      cards: [
+        { x: x + 18, y: y + 94, w: cardW, h: cardH },
+        { x: x + 18 + cardW + gap, y: y + 94, w: cardW, h: cardH },
+        { x: x + 18, y: y + 94 + cardH + gap, w: cardW, h: cardH },
+        { x: x + 18 + cardW + gap, y: y + 94 + cardH + gap, w: cardW, h: cardH },
+      ],
+    };
+  }
+
+  getClassPanelData() {
+    return [
+      { id: "knight", key: "1", name: "Knight", color: "#8fd8ff", body: "Durable frontline fighter. Longer blink guard and steadier survivability.", perks: ["Higher armor feel", "Safer blink finish", "Balanced damage"] },
+      { id: "ranger", key: "2", name: "Ranger", color: "#9fe48d", body: "Fast roaming skirmisher. Better spark speed and longer movement lines.", perks: ["Faster projectiles", "Longer blink distance", "Best travel tempo"] },
+      { id: "arcanist", key: "3", name: "Arcanist", color: "#d8a8ff", body: "High-output caster. Bigger nova and stronger spell damage.", perks: ["Stronger spark/orb", "Largest nova radius", "Mana-heavy"] },
+      { id: "raider", key: "4", name: "Raider", color: "#ffd38a", body: "Aggressive striker. Fast blink, fast orb, and sharp melee pacing.", perks: ["Longest blink", "Faster orb", "High pressure"] },
+    ];
+  }
+
+  _chooseClass(classId) {
+    this.hero.classId = classId || "knight";
+    this.menu.open = null;
+    this._msg(`${this._className(classId)} chosen`, 1.2);
   }
 
   getSpellBarLayout() {
@@ -1111,10 +1178,11 @@ export default class Game {
       crossedBridges: new Set(),
       herbs: 0,
       pickedHerbs: new Set(),
+      materials: { scrap: 0, ore: 0, hide: 0, essence: 0 },
     };
     this.hero.classId = "knight";
     this.dungeon = { active: false, floor: 0, origin: null, room: null, roomIndex: 0, totalRooms: 0, roomRewarded: false, layout: null, currentRoomId: null, keys: 0, roomClearT: 0 };
-    this.menu.open = null;
+    this.menu.open = "class-select";
     this.menu.mapZoom = 1;
     this.trackedObjective = "story";
     this._cachedNearbyCamp = null;
@@ -1214,7 +1282,7 @@ export default class Game {
 
     let walkable = false;
     for (const rect of layout.walkRects || []) {
-      if (insideRect(rect, rect.kind === "room" ? 8 : 6)) {
+      if (insideRect(rect, rect.kind === "room" ? 2 : 1)) {
         walkable = true;
         break;
       }
@@ -1483,7 +1551,8 @@ export default class Game {
     const entry = this.getInventoryEntries()[index];
     if (!entry) return;
     if (action === "equip") {
-      if (entry.kind === "material") this._brewPotion("hp");
+      if (entry.kind === "recipe") this._craftRecipe(entry.recipeId);
+      else if (entry.kind === "material") this._msg(`${entry.name} is stored for crafting`, 0.8);
       else this._equipInventoryItem(index);
     } else if (action === "salvage" && entry.kind === "gear") {
       this._salvageInventoryItem(index);
@@ -1492,7 +1561,7 @@ export default class Game {
 
   getInventoryPanelText(hasItems = (this.hero?.inventory?.length || 0) > 0) {
     return {
-      headerHint: hasItems ? "I or Esc close   V swap view   wheel/arrow select   click again use/equip   B brew HP   N brew Mana" : "I or Esc close   V swap view   B brew HP   N brew Mana",
+      headerHint: hasItems ? "I or Esc close   V swap view   wheel/arrow select   Enter craft/equip   X salvage" : "I or Esc close   V swap view   Enter craft   B brew HP   N brew Mana",
       emptyBagTitle: "No gear in your bag yet.",
       emptyBagBody: "Clear camps, shops, contracts, and dungeons will start filling it.",
       emptyDetailTitle: "Item Details",
@@ -1505,6 +1574,108 @@ export default class Game {
     };
   }
 
+  getMaterialCatalog() {
+    return {
+      herb: { label: "Wild Herb", color: "#8fe48d", desc: "Fresh greens used for brews, salves, and road remedies." },
+      scrap: { label: "Metal Scrap", color: "#d1c0aa", desc: "Bent buckles, nails, and fittings salvaged from old gear." },
+      ore: { label: "Ore Chunk", color: "#8ba9c8", desc: "Raw stone and iron ore fit for smelting or tool work." },
+      hide: { label: "Tough Hide", color: "#b88c62", desc: "Animal and raider leathers used for stitched gear." },
+      essence: { label: "Arcane Essence", color: "#c8a0ff", desc: "Residual energy gathered from occult threats and relic sites." },
+    };
+  }
+
+  getCraftingRecipes() {
+    const level = Math.max(1, this.hero?.level || 1);
+    return [
+      {
+        id: "field-tonic",
+        name: "Field Tonic",
+        color: "#8fe48d",
+        desc: "A simple restorative brew for surviving the road.",
+        requires: { herb: 3 },
+        resultText: "Crafts 1 health potion",
+        craft: () => {
+          this.hero.potions.hp = (this.hero.potions.hp || 0) + 1;
+          this._spawnFloatingText(this.hero.x, this.hero.y - 26, "+Health potion", "#8fe48d");
+          this._msg("Field tonic brewed", 1.0);
+        },
+      },
+      {
+        id: "focus-draught",
+        name: "Focus Draught",
+        color: "#88cfff",
+        desc: "An herb-and-essence draught for restoring mana.",
+        requires: { herb: 4, essence: 1 },
+        resultText: "Crafts 1 mana potion",
+        craft: () => {
+          this.hero.potions.mana = (this.hero.potions.mana || 0) + 1;
+          this._spawnFloatingText(this.hero.x, this.hero.y - 26, "+Mana potion", "#88cfff");
+          this._msg("Focus draught brewed", 1.0);
+        },
+      },
+      {
+        id: "patchwork-armor",
+        name: "Patchwork Armor",
+        color: "#d5c1a2",
+        desc: "Hide and scrap stitched into practical travel armor.",
+        requires: { hide: 5, scrap: 3 },
+        resultText: "Crafts 1 common armor",
+        craft: () => {
+          const item = makeGear("armor", Math.max(level, 2), "common", hash2(this.seed, level, this.time | 0, 201));
+          item.name = "Patchwork Armor";
+          item.affix = "stitched";
+          this.hero.inventory.push(item);
+          this._msg("Patchwork armor crafted", 1.2);
+        },
+      },
+      {
+        id: "iron-edge",
+        name: "Iron Edge",
+        color: "#dce8f6",
+        desc: "A sturdier forged weapon made from ore and salvage.",
+        requires: { scrap: 5, ore: 3 },
+        resultText: "Crafts 1 uncommon weapon",
+        craft: () => {
+          const item = makeGear("weapon", Math.max(level, 2), "uncommon", hash2(this.seed, level, this.time | 0, 202));
+          item.name = "Iron Edge";
+          item.affix = "forged";
+          this.hero.inventory.push(item);
+          this._msg("Iron Edge forged", 1.2);
+        },
+      },
+      {
+        id: "trail-boots",
+        name: "Trail Boots",
+        color: "#d8c39c",
+        desc: "Flexible boots made for long-distance travel.",
+        requires: { hide: 4, scrap: 2 },
+        resultText: "Crafts 1 uncommon boots",
+        craft: () => {
+          const item = makeGear("boots", Math.max(level, 2), "uncommon", hash2(this.seed, level, this.time | 0, 203));
+          item.name = "Trail Boots";
+          item.affix = "wayfarer";
+          this.hero.inventory.push(item);
+          this._msg("Trail boots crafted", 1.2);
+        },
+      },
+      {
+        id: "ward-charm",
+        name: "Ward Charm",
+        color: "#d3a9ff",
+        desc: "A bound charm for safer spellwork and deeper delves.",
+        requires: { essence: 3, hide: 2, scrap: 1 },
+        resultText: "Crafts 1 uncommon trinket",
+        craft: () => {
+          const item = makeGear("trinket", Math.max(level, 2), "uncommon", hash2(this.seed, level, this.time | 0, 204));
+          item.name = "Ward Charm";
+          item.affix = "bound";
+          this.hero.inventory.push(item);
+          this._msg("Ward charm crafted", 1.2);
+        },
+      },
+    ];
+  }
+
   getInventoryEntries() {
     const gear = (this.hero.inventory || []).map((item, index) => ({
       kind: "gear",
@@ -1513,17 +1684,34 @@ export default class Game {
       name: item?.name || "Unknown Gear",
       color: item?.color || "#d9dee8",
     }));
+    const catalog = this.getMaterialCatalog();
     const materials = [];
-    if ((this.progress.herbs || 0) > 0) {
+    for (const [material, count] of [
+      ["herb", this.progress.herbs || 0],
+      ["scrap", this.progress.materials?.scrap || 0],
+      ["ore", this.progress.materials?.ore || 0],
+      ["hide", this.progress.materials?.hide || 0],
+      ["essence", this.progress.materials?.essence || 0],
+    ]) {
+      if (!count) continue;
+      const meta = catalog[material];
       materials.push({
         kind: "material",
-        material: "herb",
-        count: this.progress.herbs || 0,
-        name: "Wild Herb",
-        color: "#8fe48d",
+        material,
+        count,
+        name: meta?.label || material,
+        color: meta?.color || "#d9dee8",
+        desc: meta?.desc || "",
       });
     }
-    return [...gear, ...materials];
+    const recipes = this.getCraftingRecipes().map((recipe) => ({
+      kind: "recipe",
+      recipeId: recipe.id,
+      name: recipe.name,
+      color: recipe.color,
+      recipe,
+    }));
+    return [...gear, ...materials, ...recipes];
   }
 
   getInventoryPanelLayout() {
@@ -1579,11 +1767,75 @@ export default class Game {
       item.rarity === "uncommon" ? 7 : 0;
 
     const value = Math.max(4, 6 + (item.level || 1) * 3 + rarityBonus);
+    const yieldMap = this._getSalvageYield(item);
     this.hero.gold += value;
     inv.splice(entry.index, 1);
+    this._grantMaterials(yieldMap, false);
 
     this.invIndex = clamp(index, 0, Math.max(0, this.getInventoryEntries().length - 1));
-    this._msg(`Salvaged for ${value}g`, 1.4);
+    this._msg(`Salvaged for ${value}g and materials`, 1.4);
+  }
+
+  _getSalvageYield(item) {
+    const slot = item?.slot || "trinket";
+    const rarity = item?.rarity || "common";
+    const tier = rarity === "epic" ? 3 : rarity === "rare" ? 2 : rarity === "uncommon" ? 1 : 0;
+    const out = { scrap: 1 + tier, ore: 0, hide: 0, essence: 0 };
+    if (slot === "weapon") {
+      out.ore += 1 + (tier >= 1 ? 1 : 0);
+    } else if (slot === "armor" || slot === "helm") {
+      out.hide += 1 + tier;
+      out.ore += tier >= 2 ? 1 : 0;
+    } else if (slot === "boots") {
+      out.hide += 2 + tier;
+    } else if (slot === "ring" || slot === "trinket") {
+      out.essence += 1 + tier;
+      out.scrap += tier >= 2 ? 1 : 0;
+    }
+    return out;
+  }
+
+  _grantMaterials(amounts = {}, announce = true) {
+    if (!this.progress.materials) this.progress.materials = { scrap: 0, ore: 0, hide: 0, essence: 0 };
+    const parts = [];
+    for (const key of ["scrap", "ore", "hide", "essence"]) {
+      const amount = Math.max(0, Math.round(amounts[key] || 0));
+      if (!amount) continue;
+      this.progress.materials[key] = (this.progress.materials[key] || 0) + amount;
+      parts.push(`+${amount} ${this.getMaterialCatalog()?.[key]?.label || key}`);
+    }
+    if (announce && parts.length) {
+      this._spawnFloatingText(this.hero.x, this.hero.y - 24, "Materials", "#d5c1a2");
+      this._msg(parts.join("  "), 1.2);
+    }
+  }
+
+  _canCraftRecipe(recipe) {
+    if (!recipe?.requires) return false;
+    for (const [mat, need] of Object.entries(recipe.requires)) {
+      const have = mat === "herb" ? (this.progress.herbs || 0) : (this.progress.materials?.[mat] || 0);
+      if (have < need) return false;
+    }
+    return true;
+  }
+
+  _consumeRecipeMaterials(recipe) {
+    for (const [mat, need] of Object.entries(recipe.requires || {})) {
+      if (mat === "herb") this.progress.herbs = Math.max(0, (this.progress.herbs || 0) - need);
+      else if (this.progress.materials) this.progress.materials[mat] = Math.max(0, (this.progress.materials[mat] || 0) - need);
+    }
+  }
+
+  _craftRecipe(recipeId) {
+    const recipe = this.getCraftingRecipes().find((entry) => entry.id === recipeId);
+    if (!recipe) return false;
+    if (!this._canCraftRecipe(recipe)) {
+      this._msg(`${recipe.name} needs more materials`, 0.95);
+      return false;
+    }
+    this._consumeRecipeMaterials(recipe);
+    recipe.craft?.();
+    return true;
   }
 
   getInventoryGridLayout() {
@@ -1670,6 +1922,8 @@ export default class Game {
     const forgeCost = 58 + (this.hero?.level || 1) * 9;
     const clueCost = 36 + (this.hero?.level || 1) * 4;
     const passage = this._getTownPassageInfo(town);
+    const focus = this.getTownServiceName();
+    const focusHint = focus ? `${focus} service selected.` : "Move between town buildings for different services.";
     return {
       npcs,
       lines: [
@@ -1688,7 +1942,7 @@ export default class Game {
             : "9 No harbor in this town",
         visited ? `${npcs[0]}: Roads are safer when camps are cleared.` : `${npcs[0]}: First visit supplies were added.`,
       ],
-      npcSummary: `${npcs.join(", ")} are available. Current oath: ${this._className?.() || "Knight"}.${town?.coastal ? " Harbor passage is available here." : ""}`,
+      npcSummary: `${focusHint} ${npcs.join(", ")} are available. Current oath: ${this._className?.() || "Knight"}.${town?.coastal ? " Harbor passage is available here." : ""}`,
     };
   }
 
@@ -2806,6 +3060,13 @@ export default class Game {
   _dropEnemyLoot(e) {
     const goldAmt = Math.max(2, 3 + Math.round((e.level || 1) * 0.8) + (e.lootBonus?.() || 0) + (e.extraLoot || 0));
     this.loot.push(new Loot(e.x, e.y, "gold", { amount: goldAmt }));
+    const matYield = { scrap: 0, ore: 0, hide: 0, essence: 0 };
+    const kind = String(e.kind || "").toLowerCase();
+    if (["wolf", "stalker", "thorn"].includes(kind)) matYield.hide += e.elite ? 2 : 1;
+    if (["wisp", "caster", "ashling", "dragon"].includes(kind)) matYield.essence += e.boss ? 3 : e.elite ? 2 : 1;
+    if (["brute", "duelist", "sentinel", "scout"].includes(kind)) matYield.scrap += e.elite ? 2 : 1;
+    if (["sentinel", "dragon", "brute"].includes(kind)) matYield.ore += e.boss ? 2 : e.elite ? 1 : 0;
+    this._grantMaterials(matYield, false);
 
     const hasLockedKeyDoor = !!this.dungeon?.active && (this.dungeon?.layout?.doors || []).some((door) => !door.open && door.locked === "key");
     if (e?.dungeonRoomId && hasLockedKeyDoor) {
@@ -2937,6 +3198,7 @@ export default class Game {
     this._cachedNearbyShrine = null;
     this._cachedNearbyCache = null;
     this._cachedNearbyHerb = null;
+    this._cachedNearbyTownDoor = null;
 
     const check = (arr, r, predicate = null) => {
       const r2 = r * r;
@@ -2956,6 +3218,7 @@ export default class Game {
     this._cachedNearbyHerb = check(this.world.herbs, 54, (h) => !h.picked);
     this._cachedNearbySecret = check(this.world.secrets, 62);
     this._cachedNearbyTown = check(this.world.towns, 96);
+    this._cachedNearbyTownDoor = this._findNearbyTownDoor(this._cachedNearbyTown || this.world.startTown, 42);
     this._cachedNearbyDragonLair = check(this.world.dragonLairs, 110);
     if (this._cachedNearbySecret) this._discoverSecret(this._cachedNearbySecret);
   }
@@ -3017,6 +3280,11 @@ export default class Game {
       return;
     }
 
+    if (this._cachedNearbyTownDoor) {
+      this._enterTownService(this._cachedNearbyTownDoor);
+      return;
+    }
+
     if (this._cachedNearbyCamp) {
       this._openShop(this._cachedNearbyCamp);
       return;
@@ -3057,6 +3325,40 @@ export default class Game {
     }
   }
 
+  _findNearbyTownDoor(town, radius = 42) {
+    if (!town?.buildings?.length) return null;
+    const r2 = radius * radius;
+    let best = null;
+    let bestD2 = Infinity;
+    for (const building of town.buildings) {
+      const doorX = town.x + (building.x || 0) + (building.w || 0) * 0.5;
+      const doorY = town.y + (building.y || 0) + (building.h || 0) - 8;
+      const d2 = dist2(this.hero.x, this.hero.y, doorX, doorY);
+      if (d2 > r2 || d2 >= bestD2) continue;
+      bestD2 = d2;
+      best = {
+        town,
+        building,
+        service: building.service || "",
+        name: building.name || "Door",
+        x: doorX,
+        y: doorY,
+      };
+    }
+    return best;
+  }
+
+  _enterTownService(door) {
+    if (!door?.town) return;
+    this._townServiceFocus = door.service || "";
+    if (door.service === "vendor") {
+      this._openTownVendor();
+      return;
+    }
+    this._enterTown(door.town, door.service || "");
+    this._msg(`${door.name}`, 0.9);
+  }
+
   _collectHerb(herb) {
     if (!herb || herb.picked) return;
     herb.picked = true;
@@ -3068,18 +3370,21 @@ export default class Game {
     this._msg("Wild herbs gathered", 0.8);
   }
 
-  _openShop(camp) {
+  _openShop(camp, opts = {}) {
     this.shop.campId = camp.id;
-    this._rememberProgressId(this.progress.visitedCamps, camp);
-    this._claimCampRestBonus(camp);
-    this.shop.discount = this._shopDiscount(camp);
-    this.shop.items = this._buildShopForCamp(camp);
+    if (!opts.skipCampProgress) {
+      this._rememberProgressId(this.progress.visitedCamps, camp);
+      this._claimCampRestBonus(camp);
+    }
+    this.shop.discount = opts.discount ?? this._shopDiscount(camp);
+    this.shop.items = opts.items || this._buildShopForCamp(camp);
     this.menu.open = "shop";
   }
 
-  _enterTown(town) {
+  _enterTown(town, focus = "") {
     const id = this._progressId(town);
     this._rememberProgressId(this.progress.visitedTowns, town);
+    this._townServiceFocus = focus || "";
 
     if (!this.progress.storyMilestones[`town_${id}`]) {
       this.progress.storyMilestones[`town_${id}`] = true;
@@ -3099,6 +3404,26 @@ export default class Game {
     }
 
     this.menu.open = "town";
+  }
+
+  _openTownVendor() {
+    const town = this._cachedNearbyTown || this.world.startTown;
+    if (!town) return;
+    const merchantNode = { id: `town-vendor-${this._progressId(town)}`, x: town.x, y: town.y, type: town.coastal ? "bandit" : "wild" };
+    const items = this._buildShopForCamp(merchantNode);
+    items.push({
+      kind: "material",
+      name: "Wild Herb Bundle",
+      price: 16,
+      data: { material: "herb", amount: 3 },
+    });
+    items.push({
+      kind: "material",
+      name: "Forge Scrap",
+      price: 24,
+      data: { material: "scrap", amount: 2 },
+    });
+    this._openShop(merchantNode, { items, discount: 0, skipCampProgress: true });
   }
 
   _townRest() {
@@ -3142,6 +3467,20 @@ export default class Game {
     this.hero.gold -= cost;
     this.hero.inventory.push(item);
     this._msg(`Forged ${item.name}`, 1.4);
+  }
+
+  getTownServiceName(service = this._townServiceFocus) {
+    const names = {
+      inn: "Inn",
+      forge: "Forge",
+      vendor: "Vendor",
+      stable: "Stable",
+      healer: "Healer",
+      cartography: "Cartography",
+      guild: "Guildhall",
+      sanctum: "Sanctum",
+    };
+    return names[service] || "";
   }
 
   _townAskRumor() {
@@ -3411,6 +3750,14 @@ export default class Game {
     if (item.kind === "potion") {
       const pt = item.data?.potionType === "mana" ? "mana" : "hp";
       this.hero.potions[pt] = (this.hero.potions[pt] || 0) + 1;
+    } else if (item.kind === "material") {
+      const material = item.data?.material || "scrap";
+      const amount = Math.max(1, item.data?.amount || 1);
+      if (material === "herb") {
+        this.progress.herbs = (this.progress.herbs || 0) + amount;
+      } else {
+        this._grantMaterials({ [material]: amount }, false);
+      }
     } else if (item.kind === "gear") {
       this.hero.inventory.push(item.data);
     }
@@ -3496,6 +3843,13 @@ export default class Game {
       item.name = `Cache-Sealed ${item.name}`;
       this.loot.push(new Loot(cache.x, cache.y - 12, "gear", item));
     }
+
+    this._grantMaterials({
+      scrap: 1 + Math.floor(level / 3),
+      ore: level >= 3 ? 1 + Math.floor(level / 4) : 0,
+      hide: level >= 2 ? 1 : 0,
+      essence: level >= 4 ? 1 : 0,
+    }, false);
 
     this._spawnFloatingText(cache.x, cache.y - 22, "Cache opened", "#ffe19a");
     this._msg("Treasure cache opened", 1.4);
@@ -3637,8 +3991,8 @@ export default class Game {
       walkRects.push({
         x: room.x,
         y: room.y,
-        w: Math.max(96, room.w - 72),
-        h: Math.max(96, room.h - 72),
+        w: Math.max(120, room.w - 40),
+        h: Math.max(120, room.h - 40),
         kind: "room",
         roomId: id,
       });
@@ -3657,7 +4011,7 @@ export default class Game {
         const right = left === a ? b : a;
         const startX = left.x + left.w * 0.5 - 26;
         const endX = right.x - right.w * 0.5 + 26;
-        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 74, kind: "corridor", rooms: [a.id, b.id] };
+        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 86, kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
@@ -3668,7 +4022,7 @@ export default class Game {
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: 26, h: corridor.h - 12 },
+          blocker: { x: corridor.x, y: corridor.y, w: 20, h: corridor.h - 16 },
         };
         addOpening(left, "right", left.y, corridor.h + 8);
         addOpening(right, "left", right.y, corridor.h + 8);
@@ -3677,7 +4031,7 @@ export default class Game {
         const bottom = top === a ? b : a;
         const startY = top.y + top.h * 0.5 - 26;
         const endY = bottom.y - bottom.h * 0.5 + 26;
-        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 74, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
+        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 86, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
@@ -3688,7 +4042,7 @@ export default class Game {
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 12, h: 26 },
+          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 16, h: 20 },
         };
         addOpening(top, "bottom", top.x, corridor.w + 8);
         addOpening(bottom, "top", bottom.x, corridor.w + 8);
@@ -3778,6 +4132,54 @@ export default class Game {
           ["shrine", "crypt", "clear", "Stone Door"],
           ["armory", "crypt", "clear", "Stone Door"],
           ["crypt", "boss", "key", "Boss Gate"],
+        ],
+      },
+      {
+        name: "switchback-descent",
+        rooms: [
+          ["start", "start", 0, 0, 660, 430],
+          ["south", "hall", 1, 0, 540, 320],
+          ["turnA", "hall", 1, -1, 520, 320],
+          ["westA", "loot", 0, -1, 500, 300],
+          ["turnB", "hall", -1, -1, 520, 320],
+          ["shrine", "shrine", -1, -2, 500, 320],
+          ["key", "key", 0, -2, 520, 320],
+          ["crypt", "crypt", 1, -2, 620, 380],
+          ["boss", "boss", 1, -3, 860, 520],
+        ],
+        links: [
+          ["start", "south", "clear", "Gate"],
+          ["south", "turnA", "clear", "Turn Door"],
+          ["turnA", "westA", "clear", "Loot Door"],
+          ["westA", "turnB", "clear", "Stone Gate"],
+          ["turnB", "shrine", "clear", "Shrine Door"],
+          ["turnB", "key", "clear", "Archive Door"],
+          ["key", "crypt", "clear", "Crypt Door"],
+          ["crypt", "boss", "key", "Boss Gate"],
+        ],
+      },
+      {
+        name: "cathedral-run",
+        rooms: [
+          ["start", "start", 0, 0, 700, 460],
+          ["nave", "hall", 0, -1, 760, 340],
+          ["westWing", "armory", -1, -1, 500, 320],
+          ["eastWing", "loot", 1, -1, 500, 320],
+          ["apse", "crypt", 0, -2, 720, 380],
+          ["shrine", "shrine", -1, -2, 520, 320],
+          ["key", "key", 1, -2, 520, 320],
+          ["boss", "boss", 0, -3, 920, 560],
+        ],
+        links: [
+          ["start", "nave", "clear", "Entry Gate"],
+          ["nave", "westWing", "clear", "West Door"],
+          ["nave", "eastWing", "clear", "East Door"],
+          ["nave", "apse", "clear", "Apse Gate"],
+          ["westWing", "shrine", "clear", "Shrine Door"],
+          ["eastWing", "key", "clear", "Key Door"],
+          ["apse", "boss", "key", "Boss Gate"],
+          ["shrine", "apse", "clear", "Stone Door"],
+          ["key", "apse", "clear", "Stone Door"],
         ],
       },
     ];
@@ -3892,7 +4294,7 @@ export default class Game {
       const right = room.x + room.w * 0.5;
       const top = room.y - room.h * 0.5;
       const bottom = room.y + room.h * 0.5;
-      const wall = 22;
+      const wall = 14;
       const openingsBySide = { top: [], right: [], bottom: [], left: [] };
       for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
 
@@ -3929,7 +4331,7 @@ export default class Game {
     }
 
     for (const corridor of layout.corridors || []) {
-      const wall = 14;
+      const wall = 10;
       if (corridor.orientation === "h") {
         addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, corridor.w, wall);
         addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, corridor.w, wall);
@@ -3951,7 +4353,7 @@ export default class Game {
     const right = room.x + room.w * 0.5;
     const top = room.y - room.h * 0.5;
     const bottom = room.y + room.h * 0.5;
-    const wall = 22;
+    const wall = 14;
     const edge = active ? "rgba(139,233,255,0.60)" : theme.accent;
     const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(14,17,22,0.94)";
 
@@ -4017,7 +4419,7 @@ export default class Game {
   _drawDungeonCorridorWalls(ctx, rect, theme) {
     const gx = rect.x - rect.w * 0.5;
     const gy = rect.y - rect.h * 0.5;
-    const wall = 14;
+    const wall = 10;
     const face = "rgba(13,16,22,0.95)";
 
     if (rect.orientation === "h") {
@@ -4941,6 +5343,7 @@ export default class Game {
           crossedBridges: Array.from(this.progress.crossedBridges || []),
           herbs: this.progress.herbs || 0,
           pickedHerbs: Array.from(this.progress.pickedHerbs || []),
+          materials: this.progress.materials || { scrap: 0, ore: 0, hide: 0, essence: 0 },
           exploredCells: this.world?.exportDiscovery?.() || [],
         },
         trackedObjective: this.trackedObjective,
@@ -5045,6 +5448,12 @@ export default class Game {
         this.progress.crossedBridges = new Set(data.progress.crossedBridges || []);
         this.progress.herbs = data.progress.herbs || 0;
         this.progress.pickedHerbs = new Set(data.progress.pickedHerbs || []);
+        this.progress.materials = {
+          scrap: data.progress.materials?.scrap || 0,
+          ore: data.progress.materials?.ore || 0,
+          hide: data.progress.materials?.hide || 0,
+          essence: data.progress.materials?.essence || 0,
+        };
         for (const herb of this.world.herbs || []) herb.picked = this.progress.pickedHerbs.has(herb.id);
         if (!needsWorldMigration) {
           this.world?.importDiscovery?.(data.progress.exploredCells || []);

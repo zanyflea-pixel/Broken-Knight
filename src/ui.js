@@ -128,6 +128,7 @@ export default class UI {
     if (open === "map") this._drawMap(ctx, game);
     else if (open === "inventory") this._drawInventoryPanel(ctx, game);
     else if (open === "skills") this._drawSkillsPanel(ctx, game);
+    else if (open === "class-select") this._drawClassPanel(ctx, game);
     else if (open === "shop") this._drawShopPanel(ctx, game);
     else if (open === "quests") this._drawQuestPanel(ctx, game);
     else if (open === "town") this._drawTownPanel(ctx, game);
@@ -1126,6 +1127,9 @@ export default class UI {
     const bottom = viewTop + viewSpan;
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = opts.color || "rgba(84,198,255,0.72)";
@@ -1209,6 +1213,9 @@ export default class UI {
     const bottom = viewTop + viewSpan;
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -2518,26 +2525,39 @@ export default class UI {
 
     this._drawHeroPortrait(ctx, hero, rightX + rightW - 96, rightY + 14, 74, 92);
 
-    const herbCount = game?.progress?.herbs || 0;
+    const materials = [
+      { label: "Herbs", count: game?.progress?.herbs || 0, color: "#dff2de" },
+      { label: "Scrap", count: game?.progress?.materials?.scrap || 0, color: "#ead9c8" },
+      { label: "Ore", count: game?.progress?.materials?.ore || 0, color: "#cfe0f4" },
+      { label: "Hide", count: game?.progress?.materials?.hide || 0, color: "#e0c09d" },
+      { label: "Essence", count: game?.progress?.materials?.essence || 0, color: "#e2ccff" },
+    ];
     const materialY = rightY + 36;
-    const materialW = Math.max(148, rightW - 132);
+    const materialW = Math.max(168, rightW - 132);
     ctx.fillStyle = "rgba(126,210,126,0.10)";
-    ctx.fillRect(rightX + 12, materialY, materialW, 54);
+    ctx.fillRect(rightX + 12, materialY, materialW, 72);
     ctx.strokeStyle = "rgba(143,228,141,0.24)";
-    ctx.strokeRect(rightX + 12.5, materialY + 0.5, materialW - 1, 53);
-    ctx.fillStyle = "#dff2de";
+    ctx.strokeRect(rightX + 12.5, materialY + 0.5, materialW - 1, 71);
     ctx.font = "bold 12px Arial";
-    ctx.fillText(`Herbs ${herbCount}`, rightX + 22, materialY + 17);
+    let matLineY = materialY + 16;
+    for (let i = 0; i < materials.length; i++) {
+      const mat = materials[i];
+      ctx.fillStyle = mat.color;
+      const col = i < 3 ? 0 : 1;
+      const row = i % 3;
+      const mx = rightX + 22 + col * Math.max(78, materialW * 0.46);
+      ctx.fillText(`${mat.label} ${mat.count}`, mx, matLineY + row * 16);
+    }
     ctx.fillStyle = "#9cc5a0";
     ctx.font = "11px Arial";
-    this._drawFitText(ctx, inventoryText.brewHpHint || "B Brew health potion (3 herbs)", rightX + 22, materialY + 33, materialW - 18, 8);
-    this._drawFitText(ctx, inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", rightX + 22, materialY + 47, materialW - 18, 8);
+    this._drawFitText(ctx, inventoryText.brewHpHint || "B Brew health potion (3 herbs)", rightX + 22, materialY + 58, materialW - 18, 8);
+    this._drawFitText(ctx, inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", rightX + 22, materialY + 71, materialW - 18, 8);
 
     const slots = game?.getEquipmentSlots?.() || ["weapon", "armor", "helm", "boots", "ring", "trinket"];
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const item = equip[slot];
-      const iy = rightY + 106 + i * 28;
+      const iy = rightY + 126 + i * 26;
       const textW = Math.max(80, rightW - 220);
 
       ctx.fillStyle = "#9db0c8";
@@ -2558,7 +2578,7 @@ export default class UI {
     const pickedEntry = entries[selected];
     const picked = pickedEntry?.item;
     const statX = rightX + 12;
-    let sy = rightY + 284;
+    let sy = rightY + 292;
 
     ctx.fillStyle = "#dce6f4";
     ctx.font = "bold 15px Arial";
@@ -2583,6 +2603,34 @@ export default class UI {
       ctx.fillText(inventoryText.brewHpHint || "B Brew health potion (3 herbs)", statX, sy);
       sy += 16;
       ctx.fillText(inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", statX, sy);
+    } else if (pickedEntry?.kind === "recipe") {
+      const recipe = pickedEntry.recipe;
+      ctx.fillStyle = pickedEntry.color || "#dce6f4";
+      ctx.font = "bold 14px Arial";
+      this._drawFitText(ctx, pickedEntry.name || "Recipe", statX, sy, rightW - 24);
+      sy += 20;
+      ctx.fillStyle = "#9cb0c9";
+      ctx.font = "12px Arial";
+      this._drawFitText(ctx, recipe?.resultText || "Crafts an item", statX, sy, rightW - 24);
+      sy += 22;
+      ctx.fillStyle = "#dfe8f5";
+      this._drawFitText(ctx, recipe?.desc || "Craft at your packfire.", statX, sy, rightW - 24, 8);
+      sy += 34;
+      ctx.fillStyle = "#c9d8ea";
+      ctx.font = "bold 12px Arial";
+      ctx.fillText("Requires", statX, sy);
+      sy += 18;
+      ctx.fillStyle = "#9cb0c9";
+      for (const [mat, need] of Object.entries(recipe?.requires || {})) {
+        const have = mat === "herb" ? (game?.progress?.herbs || 0) : (game?.progress?.materials?.[mat] || 0);
+        const ok = have >= need;
+        ctx.fillStyle = ok ? "#94e48d" : "#ff9c9c";
+        this._drawFitText(ctx, `${need} ${game?.getMaterialCatalog?.()?.[mat]?.label || mat} (${have})`, statX, sy, rightW - 24, 8);
+        sy += 17;
+      }
+      sy += 8;
+      ctx.fillStyle = "#95a7bd";
+      ctx.fillText("Enter/E or click again craft", statX, sy);
     } else if (picked) {
       ctx.fillStyle = picked.color || "#eef4fb";
       ctx.font = "bold 14px Arial";
@@ -2748,21 +2796,62 @@ export default class UI {
       });
 
       ctx.fillStyle = "rgba(255,255,255,0.08)";
-      ctx.fillRect(xpLeft, sy + 11, xpW, 9);
+      ctx.fillRect(xpLeft, sy + 13, xpW, 9);
       ctx.fillStyle = row.color;
-      ctx.fillRect(xpLeft, sy + 11, Math.max(6, (xpW * row.xpFrac) | 0), 9);
+      ctx.fillRect(xpLeft, sy + 13, Math.max(6, (xpW * row.xpFrac) | 0), 9);
 
       ctx.fillStyle = "#dce6f4";
       ctx.font = "12px Arial";
-      this._drawFitText(ctx, row.xpText, xpLeft, sy + 25, xpW, 8);
+      this._drawFitText(ctx, row.xpText, xpLeft, sy + 32, xpW, 8);
 
       ctx.fillStyle = "#8ea1b8";
       ctx.font = "11px Arial";
-      this._drawFitText(ctx, row.infoText, rowLeft + 12, sy + 42, rowW - 24, 8);
+      this._drawFitText(ctx, row.infoText, rowLeft + 12, sy + 52, rowW - 24, 8);
 
       sy += layout.rowStep;
     }
 
+    ctx.restore();
+  }
+
+  _drawClassPanel(ctx, game) {
+    const layout = game?.getClassPanelLayout?.();
+    const classes = game?.getClassPanelData?.() || [];
+    if (!layout) return;
+    const { x, y, w, h, cards } = layout;
+
+    ctx.save();
+    this._drawPanel(ctx, x, y, w, h, { alpha: 0.94, accent: UI_PURPLE });
+    ctx.fillStyle = "#eef4fb";
+    ctx.font = "bold 22px Arial";
+    ctx.fillText("Choose Your Class", x + 18, y + 30);
+    ctx.fillStyle = "#95a7bd";
+    ctx.font = "13px Arial";
+    this._drawFitText(ctx, "Pick a starting class. Town sanctums can change your oath later, but this sets your early game feel.", x + 18, y + 52, w - 36, 9);
+
+    for (let i = 0; i < classes.length; i++) {
+      const cls = classes[i];
+      const card = cards[i];
+      if (!card || !cls) continue;
+      ctx.fillStyle = "rgba(255,255,255,0.05)";
+      ctx.fillRect(card.x, card.y, card.w, card.h);
+      ctx.strokeStyle = cls.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(card.x + 0.5, card.y + 0.5, card.w - 1, card.h - 1);
+      ctx.fillStyle = cls.color;
+      ctx.font = "bold 18px Arial";
+      ctx.fillText(`${cls.key}. ${cls.name}`, card.x + 14, card.y + 24);
+      ctx.fillStyle = "#dce6f4";
+      ctx.font = "12px Arial";
+      this._drawFitText(ctx, cls.body, card.x + 14, card.y + 46, card.w - 28, 8);
+      ctx.fillStyle = "#9cb0c9";
+      ctx.font = "11px Arial";
+      let py = card.y + 78;
+      for (const perk of cls.perks || []) {
+        this._drawFitText(ctx, `• ${perk}`, card.x + 14, py, card.w - 28, 8);
+        py += 16;
+      }
+    }
     ctx.restore();
   }
 
@@ -2853,10 +2942,10 @@ export default class UI {
     const cx = x + w * 0.5;
     const portraitBodyTop = innerY + 8;
     const portraitBodyBottom = y + h - 24;
-    const headY = y + 27;
-    const chestY = y + 56;
-    const chestW = Math.max(22, Math.round(w * 0.40));
-    const bodyH = Math.max(22, Math.round(h * 0.22));
+    const headY = y + 30;
+    const chestY = y + 58;
+    const chestW = Math.max(22, Math.round(w * 0.36));
+    const bodyH = Math.max(22, Math.round(h * 0.20));
     const armorTier = armor?.stats?.armor || 0;
     const weaponTier = weapon?.stats?.dmg || 0;
 
@@ -2889,11 +2978,11 @@ export default class UI {
     ctx.fillRect(x, y, w, h);
 
     if (this._hasUiImage(portraitImg)) {
-      const cropX = Math.round(portraitImg.naturalWidth * 0.14);
-      const cropY = Math.round(portraitImg.naturalHeight * 0.08);
-      const cropW = Math.round(portraitImg.naturalWidth * 0.72);
-      const cropH = Math.round(portraitImg.naturalHeight * 0.78);
-      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 2, innerY + 3, innerW - 4, innerH - 6);
+      const cropX = Math.round(portraitImg.naturalWidth * 0.18);
+      const cropY = Math.round(portraitImg.naturalHeight * 0.10);
+      const cropW = Math.round(portraitImg.naturalWidth * 0.64);
+      const cropH = Math.round(portraitImg.naturalHeight * 0.74);
+      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 4, innerY + 4, innerW - 8, innerH - 8);
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.12)";
@@ -2942,19 +3031,19 @@ export default class UI {
     ctx.strokeStyle = weaponColor;
     ctx.lineWidth = weaponTier >= 18 ? 5.5 : weaponTier >= 10 ? 4.8 : 4;
     ctx.beginPath();
-    ctx.moveTo(x + w - 22, y + 27);
-    ctx.lineTo(x + w - 29, y + 71);
+    ctx.moveTo(x + w - 23, y + 33);
+    ctx.lineTo(x + w - 28, y + 73);
     ctx.stroke();
     ctx.strokeStyle = "rgba(255,255,255,0.52)";
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(x + w - 21, y + 27);
-    ctx.lineTo(x + w - 27, y + 69);
+    ctx.moveTo(x + w - 22, y + 33);
+    ctx.lineTo(x + w - 26, y + 71);
     ctx.stroke();
     ctx.fillStyle = "#bf8d57";
-    ctx.fillRect(x + w - 33, y + 64, 10, 4);
+    ctx.fillRect(x + w - 32, y + 67, 10, 4);
     ctx.fillStyle = "#eef5ff";
-    ctx.fillRect(x + w - 24, y + 24, 4, 5);
+    ctx.fillRect(x + w - 24, y + 30, 4, 5);
 
     ctx.fillStyle = bootsColor;
     ctx.globalAlpha = 0.85;
@@ -3135,6 +3224,15 @@ export default class UI {
     ctx.fillStyle = "#95a7bd";
     ctx.font = "12px Arial";
     ctx.fillText("1-9 or click - Esc to leave town", x + 18, y + 55);
+    const serviceName = game?.getTownServiceName?.() || "";
+    if (serviceName) {
+      this._drawPill(ctx, x + w - 126, y + 14, 108, 18, `Service: ${serviceName}`, {
+        fill: "rgba(139,233,255,0.10)",
+        stroke: "rgba(139,233,255,0.24)",
+        textColor: "#bfefff",
+        font: "bold 10px 'Segoe UI', Arial",
+      });
+    }
 
     const townMenu = game?.getTownMenuLines?.(town) || {
       npcs: town?.npcs || ["Warden", "Smith", "Archivist"],
