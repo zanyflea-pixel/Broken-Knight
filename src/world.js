@@ -472,13 +472,13 @@ export default class World {
     }
 
     if (s.isWater) return false;
-    if (s.isMountainWall) {
-      if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.52) return true;
-      return false;
-    }
-    if (this._isNearMountainWall(x, y, actor?.state?.mountainPassAccess ? 8 : 18)) {
-      if (!(actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.58)) return false;
-    }
+        if (s.isMountainWall) {
+          if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.34) return true;
+          return false;
+        }
+        if (this._isNearMountainWall(x, y, actor?.state?.mountainPassAccess ? 8 : 18)) {
+          if (!(actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.40)) return false;
+        }
     return true;
   }
 
@@ -3143,8 +3143,8 @@ export default class World {
 
   _makeRiverBands() {
     const bands = [];
-    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south"];
-    const mainCount = 18;
+    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west"];
+    const mainCount = 16;
 
     for (let i = 0; i < mainCount; i++) {
       const side = sides[i % sides.length];
@@ -3161,9 +3161,11 @@ export default class World {
         ay: sourceAnchor.y,
         bx: coastAnchor.x,
         by: coastAnchor.y,
+        coastSide: side,
+        coastTarget: { x: coastAnchor.x, y: coastAnchor.y },
         width: this._rng.range(0.76, 1.20),
         bends: 64 + ((i % 4) * 12),
-        amplitude: this._rng.range(760, 1480),
+        amplitude: this._rng.range(680, 1320),
         seed: hash2(this.seed, 101 + i * 17),
       });
     }
@@ -3194,12 +3196,104 @@ export default class World {
         joinT,
         width: this._rng.range(0.46, 0.82),
         bends: 44 + ((i % 3) * 10),
-        amplitude: this._rng.range(360, 860),
+        amplitude: this._rng.range(300, 720),
         seed: hash2(this.seed, 401 + i * 29),
       });
     }
 
+    const spawnTributaries = this._makeSpawnRiverTributaries(bands);
+    if (spawnTributaries.length) bands.push(...spawnTributaries);
+    const forcedContinuations = this._makeForcedRiverContinuations();
+    if (forcedContinuations.length) bands.push(...forcedContinuations);
+
     return bands;
+  }
+
+  _makeForcedRiverContinuations() {
+    const out = [];
+    const fixes = [
+      { x: 6730, y: 484, coastSide: "south", coastX: 6800, width: 0.74, bends: 44, amplitude: 320 },
+    ];
+
+    for (let i = 0; i < fixes.length; i++) {
+      const fix = fixes[i];
+      const coastTarget = { x: fix.coastX ?? fix.x, y: this.mapHalfSize * 0.95 };
+      const coastAnchor =
+        this._findOceanShoreAnchor(fix.coastSide, coastTarget, 7600) ||
+        this._findOceanCoastAnchorNear(coastTarget.x, coastTarget.y, 5200) ||
+        coastTarget;
+      out.push({
+        ax: fix.x,
+        ay: fix.y,
+        bx: coastAnchor.x,
+        by: coastAnchor.y,
+        coastSide: fix.coastSide,
+        coastTarget: { x: coastAnchor.x, y: coastAnchor.y },
+        width: fix.width,
+        bends: fix.bends,
+        amplitude: fix.amplitude,
+        seed: hash2(this.seed, 1901 + i * 61),
+        forcedContinuation: true,
+      });
+    }
+
+    return out;
+  }
+
+  _makeSpawnRiverTributaries(existingBands) {
+    const mains = (existingBands || []).filter((band) => !band.joinBand);
+    if (!mains.length) return [];
+    const offsets = [
+      [-2200, -840],
+      [2140, -760],
+      [-1960, 980],
+      [1880, 1040],
+      [0, -2480],
+      [0, 2360],
+    ];
+    const out = [];
+    for (let i = 0; i < offsets.length; i++) {
+      const [ox, oy] = offsets[i];
+      const sourceGuess = { x: this.spawn.x + ox, y: this.spawn.y + oy };
+      const sourceAnchor = this._findRiverSourceNear(sourceGuess.x, sourceGuess.y, 1400) || sourceGuess;
+      let bestMain = null;
+      let bestJoin = 0.5;
+      let bestD2 = Infinity;
+      for (const main of mains) {
+        const path = this._riverPath(main);
+        const metric = this._riverPathMetric(path);
+        let traversed = 0;
+        for (let s = 1; s < path.length; s++) {
+          const a = path[s - 1];
+          const b = path[s];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len2 = dx * dx + dy * dy || 1;
+          const t = clamp(((sourceAnchor.x - a.x) * dx + (sourceAnchor.y - a.y) * dy) / len2, 0, 1);
+          const qx = a.x + dx * t;
+          const qy = a.y + dy * t;
+          const d2 = (sourceAnchor.x - qx) ** 2 + (sourceAnchor.y - qy) ** 2;
+          if (d2 < bestD2) {
+            bestD2 = d2;
+            bestMain = main;
+            bestJoin = clamp((traversed + Math.hypot(qx - a.x, qy - a.y)) / Math.max(1, metric.total), 0.18, 0.82);
+          }
+          traversed += Math.hypot(dx, dy);
+        }
+      }
+      if (!bestMain) continue;
+      out.push({
+        ax: sourceAnchor.x,
+        ay: sourceAnchor.y,
+        joinBand: bestMain,
+        joinT: bestJoin,
+        width: this._rng.range(0.42, 0.76),
+        bends: 54 + ((i % 3) * 8),
+        amplitude: this._rng.range(260, 580),
+        seed: hash2(this.seed, 881 + i * 37),
+      });
+    }
+    return out;
   }
 
   _makeRiverCoastTarget(side, index = 0) {
@@ -3306,17 +3400,19 @@ export default class World {
       const ty = dy / len;
       const nx = -ty;
       const ny = tx;
-      const passCount = 2;
+      const passCount = 3;
 
       for (let i = 0; i < passCount; i++) {
         const t = passCount === 1
           ? 0.5
           : i === 0
             ? 0.28 + ((range.seed >>> 3) & 15) / 100
-            : 0.68 + ((range.seed >>> 7) & 11) / 100;
+            : i === 1
+              ? 0.52 + ((range.seed >>> 7) & 7) / 140
+              : 0.72 + ((range.seed >>> 11) & 11) / 100;
         const px = range.ax + dx * t;
         const py = range.ay + dy * t;
-        const drift = (((range.seed >>> (i ? 11 : 15)) & 15) - 7.5) * 28;
+        const drift = (((range.seed >>> (i === 0 ? 15 : i === 1 ? 19 : 23)) & 15) - 7.5) * 24;
         passes.push({
           x: px + tx * drift,
           y: py + ty * drift,
@@ -3324,8 +3420,8 @@ export default class World {
           ny,
           tx,
           ty,
-          width: range.width * (0.48 + i * 0.08),
-          length: 480 + ((range.seed >>> (i ? 19 : 23)) & 15) * 22,
+          width: range.width * (0.52 + i * 0.06),
+          length: 560 + ((range.seed >>> (i === 0 ? 27 : i === 1 ? 13 : 17)) & 15) * 26,
           rangeSeed: range.seed,
         });
       }
@@ -3663,12 +3759,12 @@ export default class World {
       const baseY = start.y + dy * t;
       const phaseA = (band.seed % 628) * 0.01;
       const phaseB = (band.seed % 991) * 0.008;
-      const waveA = Math.sin(t * Math.PI * 4.5 + phaseA);
-      const waveB = Math.sin(t * Math.PI * 8.5 + phaseB) * 0.36;
-      const waveC = Math.sin(t * Math.PI * 13.5 + phaseA * 0.7) * 0.14;
+      const waveA = Math.sin(t * Math.PI * 3.15 + phaseA);
+      const waveB = Math.sin(t * Math.PI * 6.2 + phaseB) * 0.28;
+      const waveC = Math.sin(t * Math.PI * 9.4 + phaseA * 0.7) * 0.10;
       const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
       const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
-      const bankWobble = Math.sin(t * Math.PI * 17 + phaseB) * 68 * ease;
+      const bankWobble = Math.sin(t * Math.PI * 11 + phaseB) * 44 * ease;
       const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
       const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
 
@@ -3689,11 +3785,46 @@ export default class World {
     }
 
     if (!band.joinBand) {
+      this._extendRiverHeadwaterPath(pts, band);
       this._clipRiverPathToCoast(pts, 0.245);
     }
 
     band._path = pts;
     return pts;
+  }
+
+  _extendRiverHeadwaterPath(pts, band) {
+    if (!pts || pts.length < 2 || !band) return;
+    const first = pts[0];
+    const second = pts[1];
+    const dx = first.x - second.x;
+    const dy = first.y - second.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const extra = [];
+    const maxSteps = 10;
+
+    for (let i = 1; i <= maxSteps; i++) {
+      const dist = 110 * i;
+      const falloff = 1 - i / (maxSteps + 1);
+      const wobble =
+        (Math.sin(i * 0.7 + (band.seed || 0) * 0.003) * 0.5 +
+         (fbm((first.x + ux * dist) * 0.0012, (first.y + uy * dist) * 0.0012, (band.seed || 0) + 97, 2) - 0.5) * 0.7)
+        * (band.amplitude || 520) * 0.08 * falloff;
+      const px = first.x + ux * dist + nx * wobble;
+      const py = first.y + uy * dist + ny * wobble;
+      const sample = this._sampleCellRaw(px, py);
+      if (sample.isWater) break;
+      extra.push({ x: px, y: py });
+      if (sample.isMountain || sample.zone === "mountain" || sample.zone === "highlands" || this._groundAt(px, py) >= 0.42) {
+        break;
+      }
+    }
+
+    if (extra.length) pts.unshift(...extra.reverse());
   }
 
   _clipRiverPathToCoast(pts, coastCutoff = 0.245) {
@@ -3773,7 +3904,27 @@ export default class World {
       const join = this._pointOnRiverPath(this._riverPath(band.joinBand), band.joinT || 0.5);
       return { x: join.x, y: join.y };
     }
-    return this._shorelinePointAlongLine(band.ax, band.ay, band.bx, band.by, 0.245);
+    let end = this._shorelinePointAlongLine(band.ax, band.ay, band.bx, band.by, 0.245);
+    if (!this._isOceanCoastalLandPoint(end.x, end.y)) {
+      const fallback =
+        (band.coastSide && band.coastTarget ? this._findOceanShoreAnchor(band.coastSide, band.coastTarget, 6200) : null) ||
+        this._findOceanShoreAnchor(this._inferRiverCoastSide(band), { x: band.bx, y: band.by }, 6200) ||
+        this._findOceanCoastAnchorNear(end.x, end.y, 2600) ||
+        this._findOceanCoastAnchorNear(band.bx, band.by, 4200) ||
+        this._findCoastAnchorNear(end.x, end.y, 2200) ||
+        this._findCoastAnchorNear(band.bx, band.by, 3600);
+      if (fallback) end = fallback;
+    }
+    return end;
+  }
+
+  _inferRiverCoastSide(band) {
+    if (!band) return "south";
+    if (band.coastSide) return band.coastSide;
+    const bx = band.bx || 0;
+    const by = band.by || 0;
+    if (Math.abs(bx) > Math.abs(by)) return bx >= 0 ? "east" : "west";
+    return by >= 0 ? "south" : "north";
   }
 
   _riverStartPoint(band) {
@@ -3794,7 +3945,7 @@ export default class World {
       const uy = dy / len;
       let lx = bx;
       let ly = by;
-      for (let dist = 64; dist <= 3200; dist += 64) {
+      for (let dist = 64; dist <= 7200; dist += 64) {
         const px = bx + ux * dist;
         const py = by + uy * dist;
         if (this._groundAt(px, py) < waterCutoff) {
@@ -3862,6 +4013,7 @@ export default class World {
   }
 
   _findRiverSourceNear(x, y, radius = 2200) {
+    let fallback = null;
     for (let r = 0; r <= radius; r += 90) {
       for (let a = 0; a < Math.PI * 2; a += Math.PI / 18) {
         const px = x + Math.cos(a) * r;
@@ -3870,10 +4022,27 @@ export default class World {
         if (raw.isWater || raw.isMountain) continue;
         if (this._isCoastalLandPoint(px, py)) continue;
         if (this._groundAt(px, py) < 0.275) continue;
-        return { x: px, y: py };
+        if (!fallback) fallback = { x: px, y: py };
+        if (this._isRiverSourceHeadwaterPoint(px, py)) return { x: px, y: py };
       }
     }
-    return null;
+    return fallback;
+  }
+
+  _isRiverSourceHeadwaterPoint(x, y) {
+    const raw = this._sampleCellRaw(x, y);
+    if (raw.isWater || raw.isMountain) return false;
+
+    const ground = this._groundAt(x, y);
+    const moisture = this._moistureAt(x, y);
+    const mountainNear = this._isNearMountainWall(x, y, 320);
+    const highlandish = ground >= 0.42 || raw.zone === "highlands" || raw.zone === "stone flats";
+    const forested = raw.zone === "forest" || raw.zone === "deep wilds" || raw.zone === "greenwood";
+
+    if (mountainNear && ground >= 0.34) return true;
+    if (highlandish && moisture >= 0.30) return true;
+    if (ground >= 0.38 && forested) return true;
+    return false;
   }
 
   _isCoastalLandPoint(x, y) {
@@ -4460,7 +4629,7 @@ export default class World {
           const angle = Math.atan2(dy, dx);
           const baseSpan = Math.hypot(dx, dy);
           const riverWidth = river?.band ? this._riverVisualWidth(river.band) : baseSpan;
-          const shouldCreatePassage = baseSpan > 620 || riverWidth > 420;
+          const shouldCreatePassage = baseSpan > 980 || riverWidth > 620;
 
           if (shouldCreatePassage) {
             this._ensureRoadsidePassage(enterShore, exitShore);
@@ -4530,8 +4699,8 @@ export default class World {
 
   _repairMissingBridges(candidates) {
     const out = [...(candidates || [])];
-    const bridgeGapLimit = 340;
-    const hardBridgeGapLimit = 420;
+    const bridgeGapLimit = 492;
+    const hardBridgeGapLimit = 620;
     const nearBridge = (x, y, radius = 88) =>
       out.some((b) => Math.hypot((b.cx || 0) - x, (b.cy || 0) - y) < radius);
     const sampleWaterCrossing = (ax, ay, bx, by) => {
@@ -4613,7 +4782,7 @@ export default class World {
         if (nearBridge(midX, midY, 96)) continue;
 
         const span = Math.hypot(landAfter.x - landBefore.x, landAfter.y - landBefore.y);
-        if (span < 24 || span > 248) continue;
+        if (span < 24 || span > 388) continue;
 
         const angle = Math.atan2(dy, dx);
         const shoreInset = Math.min(6, Math.max(2, (road.width || 24) * 0.08));
@@ -4652,8 +4821,8 @@ export default class World {
   }
 
   _ensureEndpointDockAccess() {
-    const endpointBridgeGap = 320;
-    const endpointPassageGap = 480;
+    const endpointBridgeGap = 492;
+    const endpointPassageGap = 720;
     for (const road of this.roads || []) {
       const pts = road?.points;
       if (!pts || pts.length < 2) continue;
@@ -4672,7 +4841,7 @@ export default class World {
           const dx = water.shoreB.x - water.shoreA.x;
           const dy = water.shoreB.y - water.shoreA.y;
           const span = Math.hypot(dx, dy);
-          if (span >= 24 && span <= 340) {
+          if (span >= 24 && span <= 492) {
             const angle = Math.atan2(dy, dx);
             const dirX = span > 0 ? dx / span : 1;
             const dirY = span > 0 ? dy / span : 0;
@@ -5244,7 +5413,12 @@ export default class World {
         const north = this._sampleCellRaw(px, py - 140).isMountain;
         const south = this._sampleCellRaw(px, py + 140).isMountain;
 
-        if ((west && east) || (north && south)) return { x: px, y: py };
+        const nw = this._sampleCellRaw(px - 120, py - 120).isMountain;
+        const ne = this._sampleCellRaw(px + 120, py - 120).isMountain;
+        const sw = this._sampleCellRaw(px - 120, py + 120).isMountain;
+        const se = this._sampleCellRaw(px + 120, py + 120).isMountain;
+
+        if ((west && east) || (north && south) || (nw && se) || (ne && sw)) return { x: px, y: py };
       }
     }
     return null;
@@ -5526,7 +5700,7 @@ export default class World {
 
       const s = this._sampleCell(tx, ty);
       if ((s.zone === "meadow" || s.zone === "greenwood" || s.zone === "forest" || s.zone === "deep wilds" || s.zone === "old fields" || s.zone === "highlands")
-          && !s.isMountainWall && !s.isWater && !this._isNearBridgeDeck(tx, ty, 30)) {
+          && !s.isMountainWall && !s.isWater && !this._isNearBridgeDeck(tx, ty, 30) && !this._isNearRiverChannel(tx, ty, 22)) {
         const isForest = s.zone === "forest" || s.zone === "deep wilds" || s.zone === "greenwood";
         this._addTree({
           x: tx,
@@ -5535,36 +5709,52 @@ export default class World {
           scale: isForest ? 0.58 + (this._rng.next() * 0.46) : 0.48 + (this._rng.next() * 0.34)
         });
         if (isForest && this._rng.next() < 0.94) {
-          this._addTree({
-            x: tx + this._rng.range(-34, 34),
-            y: ty + this._rng.range(-30, 30),
-            seed: (this.seed + state.index * 197 + 17) >>> 0,
-            scale: 0.38 + (this._rng.next() * 0.24)
-          });
+          const cx = tx + this._rng.range(-34, 34);
+          const cy = ty + this._rng.range(-30, 30);
+          if (!this._isNearRiverChannel(cx, cy, 18)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 197 + 17) >>> 0,
+              scale: 0.38 + (this._rng.next() * 0.24)
+            });
+          }
         }
         if (this._rng.next() < 0.78) {
-          this._addTree({
-            x: tx + this._rng.range(-52, 52),
-            y: ty + this._rng.range(-44, 44),
-            seed: (this.seed + state.index * 257 + 29) >>> 0,
-            scale: 0.32 + (this._rng.next() * 0.20)
-          });
+          const cx = tx + this._rng.range(-52, 52);
+          const cy = ty + this._rng.range(-44, 44);
+          if (!this._isNearRiverChannel(cx, cy, 18)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 257 + 29) >>> 0,
+              scale: 0.32 + (this._rng.next() * 0.20)
+            });
+          }
         }
         if (isForest && this._rng.next() < 0.68) {
-          this._addTree({
-            x: tx + this._rng.range(-66, 66),
-            y: ty + this._rng.range(-58, 58),
-            seed: (this.seed + state.index * 313 + 47) >>> 0,
-            scale: 0.28 + (this._rng.next() * 0.18)
-          });
+          const cx = tx + this._rng.range(-66, 66);
+          const cy = ty + this._rng.range(-58, 58);
+          if (!this._isNearRiverChannel(cx, cy, 18)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 313 + 47) >>> 0,
+              scale: 0.28 + (this._rng.next() * 0.18)
+            });
+          }
         }
         if (isForest && this._rng.next() < 0.40) {
-          this._addTree({
-            x: tx + this._rng.range(-88, 88),
-            y: ty + this._rng.range(-76, 76),
-            seed: (this.seed + state.index * 401 + 73) >>> 0,
-            scale: 0.22 + (this._rng.next() * 0.14)
-          });
+          const cx = tx + this._rng.range(-88, 88);
+          const cy = ty + this._rng.range(-76, 76);
+          if (!this._isNearRiverChannel(cx, cy, 16)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 401 + 73) >>> 0,
+              scale: 0.22 + (this._rng.next() * 0.14)
+            });
+          }
         }
       }
     }
@@ -5784,6 +5974,7 @@ export default class World {
             if (t.scale < 0.3 && (t.seed & 3) !== 0) continue;
           }
           if (this._isNearBridgeDeck(t.x, t.y, 26)) continue;
+          if (this._isNearRiverChannel(t.x, t.y, 16)) continue;
           this._drawTree(ctx, t.x, t.y, t.seed, t.scale);
         }
       }
@@ -5887,6 +6078,11 @@ export default class World {
     }
 
     return false;
+  }
+
+  _isNearRiverChannel(x, y, pad = 18) {
+    const river = this._riverAt(x, y);
+    return river < this._riverWaterLimit + pad / 42;
   }
 
   _drawRock(ctx, x, y, seed, scale, zone = "stone flats") {

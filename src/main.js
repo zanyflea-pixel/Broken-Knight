@@ -16,6 +16,8 @@ const ctx = canvas.getContext("2d", { alpha: false });
 if (!ctx) {
   throw new Error("Could not get 2D canvas context");
 }
+const bootLoading = document.getElementById("boot-loading");
+const bootLoadingStatus = document.getElementById("boot-loading-status");
 
 let game = null;
 let rafId = 0;
@@ -139,6 +141,7 @@ function render() {
 
 function showFatalError(err) {
   cancelLoop();
+  hideBootLoading(true);
 
   const message = err?.stack || err?.message || String(err || "Unknown error");
   console.error("Broke Knight crashed:", err);
@@ -151,6 +154,32 @@ function showFatalError(err) {
   }
 
   panel.textContent = `Broke Knight hit an error.\n\n${message}`;
+}
+
+function setBootLoadingStatus(text) {
+  if (bootLoadingStatus) bootLoadingStatus.textContent = text;
+}
+
+function showBootLoading(text = "Building the world...") {
+  if (!bootLoading) return;
+  setBootLoadingStatus(text);
+  bootLoading.classList.remove("is-hidden");
+  bootLoading.style.display = "flex";
+}
+
+function hideBootLoading(immediate = false) {
+  if (!bootLoading) return;
+  if (immediate) {
+    bootLoading.classList.add("is-hidden");
+    bootLoading.style.display = "none";
+    return;
+  }
+  bootLoading.classList.add("is-hidden");
+  setTimeout(() => {
+    if (bootLoading.classList.contains("is-hidden")) {
+      bootLoading.style.display = "none";
+    }
+  }, 220);
 }
 
 function tick(now) {
@@ -170,8 +199,6 @@ function tick(now) {
   const frameMs = frame * 1000;
   frameEmaMs = frameEmaMs * 0.88 + frameMs * 0.12;
   dynamicScaleCooldown = Math.max(0, dynamicScaleCooldown - frame);
-  game?.noteFrame?.(frame);
-
   try {
     let steps = 0;
     while (accumulator >= STEP && steps < MAX_STEPS) {
@@ -185,6 +212,7 @@ function tick(now) {
     }
 
     render();
+    game?.noteFrame?.(frame);
     maybeAdjustRenderScale();
   } catch (err) {
     showFatalError(err);
@@ -245,18 +273,27 @@ function softResumeSoon() {
 function boot() {
   if (booted) return;
   booted = true;
-
+  showBootLoading("Preparing startup...");
   resizeCanvas();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        showBootLoading("Building the world...");
+        game = new Game(canvas);
 
-  game = new Game(canvas);
+        if (game?.resize) {
+          const { w, h } = getCssSize();
+          game.resize(w, h);
+        }
 
-  if (game?.resize) {
-    const { w, h } = getCssSize();
-    game.resize(w, h);
-  }
-
-  focusCanvas();
-  startLoop();
+        hideBootLoading();
+        focusCanvas();
+        startLoop();
+      } catch (err) {
+        showFatalError(err);
+      }
+    });
+  });
 }
 
 window.addEventListener("resize", () => {

@@ -38,6 +38,7 @@ export default class UI {
     this._controlsCollapsed = false;
     this._controlsToggleRect = null;
     this._profilerCopyRect = null;
+    this._spikeCopyRect = null;
     this._assets = this._loadUiAssets();
   }
 
@@ -102,6 +103,15 @@ export default class UI {
         this._copyProfilerText(game);
       }
     }
+
+    if (game?.mouse?.clicked && this._spikeCopyRect) {
+      const { x, y, w, h } = this._spikeCopyRect;
+      const mx = game.mouse.x;
+      const my = game.mouse.y;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+        this._copyHitchText(game);
+      }
+    }
   }
 
   draw(ctx, game) {
@@ -121,6 +131,7 @@ export default class UI {
     this._drawZoneText(ctx, game);
     this._drawPerfReadout(ctx, game);
     this._drawProfilerPanel(ctx, game);
+    this._drawSpikePanel(ctx, game);
 
     const open = game?.menu?.open || this._open || null;
     if (!open) return;
@@ -544,9 +555,9 @@ export default class UI {
     else if (name.includes("orb")) iconIndex = 3;
     if (iconIndex >= 0 && this._hasUiImage(spellIcons)) {
       const sprite = 64;
-      const drawSize = size * 0.68;
+      const drawSize = size * 0.64;
       const dx = x + (size - drawSize) * 0.5;
-      const dy = y + size * 0.14;
+      const dy = y + (size - drawSize) * 0.5 - 1;
       ctx.save();
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(spellIcons, iconIndex * sprite, 0, sprite, sprite, dx, dy, drawSize, drawSize);
@@ -555,7 +566,7 @@ export default class UI {
     }
 
     const cx = x + size * 0.5;
-    const cy = y + size * 0.5 - 3;
+    const cy = y + size * 0.5 - 1;
     const r = size * 0.18;
 
     ctx.save();
@@ -683,7 +694,7 @@ export default class UI {
       ctx.fillStyle = "#9ab2cf";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText((row.key || "?").toUpperCase(), x + 10, y + 10);
+      ctx.fillText((row.key || "?").toUpperCase(), x + layout.box * 0.5, y + 9);
       ctx.fillText(`${row.manaCost || 0}`, x + layout.box * 0.5, y + layout.box - 8);
 
       ctx.fillStyle = accent;
@@ -1814,9 +1825,10 @@ export default class UI {
       `Rivers ${world.rivers || 0}  River segs ${world.riverSegments || 0}  buckets ${world.riverBuckets || 0}  Bridges ${world.visibleBridges || 0}/${world.bridges || 0}`,
       `Chunks terrain ${world.terrainChunks || 0}  props ${world.propChunks || 0}  bridge ${world.bridgeChunks || 0}`,
       `Props trees ${world.trees || 0}  rocks ${world.rocks || 0}  clutter ${world.clutter || 0}  texts ${perf.floatingTexts || 0}`,
+      `Hero X ${Math.round(game?.hero?.x || 0)}  Y ${Math.round(game?.hero?.y || 0)}  Docks ${world.docks || 0}`,
     ];
     const panelW = 370;
-    const panelH = 104;
+    const panelH = 116;
     const x = this.w - panelW - 14;
     const y = this.h - panelH - 36;
     this._drawPanel(ctx, x, y, panelW, panelH, { alpha: 0.9, accent: "rgba(118,200,255,0.38)" });
@@ -1845,11 +1857,70 @@ export default class UI {
     ctx.restore();
   }
 
+  _drawSpikePanel(ctx, game) {
+    if (!game?.dev?.showSpikeMonitor) {
+      this._spikeCopyRect = null;
+      return;
+    }
+    const perf = game?.getPerfSnapshot?.();
+    const spike = perf?.spike || {};
+    const lines = [
+      `Worst ${((spike.worstMs) || 0).toFixed(1)}ms / ${spike.windowSec || 5}s`,
+      `Move worst ${((spike.moveWorstMs) || 0).toFixed(1)}ms`,
+      `Hitches 24/33/50 ${spike.hitch24 || 0}/${spike.hitch33 || 0}/${spike.hitch50 || 0}`,
+      `Move hitches ${spike.moveHitches || 0}`,
+    ];
+    const panelW = 230;
+    const panelH = 84;
+    const x = this.w - panelW - 14;
+    const y = this.h - panelH - (game?.dev?.showProfiler ? 158 : 36);
+    this._drawPanel(ctx, x, y, panelW, panelH, { alpha: 0.88, accent: "rgba(255,166,92,0.34)" });
+    ctx.save();
+    ctx.fillStyle = "#eef4fb";
+    ctx.font = "bold 12px 'Segoe UI', Arial";
+    ctx.fillText("Hitch Monitor", x + 12, y + 18);
+
+    const buttonW = 54;
+    const buttonH = 16;
+    const buttonX = x + panelW - buttonW - 10;
+    const buttonY = y + 8;
+    this._spikeCopyRect = { x: buttonX, y: buttonY, w: buttonW, h: buttonH };
+    this._drawPill(ctx, buttonX, buttonY, buttonW, buttonH, "Copy", {
+      fill: "rgba(46,30,18,0.92)",
+      stroke: "rgba(255,188,122,0.26)",
+      textColor: "#ffe3bf",
+      font: "bold 10px 'Segoe UI', Arial",
+    });
+
+    ctx.font = "11px 'Segoe UI', Arial";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i === 0 ? "#ffe1b4" : "#dbe6f2";
+      this._drawFitText(ctx, lines[i], x + 12, y + 36 + i * 12, panelW - 78);
+    }
+    ctx.restore();
+  }
+
   _copyProfilerText(game) {
     const text = game?.getPerfSnapshotText?.();
     if (!text) return;
     const onSuccess = () => game?._msg?.("Profiler copied", 0.9);
     const onFailure = () => game?._msg?.("Profiler copy failed", 1.1);
+    try {
+      if (globalThis.navigator?.clipboard?.writeText) {
+        Promise.resolve(globalThis.navigator.clipboard.writeText(text)).then(onSuccess, onFailure);
+      } else {
+        onFailure();
+      }
+    } catch (_) {
+      onFailure();
+    }
+  }
+
+  _copyHitchText(game) {
+    const text = game?.getHitchSnapshotText?.();
+    if (!text) return;
+    const onSuccess = () => game?._msg?.("Hitch monitor copied", 0.9);
+    const onFailure = () => game?._msg?.("Hitch copy failed", 1.1);
     try {
       if (globalThis.navigator?.clipboard?.writeText) {
         Promise.resolve(globalThis.navigator.clipboard.writeText(text)).then(onSuccess, onFailure);
@@ -2848,7 +2919,7 @@ export default class UI {
       ctx.font = "11px Arial";
       let py = card.y + 78;
       for (const perk of cls.perks || []) {
-        this._drawFitText(ctx, `• ${perk}`, card.x + 14, py, card.w - 28, 8);
+        this._drawFitText(ctx, `â€¢ ${perk}`, card.x + 14, py, card.w - 28, 8);
         py += 16;
       }
     }

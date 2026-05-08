@@ -240,7 +240,22 @@ export default class Game {
     this.dev = {
       godMode: false,
       showProfiler: false,
+      showSpikeMonitor: false,
     };
+
+    this._recentFrameSamples = [];
+    this._spikeStats = {
+      worstMs: 0,
+      hitch24: 0,
+      hitch33: 0,
+      hitch50: 0,
+      moveWorstMs: 0,
+      moveHitches: 0,
+      windowSec: 5,
+    };
+    this._perfLastHeroX = this.hero.x;
+    this._perfLastHeroY = this.hero.y;
+    this._moveIntentTimer = 0;
 
     this.trackedObjective = "story";
     this.quest = this._makeBountyQuest();
@@ -294,6 +309,7 @@ export default class Game {
     this._tickMessages(dt);
     this._tickCooldowns(dt);
     this._tickVisualEffects(dt);
+    this._moveIntentTimer = Math.max(0, (this._moveIntentTimer || 0) - dt);
     this.world?.setFocusPoint?.(this.hero.x, this.hero.y);
     this.world?.update?.(dt);
     this._updateMouseWorld();
@@ -755,6 +771,10 @@ export default class Game {
       this.menu.open = this.menu.open === "dev" ? null : "dev";
     }
 
+    if (this.input.wasPressed("F1")) {
+      this._toggleSpikeMonitor();
+    }
+
     if (this.input.wasPressed("F2")) {
       this._toggleProfiler();
     }
@@ -980,6 +1000,11 @@ export default class Game {
     this._msg(this.dev.showProfiler ? "Dev: profiler ON" : "Dev: profiler OFF", 1.0);
   }
 
+  _toggleSpikeMonitor() {
+    this.dev.showSpikeMonitor = !this.dev.showSpikeMonitor;
+    this._msg(this.dev.showSpikeMonitor ? "Dev: hitch monitor ON" : "Dev: hitch monitor OFF", 1.0);
+  }
+
   getDevToolLines() {
     return [
       "1 heal HP and mana",
@@ -992,6 +1017,7 @@ export default class Game {
       "8 equip mythic best gear",
       this._isDevResetConfirmLive() ? "9 reset to a new game (press again now)" : "9 reset to a new game (confirm)",
       `0 profiler ${this.dev?.showProfiler ? "ON" : "OFF"} (F2 quick toggle)`,
+      `Hitch monitor ${this.dev?.showSpikeMonitor ? "ON" : "OFF"} (F1 quick toggle)`,
       `Explored cells: ${this.world?.exportDiscovery?.()?.length || 0}`,
       `World span: ${((this.world?.mapHalfSize || 0) * 2).toLocaleString()} units`,
     ];
@@ -1221,6 +1247,7 @@ export default class Game {
     }
 
     const move = norm(mx, my);
+    if (Math.abs(mx) > 0.08 || Math.abs(my) > 0.08) this._noteMoveIntent(0.28);
     const speed = this._getHeroMoveSpeed();
 
     this.hero.vx = move.x * speed;
@@ -1312,6 +1339,50 @@ export default class Game {
       this._fpsAccum = 0;
       this._fpsFrames = 0;
     }
+
+    const now = (this.time || 0) + dt;
+    const dxHero = (this.hero?.x || 0) - (this._perfLastHeroX || 0);
+    const dyHero = (this.hero?.y || 0) - (this._perfLastHeroY || 0);
+    const movedDist = Math.hypot(dxHero, dyHero);
+    const moving =
+      movedDist > 0.85 ||
+      Math.hypot(this.hero?.vx || 0, this.hero?.vy || 0) > 12 ||
+      Math.abs(this.touch?.mx || 0) > 0.08 ||
+      Math.abs(this.touch?.my || 0) > 0.08 ||
+      (this._moveIntentTimer || 0) > 0 ||
+      !!this.hero?.state?.sailing;
+    this._perfLastHeroX = this.hero?.x || 0;
+    this._perfLastHeroY = this.hero?.y || 0;
+    this._recentFrameSamples.push({ t: now, ms: this._frameMs, moving });
+    const windowSec = this._spikeStats?.windowSec || 5;
+    while (this._recentFrameSamples.length && now - this._recentFrameSamples[0].t > windowSec) {
+      this._recentFrameSamples.shift();
+    }
+    let worstMs = 0;
+    let hitch24 = 0;
+    let hitch33 = 0;
+    let hitch50 = 0;
+    let moveWorstMs = 0;
+    let moveHitches = 0;
+    for (const sample of this._recentFrameSamples) {
+      if (sample.ms > worstMs) worstMs = sample.ms;
+      if (sample.ms >= 24) hitch24++;
+      if (sample.ms >= 33.3) hitch33++;
+      if (sample.ms >= 50) hitch50++;
+      if (sample.moving) {
+        if (sample.ms > moveWorstMs) moveWorstMs = sample.ms;
+        if (sample.ms >= 24) moveHitches++;
+      }
+    }
+    this._spikeStats = {
+      worstMs,
+      hitch24,
+      hitch33,
+      hitch50,
+      moveWorstMs,
+      moveHitches,
+      windowSec,
+    };
   }
 
   _getHeroMoveSpeed() {
@@ -1321,6 +1392,10 @@ export default class Game {
     if (this.hero.state?.sailing) speed *= 1.18;
     speed *= this._heroTerrainSample?.moveModifier || 1;
     return speed;
+  }
+
+  _noteMoveIntent(dt = 0.12) {
+    this._moveIntentTimer = Math.max(this._moveIntentTimer || 0, dt);
   }
 
   _updateHeroTerrainSample(dt) {
@@ -1361,6 +1436,7 @@ export default class Game {
       fps: this._fps || 0,
       frameMs: this._frameMs || 0,
       frameJank: this._frameJank || 0,
+      spike: this._spikeStats || null,
       renderScale: this.renderScale || 1,
       enemies: this.enemies?.length || 0,
       visibleEnemies,
@@ -1387,7 +1463,18 @@ export default class Game {
       `Bridges visible/total ${world.visibleBridges || 0}/${world.bridges || 0}  Docks ${world.docks || 0}`,
       `Chunks terrain/props/bridge ${world.terrainChunks || 0}/${world.propChunks || 0}/${world.bridgeChunks || 0}`,
       `Props trees/rocks/clutter ${world.trees || 0}/${world.rocks || 0}/${world.clutter || 0}`,
+      `Spikes worst ${((perf.spike?.worstMs) || 0).toFixed(1)}ms  move worst ${((perf.spike?.moveWorstMs) || 0).toFixed(1)}ms  h24 ${perf.spike?.hitch24 || 0}  h33 ${perf.spike?.hitch33 || 0}  h50 ${perf.spike?.hitch50 || 0}`,
       `Hero X ${Math.round(this.hero?.x || 0)}  Y ${Math.round(this.hero?.y || 0)}`,
+    ].join("\n");
+  }
+
+  getHitchSnapshotText() {
+    const spike = this._spikeStats || {};
+    return [
+      `Worst ${((spike.worstMs) || 0).toFixed(1)}ms/${spike.windowSec || 5}s`,
+      `Move worst ${((spike.moveWorstMs) || 0).toFixed(1)}ms`,
+      `Hitches 24/33/50 ${spike.hitch24 || 0}/${spike.hitch33 || 0}/${spike.hitch50 || 0}`,
+      `Move hitches ${spike.moveHitches || 0}`,
     ].join("\n");
   }
 

@@ -167,6 +167,76 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\update-project-snaps
       z-index: 10;
     }
 
+    #boot-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 50% 18%, rgba(90, 124, 158, 0.18), rgba(0, 0, 0, 0) 34%),
+        linear-gradient(180deg, rgba(8, 12, 18, 0.94) 0%, rgba(5, 8, 12, 0.98) 100%);
+      opacity: 1;
+      transition: opacity 180ms ease;
+    }
+
+    #boot-loading.is-hidden {
+      opacity: 0;
+    }
+
+    .boot-card {
+      min-width: 260px;
+      max-width: min(92vw, 420px);
+      padding: 20px 22px 18px;
+      border-radius: 14px;
+      background: rgba(10, 16, 24, 0.88);
+      border: 1px solid rgba(144, 194, 235, 0.18);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
+      color: rgba(236, 242, 248, 0.96);
+      text-align: center;
+    }
+
+    .boot-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .boot-status {
+      margin: 0;
+      font-size: 13px;
+      color: rgba(199, 216, 232, 0.86);
+    }
+
+    .boot-bar {
+      position: relative;
+      width: 100%;
+      height: 8px;
+      margin-top: 14px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .boot-bar::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      width: 42%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, rgba(118, 191, 255, 0.28), rgba(134, 220, 247, 0.9));
+      animation: boot-slide 1.2s ease-in-out infinite;
+    }
+
+    @keyframes boot-slide {
+      0% { transform: translateX(-120%); }
+      50% { transform: translateX(110%); }
+      100% { transform: translateX(240%); }
+    }
+
     .js-ready #noscript-msg {
       display: none;
     }
@@ -194,6 +264,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\update-project-snaps
 <body>
   <div id="game-shell">
     <canvas id="overworld" tabindex="0" aria-label="Broke Knight game canvas"></canvas>
+  </div>
+
+  <div id="boot-loading" aria-live="polite">
+    <div class="boot-card">
+      <p class="boot-title">Broke Knight</p>
+      <p class="boot-status" id="boot-loading-status">Building the world...</p>
+      <div class="boot-bar" aria-hidden="true"></div>
+    </div>
   </div>
 
   <div id="noscript-msg">Enable JavaScript to run Broke Knight.</div>
@@ -2471,6 +2549,7 @@ export default class Game {
     this._cachedNearbyDragonLair = null;
     this._cachedNearbyHerb = null;
     this.inventoryView = "list";
+    this._townServiceFocus = "";
 
     this._rng = new RNG(hash2(this.seed, 9001));
 
@@ -2557,7 +2636,22 @@ export default class Game {
     this.dev = {
       godMode: false,
       showProfiler: false,
+      showSpikeMonitor: false,
     };
+
+    this._recentFrameSamples = [];
+    this._spikeStats = {
+      worstMs: 0,
+      hitch24: 0,
+      hitch33: 0,
+      hitch50: 0,
+      moveWorstMs: 0,
+      moveHitches: 0,
+      windowSec: 5,
+    };
+    this._perfLastHeroX = this.hero.x;
+    this._perfLastHeroY = this.hero.y;
+    this._moveIntentTimer = 0;
 
     this.trackedObjective = "story";
     this.quest = this._makeBountyQuest();
@@ -2611,6 +2705,7 @@ export default class Game {
     this._tickMessages(dt);
     this._tickCooldowns(dt);
     this._tickVisualEffects(dt);
+    this._moveIntentTimer = Math.max(0, (this._moveIntentTimer || 0) - dt);
     this.world?.setFocusPoint?.(this.hero.x, this.hero.y);
     this.world?.update?.(dt);
     this._updateMouseWorld();
@@ -3072,6 +3167,10 @@ export default class Game {
       this.menu.open = this.menu.open === "dev" ? null : "dev";
     }
 
+    if (this.input.wasPressed("F1")) {
+      this._toggleSpikeMonitor();
+    }
+
     if (this.input.wasPressed("F2")) {
       this._toggleProfiler();
     }
@@ -3079,6 +3178,7 @@ export default class Game {
     if (this.input.wasPressed("Escape")) {
       if (this.menu.open) {
         this.menu.open = null;
+        this._townServiceFocus = "";
       } else if (this.dungeon.active) {
         this._leaveDungeon();
       }
@@ -3296,6 +3396,11 @@ export default class Game {
     this._msg(this.dev.showProfiler ? "Dev: profiler ON" : "Dev: profiler OFF", 1.0);
   }
 
+  _toggleSpikeMonitor() {
+    this.dev.showSpikeMonitor = !this.dev.showSpikeMonitor;
+    this._msg(this.dev.showSpikeMonitor ? "Dev: hitch monitor ON" : "Dev: hitch monitor OFF", 1.0);
+  }
+
   getDevToolLines() {
     return [
       "1 heal HP and mana",
@@ -3308,6 +3413,7 @@ export default class Game {
       "8 equip mythic best gear",
       this._isDevResetConfirmLive() ? "9 reset to a new game (press again now)" : "9 reset to a new game (confirm)",
       `0 profiler ${this.dev?.showProfiler ? "ON" : "OFF"} (F2 quick toggle)`,
+      `Hitch monitor ${this.dev?.showSpikeMonitor ? "ON" : "OFF"} (F1 quick toggle)`,
       `Explored cells: ${this.world?.exportDiscovery?.()?.length || 0}`,
       `World span: ${((this.world?.mapHalfSize || 0) * 2).toLocaleString()} units`,
     ];
@@ -3537,6 +3643,7 @@ export default class Game {
     }
 
     const move = norm(mx, my);
+    if (Math.abs(mx) > 0.08 || Math.abs(my) > 0.08) this._noteMoveIntent(0.28);
     const speed = this._getHeroMoveSpeed();
 
     this.hero.vx = move.x * speed;
@@ -3598,7 +3705,7 @@ export default class Game {
 
     let walkable = false;
     for (const rect of layout.walkRects || []) {
-      if (insideRect(rect, rect.kind === "room" ? 8 : 6)) {
+      if (insideRect(rect, rect.kind === "room" ? 2 : 1)) {
         walkable = true;
         break;
       }
@@ -3628,6 +3735,50 @@ export default class Game {
       this._fpsAccum = 0;
       this._fpsFrames = 0;
     }
+
+    const now = (this.time || 0) + dt;
+    const dxHero = (this.hero?.x || 0) - (this._perfLastHeroX || 0);
+    const dyHero = (this.hero?.y || 0) - (this._perfLastHeroY || 0);
+    const movedDist = Math.hypot(dxHero, dyHero);
+    const moving =
+      movedDist > 0.85 ||
+      Math.hypot(this.hero?.vx || 0, this.hero?.vy || 0) > 12 ||
+      Math.abs(this.touch?.mx || 0) > 0.08 ||
+      Math.abs(this.touch?.my || 0) > 0.08 ||
+      (this._moveIntentTimer || 0) > 0 ||
+      !!this.hero?.state?.sailing;
+    this._perfLastHeroX = this.hero?.x || 0;
+    this._perfLastHeroY = this.hero?.y || 0;
+    this._recentFrameSamples.push({ t: now, ms: this._frameMs, moving });
+    const windowSec = this._spikeStats?.windowSec || 5;
+    while (this._recentFrameSamples.length && now - this._recentFrameSamples[0].t > windowSec) {
+      this._recentFrameSamples.shift();
+    }
+    let worstMs = 0;
+    let hitch24 = 0;
+    let hitch33 = 0;
+    let hitch50 = 0;
+    let moveWorstMs = 0;
+    let moveHitches = 0;
+    for (const sample of this._recentFrameSamples) {
+      if (sample.ms > worstMs) worstMs = sample.ms;
+      if (sample.ms >= 24) hitch24++;
+      if (sample.ms >= 33.3) hitch33++;
+      if (sample.ms >= 50) hitch50++;
+      if (sample.moving) {
+        if (sample.ms > moveWorstMs) moveWorstMs = sample.ms;
+        if (sample.ms >= 24) moveHitches++;
+      }
+    }
+    this._spikeStats = {
+      worstMs,
+      hitch24,
+      hitch33,
+      hitch50,
+      moveWorstMs,
+      moveHitches,
+      windowSec,
+    };
   }
 
   _getHeroMoveSpeed() {
@@ -3637,6 +3788,10 @@ export default class Game {
     if (this.hero.state?.sailing) speed *= 1.18;
     speed *= this._heroTerrainSample?.moveModifier || 1;
     return speed;
+  }
+
+  _noteMoveIntent(dt = 0.12) {
+    this._moveIntentTimer = Math.max(this._moveIntentTimer || 0, dt);
   }
 
   _updateHeroTerrainSample(dt) {
@@ -3677,6 +3832,7 @@ export default class Game {
       fps: this._fps || 0,
       frameMs: this._frameMs || 0,
       frameJank: this._frameJank || 0,
+      spike: this._spikeStats || null,
       renderScale: this.renderScale || 1,
       enemies: this.enemies?.length || 0,
       visibleEnemies,
@@ -3703,7 +3859,18 @@ export default class Game {
       `Bridges visible/total ${world.visibleBridges || 0}/${world.bridges || 0}  Docks ${world.docks || 0}`,
       `Chunks terrain/props/bridge ${world.terrainChunks || 0}/${world.propChunks || 0}/${world.bridgeChunks || 0}`,
       `Props trees/rocks/clutter ${world.trees || 0}/${world.rocks || 0}/${world.clutter || 0}`,
+      `Spikes worst ${((perf.spike?.worstMs) || 0).toFixed(1)}ms  move worst ${((perf.spike?.moveWorstMs) || 0).toFixed(1)}ms  h24 ${perf.spike?.hitch24 || 0}  h33 ${perf.spike?.hitch33 || 0}  h50 ${perf.spike?.hitch50 || 0}`,
       `Hero X ${Math.round(this.hero?.x || 0)}  Y ${Math.round(this.hero?.y || 0)}`,
+    ].join("\n");
+  }
+
+  getHitchSnapshotText() {
+    const spike = this._spikeStats || {};
+    return [
+      `Worst ${((spike.worstMs) || 0).toFixed(1)}ms/${spike.windowSec || 5}s`,
+      `Move worst ${((spike.moveWorstMs) || 0).toFixed(1)}ms`,
+      `Hitches 24/33/50 ${spike.hitch24 || 0}/${spike.hitch33 || 0}/${spike.hitch50 || 0}`,
+      `Move hitches ${spike.moveHitches || 0}`,
     ].join("\n");
   }
 
@@ -3867,7 +4034,8 @@ export default class Game {
     const entry = this.getInventoryEntries()[index];
     if (!entry) return;
     if (action === "equip") {
-      if (entry.kind === "material") this._brewPotion("hp");
+      if (entry.kind === "recipe") this._craftRecipe(entry.recipeId);
+      else if (entry.kind === "material") this._msg(`${entry.name} is stored for crafting`, 0.8);
       else this._equipInventoryItem(index);
     } else if (action === "salvage" && entry.kind === "gear") {
       this._salvageInventoryItem(index);
@@ -3876,7 +4044,7 @@ export default class Game {
 
   getInventoryPanelText(hasItems = (this.hero?.inventory?.length || 0) > 0) {
     return {
-      headerHint: hasItems ? "I or Esc close   V swap view   wheel/arrow select   click again use/equip   B brew HP   N brew Mana" : "I or Esc close   V swap view   B brew HP   N brew Mana",
+      headerHint: hasItems ? "I or Esc close   V swap view   wheel/arrow select   Enter craft/equip   X salvage" : "I or Esc close   V swap view   Enter craft   B brew HP   N brew Mana",
       emptyBagTitle: "No gear in your bag yet.",
       emptyBagBody: "Clear camps, shops, contracts, and dungeons will start filling it.",
       emptyDetailTitle: "Item Details",
@@ -3889,6 +4057,108 @@ export default class Game {
     };
   }
 
+  getMaterialCatalog() {
+    return {
+      herb: { label: "Wild Herb", color: "#8fe48d", desc: "Fresh greens used for brews, salves, and road remedies." },
+      scrap: { label: "Metal Scrap", color: "#d1c0aa", desc: "Bent buckles, nails, and fittings salvaged from old gear." },
+      ore: { label: "Ore Chunk", color: "#8ba9c8", desc: "Raw stone and iron ore fit for smelting or tool work." },
+      hide: { label: "Tough Hide", color: "#b88c62", desc: "Animal and raider leathers used for stitched gear." },
+      essence: { label: "Arcane Essence", color: "#c8a0ff", desc: "Residual energy gathered from occult threats and relic sites." },
+    };
+  }
+
+  getCraftingRecipes() {
+    const level = Math.max(1, this.hero?.level || 1);
+    return [
+      {
+        id: "field-tonic",
+        name: "Field Tonic",
+        color: "#8fe48d",
+        desc: "A simple restorative brew for surviving the road.",
+        requires: { herb: 3 },
+        resultText: "Crafts 1 health potion",
+        craft: () => {
+          this.hero.potions.hp = (this.hero.potions.hp || 0) + 1;
+          this._spawnFloatingText(this.hero.x, this.hero.y - 26, "+Health potion", "#8fe48d");
+          this._msg("Field tonic brewed", 1.0);
+        },
+      },
+      {
+        id: "focus-draught",
+        name: "Focus Draught",
+        color: "#88cfff",
+        desc: "An herb-and-essence draught for restoring mana.",
+        requires: { herb: 4, essence: 1 },
+        resultText: "Crafts 1 mana potion",
+        craft: () => {
+          this.hero.potions.mana = (this.hero.potions.mana || 0) + 1;
+          this._spawnFloatingText(this.hero.x, this.hero.y - 26, "+Mana potion", "#88cfff");
+          this._msg("Focus draught brewed", 1.0);
+        },
+      },
+      {
+        id: "patchwork-armor",
+        name: "Patchwork Armor",
+        color: "#d5c1a2",
+        desc: "Hide and scrap stitched into practical travel armor.",
+        requires: { hide: 5, scrap: 3 },
+        resultText: "Crafts 1 common armor",
+        craft: () => {
+          const item = makeGear("armor", Math.max(level, 2), "common", hash2(this.seed, level, this.time | 0, 201));
+          item.name = "Patchwork Armor";
+          item.affix = "stitched";
+          this.hero.inventory.push(item);
+          this._msg("Patchwork armor crafted", 1.2);
+        },
+      },
+      {
+        id: "iron-edge",
+        name: "Iron Edge",
+        color: "#dce8f6",
+        desc: "A sturdier forged weapon made from ore and salvage.",
+        requires: { scrap: 5, ore: 3 },
+        resultText: "Crafts 1 uncommon weapon",
+        craft: () => {
+          const item = makeGear("weapon", Math.max(level, 2), "uncommon", hash2(this.seed, level, this.time | 0, 202));
+          item.name = "Iron Edge";
+          item.affix = "forged";
+          this.hero.inventory.push(item);
+          this._msg("Iron Edge forged", 1.2);
+        },
+      },
+      {
+        id: "trail-boots",
+        name: "Trail Boots",
+        color: "#d8c39c",
+        desc: "Flexible boots made for long-distance travel.",
+        requires: { hide: 4, scrap: 2 },
+        resultText: "Crafts 1 uncommon boots",
+        craft: () => {
+          const item = makeGear("boots", Math.max(level, 2), "uncommon", hash2(this.seed, level, this.time | 0, 203));
+          item.name = "Trail Boots";
+          item.affix = "wayfarer";
+          this.hero.inventory.push(item);
+          this._msg("Trail boots crafted", 1.2);
+        },
+      },
+      {
+        id: "ward-charm",
+        name: "Ward Charm",
+        color: "#d3a9ff",
+        desc: "A bound charm for safer spellwork and deeper delves.",
+        requires: { essence: 3, hide: 2, scrap: 1 },
+        resultText: "Crafts 1 uncommon trinket",
+        craft: () => {
+          const item = makeGear("trinket", Math.max(level, 2), "uncommon", hash2(this.seed, level, this.time | 0, 204));
+          item.name = "Ward Charm";
+          item.affix = "bound";
+          this.hero.inventory.push(item);
+          this._msg("Ward charm crafted", 1.2);
+        },
+      },
+    ];
+  }
+
   getInventoryEntries() {
     const gear = (this.hero.inventory || []).map((item, index) => ({
       kind: "gear",
@@ -3897,17 +4167,34 @@ export default class Game {
       name: item?.name || "Unknown Gear",
       color: item?.color || "#d9dee8",
     }));
+    const catalog = this.getMaterialCatalog();
     const materials = [];
-    if ((this.progress.herbs || 0) > 0) {
+    for (const [material, count] of [
+      ["herb", this.progress.herbs || 0],
+      ["scrap", this.progress.materials?.scrap || 0],
+      ["ore", this.progress.materials?.ore || 0],
+      ["hide", this.progress.materials?.hide || 0],
+      ["essence", this.progress.materials?.essence || 0],
+    ]) {
+      if (!count) continue;
+      const meta = catalog[material];
       materials.push({
         kind: "material",
-        material: "herb",
-        count: this.progress.herbs || 0,
-        name: "Wild Herb",
-        color: "#8fe48d",
+        material,
+        count,
+        name: meta?.label || material,
+        color: meta?.color || "#d9dee8",
+        desc: meta?.desc || "",
       });
     }
-    return [...gear, ...materials];
+    const recipes = this.getCraftingRecipes().map((recipe) => ({
+      kind: "recipe",
+      recipeId: recipe.id,
+      name: recipe.name,
+      color: recipe.color,
+      recipe,
+    }));
+    return [...gear, ...materials, ...recipes];
   }
 
   getInventoryPanelLayout() {
@@ -3963,11 +4250,75 @@ export default class Game {
       item.rarity === "uncommon" ? 7 : 0;
 
     const value = Math.max(4, 6 + (item.level || 1) * 3 + rarityBonus);
+    const yieldMap = this._getSalvageYield(item);
     this.hero.gold += value;
     inv.splice(entry.index, 1);
+    this._grantMaterials(yieldMap, false);
 
     this.invIndex = clamp(index, 0, Math.max(0, this.getInventoryEntries().length - 1));
-    this._msg(`Salvaged for ${value}g`, 1.4);
+    this._msg(`Salvaged for ${value}g and materials`, 1.4);
+  }
+
+  _getSalvageYield(item) {
+    const slot = item?.slot || "trinket";
+    const rarity = item?.rarity || "common";
+    const tier = rarity === "epic" ? 3 : rarity === "rare" ? 2 : rarity === "uncommon" ? 1 : 0;
+    const out = { scrap: 1 + tier, ore: 0, hide: 0, essence: 0 };
+    if (slot === "weapon") {
+      out.ore += 1 + (tier >= 1 ? 1 : 0);
+    } else if (slot === "armor" || slot === "helm") {
+      out.hide += 1 + tier;
+      out.ore += tier >= 2 ? 1 : 0;
+    } else if (slot === "boots") {
+      out.hide += 2 + tier;
+    } else if (slot === "ring" || slot === "trinket") {
+      out.essence += 1 + tier;
+      out.scrap += tier >= 2 ? 1 : 0;
+    }
+    return out;
+  }
+
+  _grantMaterials(amounts = {}, announce = true) {
+    if (!this.progress.materials) this.progress.materials = { scrap: 0, ore: 0, hide: 0, essence: 0 };
+    const parts = [];
+    for (const key of ["scrap", "ore", "hide", "essence"]) {
+      const amount = Math.max(0, Math.round(amounts[key] || 0));
+      if (!amount) continue;
+      this.progress.materials[key] = (this.progress.materials[key] || 0) + amount;
+      parts.push(`+${amount} ${this.getMaterialCatalog()?.[key]?.label || key}`);
+    }
+    if (announce && parts.length) {
+      this._spawnFloatingText(this.hero.x, this.hero.y - 24, "Materials", "#d5c1a2");
+      this._msg(parts.join("  "), 1.2);
+    }
+  }
+
+  _canCraftRecipe(recipe) {
+    if (!recipe?.requires) return false;
+    for (const [mat, need] of Object.entries(recipe.requires)) {
+      const have = mat === "herb" ? (this.progress.herbs || 0) : (this.progress.materials?.[mat] || 0);
+      if (have < need) return false;
+    }
+    return true;
+  }
+
+  _consumeRecipeMaterials(recipe) {
+    for (const [mat, need] of Object.entries(recipe.requires || {})) {
+      if (mat === "herb") this.progress.herbs = Math.max(0, (this.progress.herbs || 0) - need);
+      else if (this.progress.materials) this.progress.materials[mat] = Math.max(0, (this.progress.materials[mat] || 0) - need);
+    }
+  }
+
+  _craftRecipe(recipeId) {
+    const recipe = this.getCraftingRecipes().find((entry) => entry.id === recipeId);
+    if (!recipe) return false;
+    if (!this._canCraftRecipe(recipe)) {
+      this._msg(`${recipe.name} needs more materials`, 0.95);
+      return false;
+    }
+    this._consumeRecipeMaterials(recipe);
+    recipe.craft?.();
+    return true;
   }
 
   getInventoryGridLayout() {
@@ -4054,6 +4405,8 @@ export default class Game {
     const forgeCost = 58 + (this.hero?.level || 1) * 9;
     const clueCost = 36 + (this.hero?.level || 1) * 4;
     const passage = this._getTownPassageInfo(town);
+    const focus = this.getTownServiceName();
+    const focusHint = focus ? `${focus} service selected.` : "Move between town buildings for different services.";
     return {
       npcs,
       lines: [
@@ -4072,7 +4425,7 @@ export default class Game {
             : "9 No harbor in this town",
         visited ? `${npcs[0]}: Roads are safer when camps are cleared.` : `${npcs[0]}: First visit supplies were added.`,
       ],
-      npcSummary: `${npcs.join(", ")} are available. Current oath: ${this._className?.() || "Knight"}.${town?.coastal ? " Harbor passage is available here." : ""}`,
+      npcSummary: `${focusHint} ${npcs.join(", ")} are available. Current oath: ${this._className?.() || "Knight"}.${town?.coastal ? " Harbor passage is available here." : ""}`,
     };
   }
 
@@ -5190,6 +5543,13 @@ export default class Game {
   _dropEnemyLoot(e) {
     const goldAmt = Math.max(2, 3 + Math.round((e.level || 1) * 0.8) + (e.lootBonus?.() || 0) + (e.extraLoot || 0));
     this.loot.push(new Loot(e.x, e.y, "gold", { amount: goldAmt }));
+    const matYield = { scrap: 0, ore: 0, hide: 0, essence: 0 };
+    const kind = String(e.kind || "").toLowerCase();
+    if (["wolf", "stalker", "thorn"].includes(kind)) matYield.hide += e.elite ? 2 : 1;
+    if (["wisp", "caster", "ashling", "dragon"].includes(kind)) matYield.essence += e.boss ? 3 : e.elite ? 2 : 1;
+    if (["brute", "duelist", "sentinel", "scout"].includes(kind)) matYield.scrap += e.elite ? 2 : 1;
+    if (["sentinel", "dragon", "brute"].includes(kind)) matYield.ore += e.boss ? 2 : e.elite ? 1 : 0;
+    this._grantMaterials(matYield, false);
 
     const hasLockedKeyDoor = !!this.dungeon?.active && (this.dungeon?.layout?.doors || []).some((door) => !door.open && door.locked === "key");
     if (e?.dungeonRoomId && hasLockedKeyDoor) {
@@ -5321,6 +5681,7 @@ export default class Game {
     this._cachedNearbyShrine = null;
     this._cachedNearbyCache = null;
     this._cachedNearbyHerb = null;
+    this._cachedNearbyTownDoor = null;
 
     const check = (arr, r, predicate = null) => {
       const r2 = r * r;
@@ -5340,6 +5701,7 @@ export default class Game {
     this._cachedNearbyHerb = check(this.world.herbs, 54, (h) => !h.picked);
     this._cachedNearbySecret = check(this.world.secrets, 62);
     this._cachedNearbyTown = check(this.world.towns, 96);
+    this._cachedNearbyTownDoor = this._findNearbyTownDoor(this._cachedNearbyTown || this.world.startTown, 42);
     this._cachedNearbyDragonLair = check(this.world.dragonLairs, 110);
     if (this._cachedNearbySecret) this._discoverSecret(this._cachedNearbySecret);
   }
@@ -5401,6 +5763,11 @@ export default class Game {
       return;
     }
 
+    if (this._cachedNearbyTownDoor) {
+      this._enterTownService(this._cachedNearbyTownDoor);
+      return;
+    }
+
     if (this._cachedNearbyCamp) {
       this._openShop(this._cachedNearbyCamp);
       return;
@@ -5441,6 +5808,40 @@ export default class Game {
     }
   }
 
+  _findNearbyTownDoor(town, radius = 42) {
+    if (!town?.buildings?.length) return null;
+    const r2 = radius * radius;
+    let best = null;
+    let bestD2 = Infinity;
+    for (const building of town.buildings) {
+      const doorX = town.x + (building.x || 0) + (building.w || 0) * 0.5;
+      const doorY = town.y + (building.y || 0) + (building.h || 0) - 8;
+      const d2 = dist2(this.hero.x, this.hero.y, doorX, doorY);
+      if (d2 > r2 || d2 >= bestD2) continue;
+      bestD2 = d2;
+      best = {
+        town,
+        building,
+        service: building.service || "",
+        name: building.name || "Door",
+        x: doorX,
+        y: doorY,
+      };
+    }
+    return best;
+  }
+
+  _enterTownService(door) {
+    if (!door?.town) return;
+    this._townServiceFocus = door.service || "";
+    if (door.service === "vendor") {
+      this._openTownVendor();
+      return;
+    }
+    this._enterTown(door.town, door.service || "");
+    this._msg(`${door.name}`, 0.9);
+  }
+
   _collectHerb(herb) {
     if (!herb || herb.picked) return;
     herb.picked = true;
@@ -5452,18 +5853,21 @@ export default class Game {
     this._msg("Wild herbs gathered", 0.8);
   }
 
-  _openShop(camp) {
+  _openShop(camp, opts = {}) {
     this.shop.campId = camp.id;
-    this._rememberProgressId(this.progress.visitedCamps, camp);
-    this._claimCampRestBonus(camp);
-    this.shop.discount = this._shopDiscount(camp);
-    this.shop.items = this._buildShopForCamp(camp);
+    if (!opts.skipCampProgress) {
+      this._rememberProgressId(this.progress.visitedCamps, camp);
+      this._claimCampRestBonus(camp);
+    }
+    this.shop.discount = opts.discount ?? this._shopDiscount(camp);
+    this.shop.items = opts.items || this._buildShopForCamp(camp);
     this.menu.open = "shop";
   }
 
-  _enterTown(town) {
+  _enterTown(town, focus = "") {
     const id = this._progressId(town);
     this._rememberProgressId(this.progress.visitedTowns, town);
+    this._townServiceFocus = focus || "";
 
     if (!this.progress.storyMilestones[`town_${id}`]) {
       this.progress.storyMilestones[`town_${id}`] = true;
@@ -5483,6 +5887,26 @@ export default class Game {
     }
 
     this.menu.open = "town";
+  }
+
+  _openTownVendor() {
+    const town = this._cachedNearbyTown || this.world.startTown;
+    if (!town) return;
+    const merchantNode = { id: `town-vendor-${this._progressId(town)}`, x: town.x, y: town.y, type: town.coastal ? "bandit" : "wild" };
+    const items = this._buildShopForCamp(merchantNode);
+    items.push({
+      kind: "material",
+      name: "Wild Herb Bundle",
+      price: 16,
+      data: { material: "herb", amount: 3 },
+    });
+    items.push({
+      kind: "material",
+      name: "Forge Scrap",
+      price: 24,
+      data: { material: "scrap", amount: 2 },
+    });
+    this._openShop(merchantNode, { items, discount: 0, skipCampProgress: true });
   }
 
   _townRest() {
@@ -5526,6 +5950,20 @@ export default class Game {
     this.hero.gold -= cost;
     this.hero.inventory.push(item);
     this._msg(`Forged ${item.name}`, 1.4);
+  }
+
+  getTownServiceName(service = this._townServiceFocus) {
+    const names = {
+      inn: "Inn",
+      forge: "Forge",
+      vendor: "Vendor",
+      stable: "Stable",
+      healer: "Healer",
+      cartography: "Cartography",
+      guild: "Guildhall",
+      sanctum: "Sanctum",
+    };
+    return names[service] || "";
   }
 
   _townAskRumor() {
@@ -5795,6 +6233,14 @@ export default class Game {
     if (item.kind === "potion") {
       const pt = item.data?.potionType === "mana" ? "mana" : "hp";
       this.hero.potions[pt] = (this.hero.potions[pt] || 0) + 1;
+    } else if (item.kind === "material") {
+      const material = item.data?.material || "scrap";
+      const amount = Math.max(1, item.data?.amount || 1);
+      if (material === "herb") {
+        this.progress.herbs = (this.progress.herbs || 0) + amount;
+      } else {
+        this._grantMaterials({ [material]: amount }, false);
+      }
     } else if (item.kind === "gear") {
       this.hero.inventory.push(item.data);
     }
@@ -5880,6 +6326,13 @@ export default class Game {
       item.name = `Cache-Sealed ${item.name}`;
       this.loot.push(new Loot(cache.x, cache.y - 12, "gear", item));
     }
+
+    this._grantMaterials({
+      scrap: 1 + Math.floor(level / 3),
+      ore: level >= 3 ? 1 + Math.floor(level / 4) : 0,
+      hide: level >= 2 ? 1 : 0,
+      essence: level >= 4 ? 1 : 0,
+    }, false);
 
     this._spawnFloatingText(cache.x, cache.y - 22, "Cache opened", "#ffe19a");
     this._msg("Treasure cache opened", 1.4);
@@ -6021,8 +6474,8 @@ export default class Game {
       walkRects.push({
         x: room.x,
         y: room.y,
-        w: Math.max(96, room.w - 72),
-        h: Math.max(96, room.h - 72),
+        w: Math.max(120, room.w - 40),
+        h: Math.max(120, room.h - 40),
         kind: "room",
         roomId: id,
       });
@@ -6041,7 +6494,7 @@ export default class Game {
         const right = left === a ? b : a;
         const startX = left.x + left.w * 0.5 - 26;
         const endX = right.x - right.w * 0.5 + 26;
-        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 74, kind: "corridor", rooms: [a.id, b.id] };
+        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 86, kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
@@ -6052,7 +6505,7 @@ export default class Game {
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: 26, h: corridor.h - 12 },
+          blocker: { x: corridor.x, y: corridor.y, w: 20, h: corridor.h - 16 },
         };
         addOpening(left, "right", left.y, corridor.h + 8);
         addOpening(right, "left", right.y, corridor.h + 8);
@@ -6061,7 +6514,7 @@ export default class Game {
         const bottom = top === a ? b : a;
         const startY = top.y + top.h * 0.5 - 26;
         const endY = bottom.y - bottom.h * 0.5 + 26;
-        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 74, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
+        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 86, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
@@ -6072,7 +6525,7 @@ export default class Game {
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 12, h: 26 },
+          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 16, h: 20 },
         };
         addOpening(top, "bottom", top.x, corridor.w + 8);
         addOpening(bottom, "top", bottom.x, corridor.w + 8);
@@ -6162,6 +6615,54 @@ export default class Game {
           ["shrine", "crypt", "clear", "Stone Door"],
           ["armory", "crypt", "clear", "Stone Door"],
           ["crypt", "boss", "key", "Boss Gate"],
+        ],
+      },
+      {
+        name: "switchback-descent",
+        rooms: [
+          ["start", "start", 0, 0, 660, 430],
+          ["south", "hall", 1, 0, 540, 320],
+          ["turnA", "hall", 1, -1, 520, 320],
+          ["westA", "loot", 0, -1, 500, 300],
+          ["turnB", "hall", -1, -1, 520, 320],
+          ["shrine", "shrine", -1, -2, 500, 320],
+          ["key", "key", 0, -2, 520, 320],
+          ["crypt", "crypt", 1, -2, 620, 380],
+          ["boss", "boss", 1, -3, 860, 520],
+        ],
+        links: [
+          ["start", "south", "clear", "Gate"],
+          ["south", "turnA", "clear", "Turn Door"],
+          ["turnA", "westA", "clear", "Loot Door"],
+          ["westA", "turnB", "clear", "Stone Gate"],
+          ["turnB", "shrine", "clear", "Shrine Door"],
+          ["turnB", "key", "clear", "Archive Door"],
+          ["key", "crypt", "clear", "Crypt Door"],
+          ["crypt", "boss", "key", "Boss Gate"],
+        ],
+      },
+      {
+        name: "cathedral-run",
+        rooms: [
+          ["start", "start", 0, 0, 700, 460],
+          ["nave", "hall", 0, -1, 760, 340],
+          ["westWing", "armory", -1, -1, 500, 320],
+          ["eastWing", "loot", 1, -1, 500, 320],
+          ["apse", "crypt", 0, -2, 720, 380],
+          ["shrine", "shrine", -1, -2, 520, 320],
+          ["key", "key", 1, -2, 520, 320],
+          ["boss", "boss", 0, -3, 920, 560],
+        ],
+        links: [
+          ["start", "nave", "clear", "Entry Gate"],
+          ["nave", "westWing", "clear", "West Door"],
+          ["nave", "eastWing", "clear", "East Door"],
+          ["nave", "apse", "clear", "Apse Gate"],
+          ["westWing", "shrine", "clear", "Shrine Door"],
+          ["eastWing", "key", "clear", "Key Door"],
+          ["apse", "boss", "key", "Boss Gate"],
+          ["shrine", "apse", "clear", "Stone Door"],
+          ["key", "apse", "clear", "Stone Door"],
         ],
       },
     ];
@@ -6276,7 +6777,7 @@ export default class Game {
       const right = room.x + room.w * 0.5;
       const top = room.y - room.h * 0.5;
       const bottom = room.y + room.h * 0.5;
-      const wall = 22;
+      const wall = 14;
       const openingsBySide = { top: [], right: [], bottom: [], left: [] };
       for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
 
@@ -6313,7 +6814,7 @@ export default class Game {
     }
 
     for (const corridor of layout.corridors || []) {
-      const wall = 14;
+      const wall = 10;
       if (corridor.orientation === "h") {
         addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, corridor.w, wall);
         addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, corridor.w, wall);
@@ -6335,7 +6836,7 @@ export default class Game {
     const right = room.x + room.w * 0.5;
     const top = room.y - room.h * 0.5;
     const bottom = room.y + room.h * 0.5;
-    const wall = 22;
+    const wall = 14;
     const edge = active ? "rgba(139,233,255,0.60)" : theme.accent;
     const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(14,17,22,0.94)";
 
@@ -6401,7 +6902,7 @@ export default class Game {
   _drawDungeonCorridorWalls(ctx, rect, theme) {
     const gx = rect.x - rect.w * 0.5;
     const gy = rect.y - rect.h * 0.5;
-    const wall = 14;
+    const wall = 10;
     const face = "rgba(13,16,22,0.95)";
 
     if (rect.orientation === "h") {
@@ -7325,6 +7826,7 @@ export default class Game {
           crossedBridges: Array.from(this.progress.crossedBridges || []),
           herbs: this.progress.herbs || 0,
           pickedHerbs: Array.from(this.progress.pickedHerbs || []),
+          materials: this.progress.materials || { scrap: 0, ore: 0, hide: 0, essence: 0 },
           exploredCells: this.world?.exportDiscovery?.() || [],
         },
         trackedObjective: this.trackedObjective,
@@ -7429,6 +7931,12 @@ export default class Game {
         this.progress.crossedBridges = new Set(data.progress.crossedBridges || []);
         this.progress.herbs = data.progress.herbs || 0;
         this.progress.pickedHerbs = new Set(data.progress.pickedHerbs || []);
+        this.progress.materials = {
+          scrap: data.progress.materials?.scrap || 0,
+          ore: data.progress.materials?.ore || 0,
+          hide: data.progress.materials?.hide || 0,
+          essence: data.progress.materials?.essence || 0,
+        };
         for (const herb of this.world.herbs || []) herb.picked = this.progress.pickedHerbs.has(herb.id);
         if (!needsWorldMigration) {
           this.world?.importDiscovery?.(data.progress.exploredCells || []);
@@ -7637,6 +8145,8 @@ const ctx = canvas.getContext("2d", { alpha: false });
 if (!ctx) {
   throw new Error("Could not get 2D canvas context");
 }
+const bootLoading = document.getElementById("boot-loading");
+const bootLoadingStatus = document.getElementById("boot-loading-status");
 
 let game = null;
 let rafId = 0;
@@ -7760,6 +8270,7 @@ function render() {
 
 function showFatalError(err) {
   cancelLoop();
+  hideBootLoading(true);
 
   const message = err?.stack || err?.message || String(err || "Unknown error");
   console.error("Broke Knight crashed:", err);
@@ -7772,6 +8283,32 @@ function showFatalError(err) {
   }
 
   panel.textContent = `Broke Knight hit an error.\n\n${message}`;
+}
+
+function setBootLoadingStatus(text) {
+  if (bootLoadingStatus) bootLoadingStatus.textContent = text;
+}
+
+function showBootLoading(text = "Building the world...") {
+  if (!bootLoading) return;
+  setBootLoadingStatus(text);
+  bootLoading.classList.remove("is-hidden");
+  bootLoading.style.display = "flex";
+}
+
+function hideBootLoading(immediate = false) {
+  if (!bootLoading) return;
+  if (immediate) {
+    bootLoading.classList.add("is-hidden");
+    bootLoading.style.display = "none";
+    return;
+  }
+  bootLoading.classList.add("is-hidden");
+  setTimeout(() => {
+    if (bootLoading.classList.contains("is-hidden")) {
+      bootLoading.style.display = "none";
+    }
+  }, 220);
 }
 
 function tick(now) {
@@ -7791,8 +8328,6 @@ function tick(now) {
   const frameMs = frame * 1000;
   frameEmaMs = frameEmaMs * 0.88 + frameMs * 0.12;
   dynamicScaleCooldown = Math.max(0, dynamicScaleCooldown - frame);
-  game?.noteFrame?.(frame);
-
   try {
     let steps = 0;
     while (accumulator >= STEP && steps < MAX_STEPS) {
@@ -7806,6 +8341,7 @@ function tick(now) {
     }
 
     render();
+    game?.noteFrame?.(frame);
     maybeAdjustRenderScale();
   } catch (err) {
     showFatalError(err);
@@ -7866,18 +8402,27 @@ function softResumeSoon() {
 function boot() {
   if (booted) return;
   booted = true;
-
+  showBootLoading("Preparing startup...");
   resizeCanvas();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        showBootLoading("Building the world...");
+        game = new Game(canvas);
 
-  game = new Game(canvas);
+        if (game?.resize) {
+          const { w, h } = getCssSize();
+          game.resize(w, h);
+        }
 
-  if (game?.resize) {
-    const { w, h } = getCssSize();
-    game.resize(w, h);
-  }
-
-  focusCanvas();
-  startLoop();
+        hideBootLoading();
+        focusCanvas();
+        startLoop();
+      } catch (err) {
+        showFatalError(err);
+      }
+    });
+  });
 }
 
 window.addEventListener("resize", () => {
@@ -8100,6 +8645,14 @@ export default class Save {
         storyMilestones: this._object(progressSrc.storyMilestones),
         visitedTowns: this._stringArray(progressSrc.visitedTowns),
         crossedBridges: this._stringArray(progressSrc.crossedBridges),
+        herbs: this._int(progressSrc.herbs, 0, 0, 999999),
+        pickedHerbs: this._stringArray(progressSrc.pickedHerbs),
+        materials: {
+          scrap: this._int(progressSrc?.materials?.scrap, 0, 0, 999999),
+          ore: this._int(progressSrc?.materials?.ore, 0, 0, 999999),
+          hide: this._int(progressSrc?.materials?.hide, 0, 0, 999999),
+          essence: this._int(progressSrc?.materials?.essence, 0, 0, 999999),
+        },
         exploredCells: this._stringArray(progressSrc.exploredCells).slice(0, 120000),
       },
 
@@ -8226,6 +8779,7 @@ export default class Save {
       "map",
       "inventory",
       "skills",
+      "class-select",
       "quests",
       "shop",
       "town",
@@ -8351,6 +8905,7 @@ export default class UI {
     this._controlsCollapsed = false;
     this._controlsToggleRect = null;
     this._profilerCopyRect = null;
+    this._spikeCopyRect = null;
     this._assets = this._loadUiAssets();
   }
 
@@ -8415,6 +8970,15 @@ export default class UI {
         this._copyProfilerText(game);
       }
     }
+
+    if (game?.mouse?.clicked && this._spikeCopyRect) {
+      const { x, y, w, h } = this._spikeCopyRect;
+      const mx = game.mouse.x;
+      const my = game.mouse.y;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+        this._copyHitchText(game);
+      }
+    }
   }
 
   draw(ctx, game) {
@@ -8434,6 +8998,7 @@ export default class UI {
     this._drawZoneText(ctx, game);
     this._drawPerfReadout(ctx, game);
     this._drawProfilerPanel(ctx, game);
+    this._drawSpikePanel(ctx, game);
 
     const open = game?.menu?.open || this._open || null;
     if (!open) return;
@@ -8857,9 +9422,9 @@ export default class UI {
     else if (name.includes("orb")) iconIndex = 3;
     if (iconIndex >= 0 && this._hasUiImage(spellIcons)) {
       const sprite = 64;
-      const drawSize = size * 0.68;
+      const drawSize = size * 0.64;
       const dx = x + (size - drawSize) * 0.5;
-      const dy = y + size * 0.14;
+      const dy = y + (size - drawSize) * 0.5 - 1;
       ctx.save();
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(spellIcons, iconIndex * sprite, 0, sprite, sprite, dx, dy, drawSize, drawSize);
@@ -8868,7 +9433,7 @@ export default class UI {
     }
 
     const cx = x + size * 0.5;
-    const cy = y + size * 0.5 - 3;
+    const cy = y + size * 0.5 - 1;
     const r = size * 0.18;
 
     ctx.save();
@@ -8996,7 +9561,7 @@ export default class UI {
       ctx.fillStyle = "#9ab2cf";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText((row.key || "?").toUpperCase(), x + 10, y + 10);
+      ctx.fillText((row.key || "?").toUpperCase(), x + layout.box * 0.5, y + 9);
       ctx.fillText(`${row.manaCost || 0}`, x + layout.box * 0.5, y + layout.box - 8);
 
       ctx.fillStyle = accent;
@@ -10127,9 +10692,10 @@ export default class UI {
       `Rivers ${world.rivers || 0}  River segs ${world.riverSegments || 0}  buckets ${world.riverBuckets || 0}  Bridges ${world.visibleBridges || 0}/${world.bridges || 0}`,
       `Chunks terrain ${world.terrainChunks || 0}  props ${world.propChunks || 0}  bridge ${world.bridgeChunks || 0}`,
       `Props trees ${world.trees || 0}  rocks ${world.rocks || 0}  clutter ${world.clutter || 0}  texts ${perf.floatingTexts || 0}`,
+      `Hero X ${Math.round(game?.hero?.x || 0)}  Y ${Math.round(game?.hero?.y || 0)}  Docks ${world.docks || 0}`,
     ];
     const panelW = 370;
-    const panelH = 104;
+    const panelH = 116;
     const x = this.w - panelW - 14;
     const y = this.h - panelH - 36;
     this._drawPanel(ctx, x, y, panelW, panelH, { alpha: 0.9, accent: "rgba(118,200,255,0.38)" });
@@ -10158,11 +10724,70 @@ export default class UI {
     ctx.restore();
   }
 
+  _drawSpikePanel(ctx, game) {
+    if (!game?.dev?.showSpikeMonitor) {
+      this._spikeCopyRect = null;
+      return;
+    }
+    const perf = game?.getPerfSnapshot?.();
+    const spike = perf?.spike || {};
+    const lines = [
+      `Worst ${((spike.worstMs) || 0).toFixed(1)}ms / ${spike.windowSec || 5}s`,
+      `Move worst ${((spike.moveWorstMs) || 0).toFixed(1)}ms`,
+      `Hitches 24/33/50 ${spike.hitch24 || 0}/${spike.hitch33 || 0}/${spike.hitch50 || 0}`,
+      `Move hitches ${spike.moveHitches || 0}`,
+    ];
+    const panelW = 230;
+    const panelH = 84;
+    const x = this.w - panelW - 14;
+    const y = this.h - panelH - (game?.dev?.showProfiler ? 158 : 36);
+    this._drawPanel(ctx, x, y, panelW, panelH, { alpha: 0.88, accent: "rgba(255,166,92,0.34)" });
+    ctx.save();
+    ctx.fillStyle = "#eef4fb";
+    ctx.font = "bold 12px 'Segoe UI', Arial";
+    ctx.fillText("Hitch Monitor", x + 12, y + 18);
+
+    const buttonW = 54;
+    const buttonH = 16;
+    const buttonX = x + panelW - buttonW - 10;
+    const buttonY = y + 8;
+    this._spikeCopyRect = { x: buttonX, y: buttonY, w: buttonW, h: buttonH };
+    this._drawPill(ctx, buttonX, buttonY, buttonW, buttonH, "Copy", {
+      fill: "rgba(46,30,18,0.92)",
+      stroke: "rgba(255,188,122,0.26)",
+      textColor: "#ffe3bf",
+      font: "bold 10px 'Segoe UI', Arial",
+    });
+
+    ctx.font = "11px 'Segoe UI', Arial";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i === 0 ? "#ffe1b4" : "#dbe6f2";
+      this._drawFitText(ctx, lines[i], x + 12, y + 36 + i * 12, panelW - 78);
+    }
+    ctx.restore();
+  }
+
   _copyProfilerText(game) {
     const text = game?.getPerfSnapshotText?.();
     if (!text) return;
     const onSuccess = () => game?._msg?.("Profiler copied", 0.9);
     const onFailure = () => game?._msg?.("Profiler copy failed", 1.1);
+    try {
+      if (globalThis.navigator?.clipboard?.writeText) {
+        Promise.resolve(globalThis.navigator.clipboard.writeText(text)).then(onSuccess, onFailure);
+      } else {
+        onFailure();
+      }
+    } catch (_) {
+      onFailure();
+    }
+  }
+
+  _copyHitchText(game) {
+    const text = game?.getHitchSnapshotText?.();
+    if (!text) return;
+    const onSuccess = () => game?._msg?.("Hitch monitor copied", 0.9);
+    const onFailure = () => game?._msg?.("Hitch copy failed", 1.1);
     try {
       if (globalThis.navigator?.clipboard?.writeText) {
         Promise.resolve(globalThis.navigator.clipboard.writeText(text)).then(onSuccess, onFailure);
@@ -10838,26 +11463,39 @@ export default class UI {
 
     this._drawHeroPortrait(ctx, hero, rightX + rightW - 96, rightY + 14, 74, 92);
 
-    const herbCount = game?.progress?.herbs || 0;
+    const materials = [
+      { label: "Herbs", count: game?.progress?.herbs || 0, color: "#dff2de" },
+      { label: "Scrap", count: game?.progress?.materials?.scrap || 0, color: "#ead9c8" },
+      { label: "Ore", count: game?.progress?.materials?.ore || 0, color: "#cfe0f4" },
+      { label: "Hide", count: game?.progress?.materials?.hide || 0, color: "#e0c09d" },
+      { label: "Essence", count: game?.progress?.materials?.essence || 0, color: "#e2ccff" },
+    ];
     const materialY = rightY + 36;
-    const materialW = Math.max(148, rightW - 132);
+    const materialW = Math.max(168, rightW - 132);
     ctx.fillStyle = "rgba(126,210,126,0.10)";
-    ctx.fillRect(rightX + 12, materialY, materialW, 54);
+    ctx.fillRect(rightX + 12, materialY, materialW, 72);
     ctx.strokeStyle = "rgba(143,228,141,0.24)";
-    ctx.strokeRect(rightX + 12.5, materialY + 0.5, materialW - 1, 53);
-    ctx.fillStyle = "#dff2de";
+    ctx.strokeRect(rightX + 12.5, materialY + 0.5, materialW - 1, 71);
     ctx.font = "bold 12px Arial";
-    ctx.fillText(`Herbs ${herbCount}`, rightX + 22, materialY + 17);
+    let matLineY = materialY + 16;
+    for (let i = 0; i < materials.length; i++) {
+      const mat = materials[i];
+      ctx.fillStyle = mat.color;
+      const col = i < 3 ? 0 : 1;
+      const row = i % 3;
+      const mx = rightX + 22 + col * Math.max(78, materialW * 0.46);
+      ctx.fillText(`${mat.label} ${mat.count}`, mx, matLineY + row * 16);
+    }
     ctx.fillStyle = "#9cc5a0";
     ctx.font = "11px Arial";
-    this._drawFitText(ctx, inventoryText.brewHpHint || "B Brew health potion (3 herbs)", rightX + 22, materialY + 33, materialW - 18, 8);
-    this._drawFitText(ctx, inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", rightX + 22, materialY + 47, materialW - 18, 8);
+    this._drawFitText(ctx, inventoryText.brewHpHint || "B Brew health potion (3 herbs)", rightX + 22, materialY + 58, materialW - 18, 8);
+    this._drawFitText(ctx, inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", rightX + 22, materialY + 71, materialW - 18, 8);
 
     const slots = game?.getEquipmentSlots?.() || ["weapon", "armor", "helm", "boots", "ring", "trinket"];
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const item = equip[slot];
-      const iy = rightY + 106 + i * 28;
+      const iy = rightY + 126 + i * 26;
       const textW = Math.max(80, rightW - 220);
 
       ctx.fillStyle = "#9db0c8";
@@ -10878,7 +11516,7 @@ export default class UI {
     const pickedEntry = entries[selected];
     const picked = pickedEntry?.item;
     const statX = rightX + 12;
-    let sy = rightY + 284;
+    let sy = rightY + 292;
 
     ctx.fillStyle = "#dce6f4";
     ctx.font = "bold 15px Arial";
@@ -10903,6 +11541,34 @@ export default class UI {
       ctx.fillText(inventoryText.brewHpHint || "B Brew health potion (3 herbs)", statX, sy);
       sy += 16;
       ctx.fillText(inventoryText.brewManaHint || "N Brew mana potion (4 herbs)", statX, sy);
+    } else if (pickedEntry?.kind === "recipe") {
+      const recipe = pickedEntry.recipe;
+      ctx.fillStyle = pickedEntry.color || "#dce6f4";
+      ctx.font = "bold 14px Arial";
+      this._drawFitText(ctx, pickedEntry.name || "Recipe", statX, sy, rightW - 24);
+      sy += 20;
+      ctx.fillStyle = "#9cb0c9";
+      ctx.font = "12px Arial";
+      this._drawFitText(ctx, recipe?.resultText || "Crafts an item", statX, sy, rightW - 24);
+      sy += 22;
+      ctx.fillStyle = "#dfe8f5";
+      this._drawFitText(ctx, recipe?.desc || "Craft at your packfire.", statX, sy, rightW - 24, 8);
+      sy += 34;
+      ctx.fillStyle = "#c9d8ea";
+      ctx.font = "bold 12px Arial";
+      ctx.fillText("Requires", statX, sy);
+      sy += 18;
+      ctx.fillStyle = "#9cb0c9";
+      for (const [mat, need] of Object.entries(recipe?.requires || {})) {
+        const have = mat === "herb" ? (game?.progress?.herbs || 0) : (game?.progress?.materials?.[mat] || 0);
+        const ok = have >= need;
+        ctx.fillStyle = ok ? "#94e48d" : "#ff9c9c";
+        this._drawFitText(ctx, `${need} ${game?.getMaterialCatalog?.()?.[mat]?.label || mat} (${have})`, statX, sy, rightW - 24, 8);
+        sy += 17;
+      }
+      sy += 8;
+      ctx.fillStyle = "#95a7bd";
+      ctx.fillText("Enter/E or click again craft", statX, sy);
     } else if (picked) {
       ctx.fillStyle = picked.color || "#eef4fb";
       ctx.font = "bold 14px Arial";
@@ -11120,7 +11786,7 @@ export default class UI {
       ctx.font = "11px Arial";
       let py = card.y + 78;
       for (const perk of cls.perks || []) {
-        this._drawFitText(ctx, `• ${perk}`, card.x + 14, py, card.w - 28, 8);
+        this._drawFitText(ctx, `â€¢ ${perk}`, card.x + 14, py, card.w - 28, 8);
         py += 16;
       }
     }
@@ -11214,10 +11880,10 @@ export default class UI {
     const cx = x + w * 0.5;
     const portraitBodyTop = innerY + 8;
     const portraitBodyBottom = y + h - 24;
-    const headY = y + 27;
-    const chestY = y + 56;
-    const chestW = Math.max(22, Math.round(w * 0.40));
-    const bodyH = Math.max(22, Math.round(h * 0.22));
+    const headY = y + 30;
+    const chestY = y + 58;
+    const chestW = Math.max(22, Math.round(w * 0.36));
+    const bodyH = Math.max(22, Math.round(h * 0.20));
     const armorTier = armor?.stats?.armor || 0;
     const weaponTier = weapon?.stats?.dmg || 0;
 
@@ -11250,11 +11916,11 @@ export default class UI {
     ctx.fillRect(x, y, w, h);
 
     if (this._hasUiImage(portraitImg)) {
-      const cropX = Math.round(portraitImg.naturalWidth * 0.14);
-      const cropY = Math.round(portraitImg.naturalHeight * 0.08);
-      const cropW = Math.round(portraitImg.naturalWidth * 0.72);
-      const cropH = Math.round(portraitImg.naturalHeight * 0.78);
-      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 2, innerY + 3, innerW - 4, innerH - 6);
+      const cropX = Math.round(portraitImg.naturalWidth * 0.18);
+      const cropY = Math.round(portraitImg.naturalHeight * 0.10);
+      const cropW = Math.round(portraitImg.naturalWidth * 0.64);
+      const cropH = Math.round(portraitImg.naturalHeight * 0.74);
+      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 4, innerY + 4, innerW - 8, innerH - 8);
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.12)";
@@ -11303,19 +11969,19 @@ export default class UI {
     ctx.strokeStyle = weaponColor;
     ctx.lineWidth = weaponTier >= 18 ? 5.5 : weaponTier >= 10 ? 4.8 : 4;
     ctx.beginPath();
-    ctx.moveTo(x + w - 22, y + 27);
-    ctx.lineTo(x + w - 29, y + 71);
+    ctx.moveTo(x + w - 23, y + 33);
+    ctx.lineTo(x + w - 28, y + 73);
     ctx.stroke();
     ctx.strokeStyle = "rgba(255,255,255,0.52)";
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(x + w - 21, y + 27);
-    ctx.lineTo(x + w - 27, y + 69);
+    ctx.moveTo(x + w - 22, y + 33);
+    ctx.lineTo(x + w - 26, y + 71);
     ctx.stroke();
     ctx.fillStyle = "#bf8d57";
-    ctx.fillRect(x + w - 33, y + 64, 10, 4);
+    ctx.fillRect(x + w - 32, y + 67, 10, 4);
     ctx.fillStyle = "#eef5ff";
-    ctx.fillRect(x + w - 24, y + 24, 4, 5);
+    ctx.fillRect(x + w - 24, y + 30, 4, 5);
 
     ctx.fillStyle = bootsColor;
     ctx.globalAlpha = 0.85;
@@ -11496,6 +12162,15 @@ export default class UI {
     ctx.fillStyle = "#95a7bd";
     ctx.font = "12px Arial";
     ctx.fillText("1-9 or click - Esc to leave town", x + 18, y + 55);
+    const serviceName = game?.getTownServiceName?.() || "";
+    if (serviceName) {
+      this._drawPill(ctx, x + w - 126, y + 14, 108, 18, `Service: ${serviceName}`, {
+        fill: "rgba(139,233,255,0.10)",
+        stroke: "rgba(139,233,255,0.24)",
+        textColor: "#bfefff",
+        font: "bold 10px 'Segoe UI', Arial",
+      });
+    }
 
     const townMenu = game?.getTownMenuLines?.(town) || {
       npcs: town?.npcs || ["Warden", "Smith", "Archivist"],
@@ -12312,13 +12987,13 @@ export default class World {
     }
 
     if (s.isWater) return false;
-    if (s.isMountainWall) {
-      if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.52) return true;
-      return false;
-    }
-    if (this._isNearMountainWall(x, y, actor?.state?.mountainPassAccess ? 8 : 18)) {
-      if (!(actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.58)) return false;
-    }
+        if (s.isMountainWall) {
+          if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.34) return true;
+          return false;
+        }
+        if (this._isNearMountainWall(x, y, actor?.state?.mountainPassAccess ? 8 : 18)) {
+          if (!(actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.40)) return false;
+        }
     return true;
   }
 
@@ -14983,8 +15658,8 @@ export default class World {
 
   _makeRiverBands() {
     const bands = [];
-    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south"];
-    const mainCount = 18;
+    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west"];
+    const mainCount = 16;
 
     for (let i = 0; i < mainCount; i++) {
       const side = sides[i % sides.length];
@@ -15001,9 +15676,11 @@ export default class World {
         ay: sourceAnchor.y,
         bx: coastAnchor.x,
         by: coastAnchor.y,
+        coastSide: side,
+        coastTarget: { x: coastAnchor.x, y: coastAnchor.y },
         width: this._rng.range(0.76, 1.20),
         bends: 64 + ((i % 4) * 12),
-        amplitude: this._rng.range(760, 1480),
+        amplitude: this._rng.range(680, 1320),
         seed: hash2(this.seed, 101 + i * 17),
       });
     }
@@ -15034,12 +15711,104 @@ export default class World {
         joinT,
         width: this._rng.range(0.46, 0.82),
         bends: 44 + ((i % 3) * 10),
-        amplitude: this._rng.range(360, 860),
+        amplitude: this._rng.range(300, 720),
         seed: hash2(this.seed, 401 + i * 29),
       });
     }
 
+    const spawnTributaries = this._makeSpawnRiverTributaries(bands);
+    if (spawnTributaries.length) bands.push(...spawnTributaries);
+    const forcedContinuations = this._makeForcedRiverContinuations();
+    if (forcedContinuations.length) bands.push(...forcedContinuations);
+
     return bands;
+  }
+
+  _makeForcedRiverContinuations() {
+    const out = [];
+    const fixes = [
+      { x: 6730, y: 484, coastSide: "south", coastX: 6800, width: 0.74, bends: 44, amplitude: 320 },
+    ];
+
+    for (let i = 0; i < fixes.length; i++) {
+      const fix = fixes[i];
+      const coastTarget = { x: fix.coastX ?? fix.x, y: this.mapHalfSize * 0.95 };
+      const coastAnchor =
+        this._findOceanShoreAnchor(fix.coastSide, coastTarget, 7600) ||
+        this._findOceanCoastAnchorNear(coastTarget.x, coastTarget.y, 5200) ||
+        coastTarget;
+      out.push({
+        ax: fix.x,
+        ay: fix.y,
+        bx: coastAnchor.x,
+        by: coastAnchor.y,
+        coastSide: fix.coastSide,
+        coastTarget: { x: coastAnchor.x, y: coastAnchor.y },
+        width: fix.width,
+        bends: fix.bends,
+        amplitude: fix.amplitude,
+        seed: hash2(this.seed, 1901 + i * 61),
+        forcedContinuation: true,
+      });
+    }
+
+    return out;
+  }
+
+  _makeSpawnRiverTributaries(existingBands) {
+    const mains = (existingBands || []).filter((band) => !band.joinBand);
+    if (!mains.length) return [];
+    const offsets = [
+      [-2200, -840],
+      [2140, -760],
+      [-1960, 980],
+      [1880, 1040],
+      [0, -2480],
+      [0, 2360],
+    ];
+    const out = [];
+    for (let i = 0; i < offsets.length; i++) {
+      const [ox, oy] = offsets[i];
+      const sourceGuess = { x: this.spawn.x + ox, y: this.spawn.y + oy };
+      const sourceAnchor = this._findRiverSourceNear(sourceGuess.x, sourceGuess.y, 1400) || sourceGuess;
+      let bestMain = null;
+      let bestJoin = 0.5;
+      let bestD2 = Infinity;
+      for (const main of mains) {
+        const path = this._riverPath(main);
+        const metric = this._riverPathMetric(path);
+        let traversed = 0;
+        for (let s = 1; s < path.length; s++) {
+          const a = path[s - 1];
+          const b = path[s];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len2 = dx * dx + dy * dy || 1;
+          const t = clamp(((sourceAnchor.x - a.x) * dx + (sourceAnchor.y - a.y) * dy) / len2, 0, 1);
+          const qx = a.x + dx * t;
+          const qy = a.y + dy * t;
+          const d2 = (sourceAnchor.x - qx) ** 2 + (sourceAnchor.y - qy) ** 2;
+          if (d2 < bestD2) {
+            bestD2 = d2;
+            bestMain = main;
+            bestJoin = clamp((traversed + Math.hypot(qx - a.x, qy - a.y)) / Math.max(1, metric.total), 0.18, 0.82);
+          }
+          traversed += Math.hypot(dx, dy);
+        }
+      }
+      if (!bestMain) continue;
+      out.push({
+        ax: sourceAnchor.x,
+        ay: sourceAnchor.y,
+        joinBand: bestMain,
+        joinT: bestJoin,
+        width: this._rng.range(0.42, 0.76),
+        bends: 54 + ((i % 3) * 8),
+        amplitude: this._rng.range(260, 580),
+        seed: hash2(this.seed, 881 + i * 37),
+      });
+    }
+    return out;
   }
 
   _makeRiverCoastTarget(side, index = 0) {
@@ -15146,17 +15915,19 @@ export default class World {
       const ty = dy / len;
       const nx = -ty;
       const ny = tx;
-      const passCount = 1;
+      const passCount = 3;
 
       for (let i = 0; i < passCount; i++) {
         const t = passCount === 1
           ? 0.5
           : i === 0
             ? 0.28 + ((range.seed >>> 3) & 15) / 100
-            : 0.68 + ((range.seed >>> 7) & 11) / 100;
+            : i === 1
+              ? 0.52 + ((range.seed >>> 7) & 7) / 140
+              : 0.72 + ((range.seed >>> 11) & 11) / 100;
         const px = range.ax + dx * t;
         const py = range.ay + dy * t;
-        const drift = (((range.seed >>> (i ? 11 : 15)) & 15) - 7.5) * 28;
+        const drift = (((range.seed >>> (i === 0 ? 15 : i === 1 ? 19 : 23)) & 15) - 7.5) * 24;
         passes.push({
           x: px + tx * drift,
           y: py + ty * drift,
@@ -15164,8 +15935,8 @@ export default class World {
           ny,
           tx,
           ty,
-          width: range.width * (0.48 + i * 0.08),
-          length: 480 + ((range.seed >>> (i ? 19 : 23)) & 15) * 22,
+          width: range.width * (0.52 + i * 0.06),
+          length: 560 + ((range.seed >>> (i === 0 ? 27 : i === 1 ? 13 : 17)) & 15) * 26,
           rangeSeed: range.seed,
         });
       }
@@ -15503,12 +16274,12 @@ export default class World {
       const baseY = start.y + dy * t;
       const phaseA = (band.seed % 628) * 0.01;
       const phaseB = (band.seed % 991) * 0.008;
-      const waveA = Math.sin(t * Math.PI * 4.5 + phaseA);
-      const waveB = Math.sin(t * Math.PI * 8.5 + phaseB) * 0.36;
-      const waveC = Math.sin(t * Math.PI * 13.5 + phaseA * 0.7) * 0.14;
+      const waveA = Math.sin(t * Math.PI * 3.15 + phaseA);
+      const waveB = Math.sin(t * Math.PI * 6.2 + phaseB) * 0.28;
+      const waveC = Math.sin(t * Math.PI * 9.4 + phaseA * 0.7) * 0.10;
       const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
       const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
-      const bankWobble = Math.sin(t * Math.PI * 17 + phaseB) * 68 * ease;
+      const bankWobble = Math.sin(t * Math.PI * 11 + phaseB) * 44 * ease;
       const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
       const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
 
@@ -15529,11 +16300,46 @@ export default class World {
     }
 
     if (!band.joinBand) {
+      this._extendRiverHeadwaterPath(pts, band);
       this._clipRiverPathToCoast(pts, 0.245);
     }
 
     band._path = pts;
     return pts;
+  }
+
+  _extendRiverHeadwaterPath(pts, band) {
+    if (!pts || pts.length < 2 || !band) return;
+    const first = pts[0];
+    const second = pts[1];
+    const dx = first.x - second.x;
+    const dy = first.y - second.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const extra = [];
+    const maxSteps = 10;
+
+    for (let i = 1; i <= maxSteps; i++) {
+      const dist = 110 * i;
+      const falloff = 1 - i / (maxSteps + 1);
+      const wobble =
+        (Math.sin(i * 0.7 + (band.seed || 0) * 0.003) * 0.5 +
+         (fbm((first.x + ux * dist) * 0.0012, (first.y + uy * dist) * 0.0012, (band.seed || 0) + 97, 2) - 0.5) * 0.7)
+        * (band.amplitude || 520) * 0.08 * falloff;
+      const px = first.x + ux * dist + nx * wobble;
+      const py = first.y + uy * dist + ny * wobble;
+      const sample = this._sampleCellRaw(px, py);
+      if (sample.isWater) break;
+      extra.push({ x: px, y: py });
+      if (sample.isMountain || sample.zone === "mountain" || sample.zone === "highlands" || this._groundAt(px, py) >= 0.42) {
+        break;
+      }
+    }
+
+    if (extra.length) pts.unshift(...extra.reverse());
   }
 
   _clipRiverPathToCoast(pts, coastCutoff = 0.245) {
@@ -15613,7 +16419,27 @@ export default class World {
       const join = this._pointOnRiverPath(this._riverPath(band.joinBand), band.joinT || 0.5);
       return { x: join.x, y: join.y };
     }
-    return this._shorelinePointAlongLine(band.ax, band.ay, band.bx, band.by, 0.245);
+    let end = this._shorelinePointAlongLine(band.ax, band.ay, band.bx, band.by, 0.245);
+    if (!this._isOceanCoastalLandPoint(end.x, end.y)) {
+      const fallback =
+        (band.coastSide && band.coastTarget ? this._findOceanShoreAnchor(band.coastSide, band.coastTarget, 6200) : null) ||
+        this._findOceanShoreAnchor(this._inferRiverCoastSide(band), { x: band.bx, y: band.by }, 6200) ||
+        this._findOceanCoastAnchorNear(end.x, end.y, 2600) ||
+        this._findOceanCoastAnchorNear(band.bx, band.by, 4200) ||
+        this._findCoastAnchorNear(end.x, end.y, 2200) ||
+        this._findCoastAnchorNear(band.bx, band.by, 3600);
+      if (fallback) end = fallback;
+    }
+    return end;
+  }
+
+  _inferRiverCoastSide(band) {
+    if (!band) return "south";
+    if (band.coastSide) return band.coastSide;
+    const bx = band.bx || 0;
+    const by = band.by || 0;
+    if (Math.abs(bx) > Math.abs(by)) return bx >= 0 ? "east" : "west";
+    return by >= 0 ? "south" : "north";
   }
 
   _riverStartPoint(band) {
@@ -15634,7 +16460,7 @@ export default class World {
       const uy = dy / len;
       let lx = bx;
       let ly = by;
-      for (let dist = 64; dist <= 3200; dist += 64) {
+      for (let dist = 64; dist <= 7200; dist += 64) {
         const px = bx + ux * dist;
         const py = by + uy * dist;
         if (this._groundAt(px, py) < waterCutoff) {
@@ -15702,6 +16528,7 @@ export default class World {
   }
 
   _findRiverSourceNear(x, y, radius = 2200) {
+    let fallback = null;
     for (let r = 0; r <= radius; r += 90) {
       for (let a = 0; a < Math.PI * 2; a += Math.PI / 18) {
         const px = x + Math.cos(a) * r;
@@ -15710,10 +16537,27 @@ export default class World {
         if (raw.isWater || raw.isMountain) continue;
         if (this._isCoastalLandPoint(px, py)) continue;
         if (this._groundAt(px, py) < 0.275) continue;
-        return { x: px, y: py };
+        if (!fallback) fallback = { x: px, y: py };
+        if (this._isRiverSourceHeadwaterPoint(px, py)) return { x: px, y: py };
       }
     }
-    return null;
+    return fallback;
+  }
+
+  _isRiverSourceHeadwaterPoint(x, y) {
+    const raw = this._sampleCellRaw(x, y);
+    if (raw.isWater || raw.isMountain) return false;
+
+    const ground = this._groundAt(x, y);
+    const moisture = this._moistureAt(x, y);
+    const mountainNear = this._isNearMountainWall(x, y, 320);
+    const highlandish = ground >= 0.42 || raw.zone === "highlands" || raw.zone === "stone flats";
+    const forested = raw.zone === "forest" || raw.zone === "deep wilds" || raw.zone === "greenwood";
+
+    if (mountainNear && ground >= 0.34) return true;
+    if (highlandish && moisture >= 0.30) return true;
+    if (ground >= 0.38 && forested) return true;
+    return false;
   }
 
   _isCoastalLandPoint(x, y) {
@@ -16300,7 +17144,7 @@ export default class World {
           const angle = Math.atan2(dy, dx);
           const baseSpan = Math.hypot(dx, dy);
           const riverWidth = river?.band ? this._riverVisualWidth(river.band) : baseSpan;
-          const shouldCreatePassage = baseSpan > 620 || riverWidth > 420;
+          const shouldCreatePassage = baseSpan > 980 || riverWidth > 620;
 
           if (shouldCreatePassage) {
             this._ensureRoadsidePassage(enterShore, exitShore);
@@ -16370,8 +17214,8 @@ export default class World {
 
   _repairMissingBridges(candidates) {
     const out = [...(candidates || [])];
-    const bridgeGapLimit = 340;
-    const hardBridgeGapLimit = 420;
+    const bridgeGapLimit = 492;
+    const hardBridgeGapLimit = 620;
     const nearBridge = (x, y, radius = 88) =>
       out.some((b) => Math.hypot((b.cx || 0) - x, (b.cy || 0) - y) < radius);
     const sampleWaterCrossing = (ax, ay, bx, by) => {
@@ -16453,7 +17297,7 @@ export default class World {
         if (nearBridge(midX, midY, 96)) continue;
 
         const span = Math.hypot(landAfter.x - landBefore.x, landAfter.y - landBefore.y);
-        if (span < 24 || span > 248) continue;
+        if (span < 24 || span > 388) continue;
 
         const angle = Math.atan2(dy, dx);
         const shoreInset = Math.min(6, Math.max(2, (road.width || 24) * 0.08));
@@ -16492,8 +17336,8 @@ export default class World {
   }
 
   _ensureEndpointDockAccess() {
-    const endpointBridgeGap = 320;
-    const endpointPassageGap = 480;
+    const endpointBridgeGap = 492;
+    const endpointPassageGap = 720;
     for (const road of this.roads || []) {
       const pts = road?.points;
       if (!pts || pts.length < 2) continue;
@@ -16512,7 +17356,7 @@ export default class World {
           const dx = water.shoreB.x - water.shoreA.x;
           const dy = water.shoreB.y - water.shoreA.y;
           const span = Math.hypot(dx, dy);
-          if (span >= 24 && span <= 340) {
+          if (span >= 24 && span <= 492) {
             const angle = Math.atan2(dy, dx);
             const dirX = span > 0 ? dx / span : 1;
             const dirY = span > 0 ? dy / span : 0;
@@ -17084,7 +17928,12 @@ export default class World {
         const north = this._sampleCellRaw(px, py - 140).isMountain;
         const south = this._sampleCellRaw(px, py + 140).isMountain;
 
-        if ((west && east) || (north && south)) return { x: px, y: py };
+        const nw = this._sampleCellRaw(px - 120, py - 120).isMountain;
+        const ne = this._sampleCellRaw(px + 120, py - 120).isMountain;
+        const sw = this._sampleCellRaw(px - 120, py + 120).isMountain;
+        const se = this._sampleCellRaw(px + 120, py + 120).isMountain;
+
+        if ((west && east) || (north && south) || (nw && se) || (ne && sw)) return { x: px, y: py };
       }
     }
     return null;
@@ -17366,7 +18215,7 @@ export default class World {
 
       const s = this._sampleCell(tx, ty);
       if ((s.zone === "meadow" || s.zone === "greenwood" || s.zone === "forest" || s.zone === "deep wilds" || s.zone === "old fields" || s.zone === "highlands")
-          && !s.isMountainWall && !s.isWater && !this._isNearBridgeDeck(tx, ty, 30)) {
+          && !s.isMountainWall && !s.isWater && !this._isNearBridgeDeck(tx, ty, 30) && !this._isNearRiverChannel(tx, ty, 22)) {
         const isForest = s.zone === "forest" || s.zone === "deep wilds" || s.zone === "greenwood";
         this._addTree({
           x: tx,
@@ -17375,36 +18224,52 @@ export default class World {
           scale: isForest ? 0.58 + (this._rng.next() * 0.46) : 0.48 + (this._rng.next() * 0.34)
         });
         if (isForest && this._rng.next() < 0.94) {
-          this._addTree({
-            x: tx + this._rng.range(-34, 34),
-            y: ty + this._rng.range(-30, 30),
-            seed: (this.seed + state.index * 197 + 17) >>> 0,
-            scale: 0.38 + (this._rng.next() * 0.24)
-          });
+          const cx = tx + this._rng.range(-34, 34);
+          const cy = ty + this._rng.range(-30, 30);
+          if (!this._isNearRiverChannel(cx, cy, 18)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 197 + 17) >>> 0,
+              scale: 0.38 + (this._rng.next() * 0.24)
+            });
+          }
         }
         if (this._rng.next() < 0.78) {
-          this._addTree({
-            x: tx + this._rng.range(-52, 52),
-            y: ty + this._rng.range(-44, 44),
-            seed: (this.seed + state.index * 257 + 29) >>> 0,
-            scale: 0.32 + (this._rng.next() * 0.20)
-          });
+          const cx = tx + this._rng.range(-52, 52);
+          const cy = ty + this._rng.range(-44, 44);
+          if (!this._isNearRiverChannel(cx, cy, 18)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 257 + 29) >>> 0,
+              scale: 0.32 + (this._rng.next() * 0.20)
+            });
+          }
         }
         if (isForest && this._rng.next() < 0.68) {
-          this._addTree({
-            x: tx + this._rng.range(-66, 66),
-            y: ty + this._rng.range(-58, 58),
-            seed: (this.seed + state.index * 313 + 47) >>> 0,
-            scale: 0.28 + (this._rng.next() * 0.18)
-          });
+          const cx = tx + this._rng.range(-66, 66);
+          const cy = ty + this._rng.range(-58, 58);
+          if (!this._isNearRiverChannel(cx, cy, 18)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 313 + 47) >>> 0,
+              scale: 0.28 + (this._rng.next() * 0.18)
+            });
+          }
         }
         if (isForest && this._rng.next() < 0.40) {
-          this._addTree({
-            x: tx + this._rng.range(-88, 88),
-            y: ty + this._rng.range(-76, 76),
-            seed: (this.seed + state.index * 401 + 73) >>> 0,
-            scale: 0.22 + (this._rng.next() * 0.14)
-          });
+          const cx = tx + this._rng.range(-88, 88);
+          const cy = ty + this._rng.range(-76, 76);
+          if (!this._isNearRiverChannel(cx, cy, 16)) {
+            this._addTree({
+              x: cx,
+              y: cy,
+              seed: (this.seed + state.index * 401 + 73) >>> 0,
+              scale: 0.22 + (this._rng.next() * 0.14)
+            });
+          }
         }
       }
     }
@@ -17624,6 +18489,7 @@ export default class World {
             if (t.scale < 0.3 && (t.seed & 3) !== 0) continue;
           }
           if (this._isNearBridgeDeck(t.x, t.y, 26)) continue;
+          if (this._isNearRiverChannel(t.x, t.y, 16)) continue;
           this._drawTree(ctx, t.x, t.y, t.seed, t.scale);
         }
       }
@@ -17727,6 +18593,11 @@ export default class World {
     }
 
     return false;
+  }
+
+  _isNearRiverChannel(x, y, pad = 18) {
+    const river = this._riverAt(x, y);
+    return river < this._riverWaterLimit + pad / 42;
   }
 
   _drawRock(ctx, x, y, seed, scale, zone = "stone flats") {
