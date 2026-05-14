@@ -300,7 +300,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\update-project-snaps
   </div>
 
   <div class="footer-note">
-    WASD or arrows to move. Hold Shift to run. Drag to orbit, right-drag to pan, mouse wheel to zoom.
+    WASD or arrows to move. Hold Shift to run. F, Space, or click to attack. F3 toggles debug.
   </div>
 
   <script type="module" src="./src/main3d.js"></script>
@@ -8822,6 +8822,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 import Save from "../save.js";
 import World from "../world.js";
+import { hash2 } from "../util.js";
 
 const SAVE_KEY = "broke-knight-save-v106";
 const TERRAIN_SIZE = 24000;
@@ -8831,6 +8832,12 @@ const ROAD_SAMPLE_STRIDE = 3;
 const WALK_SPEED = 560;
 const RUN_SPEED = 920;
 const FOLLOW_LERP = 0.16;
+const ATTACK_RANGE = 145;
+const ATTACK_ARC = Math.PI * 0.58;
+const ATTACK_COOLDOWN = 0.38;
+const ENEMY_ACTIVE_RADIUS = 1700;
+const ENEMY_DESPAWN_RADIUS = 2600;
+const MAX_ENEMIES = 18;
 
 export default class World3DApp {
   constructor(canvas, ui = {}) {
@@ -8870,14 +8877,34 @@ export default class World3DApp {
     this.hero = { x: 0, y: 0 };
     this.heroMarker = null;
     this.heroHeading = 0;
+    this.heroHp = 100;
+    this.attackCooldown = 0;
+    this.attackFlash = 0;
+    this.enemies = [];
+    this.enemyGroup = new THREE.Group();
+    this.attackFxGroup = new THREE.Group();
+    this.enemySpawnTimer = 0;
+    this.enemySerial = 0;
     this.keys = new Set();
     this.lastSaveAt = 0;
+    this.debug = {
+      enabled: false,
+      paused: false,
+      wireframe: false,
+      fps: 0,
+      frameMs: 0,
+      frames: 0,
+      accum: 0,
+      panel: null,
+      body: null,
+    };
 
     this.resize = this.resize.bind(this);
     this.animate = this.animate.bind(this);
     this.recenter = this.recenter.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
     this.onKeyUp = this.onKeyUp.bind(this);
+    this.onPointerDown = this.onPointerDown.bind(this);
   }
 
   start() {
@@ -8900,7 +8927,9 @@ export default class World3DApp {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", () => this.keys.clear());
+    this.canvas.addEventListener("pointerdown", this.onPointerDown);
     this.ui.recenterBtn?.addEventListener("click", this.recenter);
+    this.createDebugPanel();
     this.animate();
   }
 
@@ -8920,6 +8949,9 @@ export default class World3DApp {
     this.addWorldProps();
     this.addLandmarks();
     this.addHeroMarker();
+    this.scene.add(this.enemyGroup);
+    this.scene.add(this.attackFxGroup);
+    this.spawnEnemyPack(8, 520, 1200);
   }
 
   finishWorldWarmup() {
@@ -9035,35 +9067,27 @@ export default class World3DApp {
       color: 0x6a5236,
       roughness: 1,
       metalness: 0.01,
+      side: THREE.DoubleSide,
     });
     const wornMat = new THREE.MeshStandardMaterial({
       color: 0xa98a63,
       roughness: 0.95,
       metalness: 0,
+      side: THREE.DoubleSide,
     });
 
     for (const road of this.world.roads || []) {
       const pts = this.samplePolyline(road.points || [], ROAD_SAMPLE_STRIDE);
       if (pts.length < 2) continue;
-      const curvePoints = pts.map((p) => this.toVec3(p.x, p.y, 18)).filter(Boolean);
-      if (curvePoints.length < 2) continue;
-      const curve = new THREE.CatmullRomCurve3(curvePoints);
-      const width = Math.max(6, (road.width || 28) * 0.28);
+      const width = Math.max(18, (road.width || 28) * 0.82);
+      const roadMesh = this.makePathRibbon(pts, width, 5.5, baseMat);
+      if (roadMesh) {
+        roadMesh.receiveShadow = true;
+        group.add(roadMesh);
+      }
 
-      const roadTube = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, Math.max(16, curvePoints.length * 3), width, 6, false),
-        baseMat
-      );
-      roadTube.castShadow = true;
-      roadTube.receiveShadow = true;
-      group.add(roadTube);
-
-      const wornTube = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, Math.max(14, curvePoints.length * 2), width * 0.42, 5, false),
-        wornMat
-      );
-      wornTube.position.y += 0.8;
-      group.add(wornTube);
+      const wornMesh = this.makePathRibbon(pts, width * 0.42, 7, wornMat);
+      if (wornMesh) group.add(wornMesh);
     }
 
     this.scene.add(group);
@@ -9399,6 +9423,106 @@ export default class World3DApp {
     this.scene.add(group);
   }
 
+  createEnemyMesh(kind = "blob") {
+    const group = new THREE.Group();
+    const palette = {
+      blob: [0x668f54, 0x405c38],
+      scout: [0x8d6b48, 0x60452e],
+      brute: [0x8f5248, 0x5c332e],
+      wisp: [0x7fe8ff, 0x265a72],
+    };
+    const colors = palette[kind] || palette.blob;
+    const mat = new THREE.MeshStandardMaterial({
+      color: colors[0],
+      roughness: 0.8,
+      metalness: 0.02,
+      emissive: kind === "wisp" ? colors[1] : 0x000000,
+      emissiveIntensity: kind === "wisp" ? 0.35 : 0,
+    });
+    const darkMat = new THREE.MeshStandardMaterial({ color: colors[1], roughness: 0.9 });
+
+    const body =
+      kind === "brute"
+        ? new THREE.Mesh(new THREE.CapsuleGeometry(18, 36, 6, 10), mat)
+        : kind === "scout"
+          ? new THREE.Mesh(new THREE.CapsuleGeometry(12, 30, 5, 8), mat)
+          : new THREE.Mesh(new THREE.SphereGeometry(kind === "wisp" ? 12 : 16, 14, 10), mat);
+    body.position.y = kind === "brute" ? 42 : 30;
+    body.castShadow = true;
+    group.add(body);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(kind === "brute" ? 11 : 8, 10, 8), darkMat);
+    head.position.set(0, kind === "brute" ? 68 : 52, -2);
+    head.castShadow = true;
+    group.add(head);
+
+    const healthBack = new THREE.Mesh(
+      new THREE.BoxGeometry(38, 3, 2),
+      new THREE.MeshBasicMaterial({ color: 0x1b1512 })
+    );
+    healthBack.position.set(0, kind === "brute" ? 92 : 75, 0);
+    group.add(healthBack);
+
+    const health = new THREE.Mesh(
+      new THREE.BoxGeometry(36, 4, 2.4),
+      new THREE.MeshBasicMaterial({ color: 0xff6b5c })
+    );
+    health.position.set(0, kind === "brute" ? 92 : 75, 1);
+    group.add(health);
+    group.userData.health = health;
+
+    return group;
+  }
+
+  spawnEnemyPack(count = 4, minDist = 460, maxDist = 1100) {
+    for (let i = 0; i < count; i++) {
+      this.spawnEnemyNearHero(minDist, maxDist, i);
+    }
+    this.updateDebugPanel();
+  }
+
+  spawnEnemyNearHero(minDist = 520, maxDist = 1400, salt = 0) {
+    const kinds = ["blob", "scout", "blob", "brute", "wisp"];
+    for (let tries = 0; tries < 36; tries++) {
+      const seed = hash2((this.hero.x + salt * 97) | 0, (this.hero.y - tries * 131) | 0, this.world.seed);
+      const angle = ((seed % 6283) / 1000) + tries * 0.71;
+      const dist = minDist + ((Math.abs(seed >> 7) % 1000) / 1000) * (maxDist - minDist);
+      const x = this.hero.x + Math.cos(angle) * dist;
+      const y = this.hero.y + Math.sin(angle) * dist;
+      if (!this.world.canWalk?.(x, y, { state: { mountainPassAccess: true } })) continue;
+
+      const kind = kinds[Math.abs(seed) % kinds.length];
+      const mesh = this.createEnemyMesh(kind);
+      mesh.position.copy(this.toVec3(x, y, 0));
+      this.enemyGroup.add(mesh);
+      const maxHp = kind === "brute" ? 58 : kind === "wisp" ? 28 : kind === "scout" ? 34 : 38;
+      const enemy = {
+        id: ++this.enemySerial,
+        kind,
+        x,
+        y,
+        hp: maxHp,
+        maxHp,
+        speed: kind === "brute" ? 190 : kind === "wisp" ? 250 : kind === "scout" ? 280 : 220,
+        damage: kind === "brute" ? 14 : kind === "wisp" ? 8 : 9,
+        attackCd: 0.5,
+        hitT: 0,
+        mesh,
+      };
+      this.enemies.push(enemy);
+      return enemy;
+    }
+    return null;
+  }
+
+  clearEnemies() {
+    for (const enemy of this.enemies) {
+      if (enemy.mesh) this.enemyGroup.remove(enemy.mesh);
+    }
+    this.enemies.length = 0;
+    this.updateDebugPanel();
+  }
+
   samplePolyline(points, stride = 1) {
     if (!points?.length) return [];
     const out = [];
@@ -9416,6 +9540,43 @@ export default class World3DApp {
       if (!tail || Math.hypot(last.x - tail.x, last.y - tail.y) >= 1) out.push(last);
     }
     return out;
+  }
+
+  makePathRibbon(points, width, lift, material) {
+    if (!points?.length || points.length < 2) return null;
+
+    const vertices = [];
+    const indices = [];
+    const half = width * 0.5;
+
+    for (let i = 0; i < points.length; i++) {
+      const prev = points[Math.max(0, i - 1)];
+      const here = points[i];
+      const next = points[Math.min(points.length - 1, i + 1)];
+      const dx = next.x - prev.x;
+      const dy = next.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      const left = this.toVec3(here.x + nx * half, here.y + ny * half, lift);
+      const right = this.toVec3(here.x - nx * half, here.y - ny * half, lift);
+      vertices.push(left.x, left.y, left.z, right.x, right.y, right.z);
+
+      if (i > 0) {
+        const a = (i - 1) * 2;
+        const b = a + 1;
+        const c = i * 2;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    return new THREE.Mesh(geometry, material);
   }
 
   colorForSample(sample) {
@@ -9468,8 +9629,41 @@ export default class World3DApp {
   onKeyDown(event) {
     const key = this.normalizeKey(event);
     if (!key) return;
+    if (key === "`" || key === "f3") {
+      this.toggleDebug();
+      event.preventDefault();
+      return;
+    }
+    if (key === "f" || key === " ") {
+      this.attack();
+      event.preventDefault();
+      return;
+    }
+    if (this.debug.enabled) {
+      if (key === "p") {
+        this.debug.paused = !this.debug.paused;
+        this.updateDebugPanel();
+        event.preventDefault();
+        return;
+      }
+      if (key === "n") {
+        this.spawnEnemyPack(1, 220, 520);
+        event.preventDefault();
+        return;
+      }
+      if (key === "c") {
+        this.clearEnemies();
+        event.preventDefault();
+        return;
+      }
+      if (key === "v") {
+        this.toggleWireframe();
+        event.preventDefault();
+        return;
+      }
+    }
     this.keys.add(key);
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Shift"].includes(key)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Shift"].includes(key)) {
       event.preventDefault();
     }
   }
@@ -9488,6 +9682,11 @@ export default class World3DApp {
     return String(event.key || "").toLowerCase();
   }
 
+  onPointerDown(event) {
+    if (event.button !== 0) return;
+    this.attack();
+  }
+
   updateMovement(dt) {
     const forwardKey = this.keys.has("w") || this.keys.has("ArrowUp");
     const backKey = this.keys.has("s") || this.keys.has("ArrowDown");
@@ -9503,7 +9702,7 @@ export default class World3DApp {
     if (forward.lengthSq() < 0.001) forward.set(0, 0, -1);
     forward.normalize();
 
-    const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+    const right = new THREE.Vector3(-forward.z, 0, forward.x).normalize();
     const move = new THREE.Vector3()
       .addScaledVector(forward, mz)
       .addScaledVector(right, mx);
@@ -9562,6 +9761,270 @@ export default class World3DApp {
     this.save.save(next);
   }
 
+  attack() {
+    if (this.attackCooldown > 0) return;
+    this.attackCooldown = ATTACK_COOLDOWN;
+    this.attackFlash = 0.18;
+
+    const forward = this.heroForward2D();
+    this.heroHeading = Math.atan2(forward.x, forward.y);
+    this.updateHeroMarker();
+    const hit = [];
+    for (const enemy of this.enemies) {
+      if (!enemy || enemy.hp <= 0) continue;
+      const dx = enemy.x - this.hero.x;
+      const dy = enemy.y - this.hero.y;
+      const d = Math.hypot(dx, dy);
+      if (d > ATTACK_RANGE) continue;
+      const dot = d > 0 ? (dx / d) * forward.x + (dy / d) * forward.y : 1;
+      const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+      if (angle <= ATTACK_ARC * 0.5) hit.push(enemy);
+    }
+
+    for (const enemy of hit) {
+      enemy.hp -= 22;
+      enemy.hitT = 0.18;
+      if (enemy.hp <= 0) this.killEnemy(enemy);
+      else this.updateEnemyHealth(enemy);
+    }
+
+    this.addAttackArcMesh(hit.length > 0);
+    this.updateDebugPanel();
+  }
+
+  heroForward2D() {
+    const forward = new THREE.Vector3()
+      .subVectors(this.controls.target, this.camera.position)
+      .setY(0);
+    if (forward.lengthSq() < 0.001) {
+      return { x: Math.sin(this.heroHeading), y: Math.cos(this.heroHeading) };
+    }
+    forward.normalize();
+    return { x: forward.x, y: forward.z };
+  }
+
+  addAttackArcMesh(didHit = false) {
+    const shape = new THREE.Shape();
+    const halfArc = ATTACK_ARC * 0.5;
+    const forwardAngle = Math.atan2(Math.sin(this.heroHeading), Math.cos(this.heroHeading));
+    shape.moveTo(0, 0);
+    for (let i = 0; i <= 18; i++) {
+      const a = forwardAngle - halfArc + (i / 18) * ATTACK_ARC;
+      shape.lineTo(Math.sin(a) * ATTACK_RANGE, Math.cos(a) * ATTACK_RANGE);
+    }
+    shape.lineTo(0, 0);
+
+    const geometry = new THREE.ShapeGeometry(shape);
+    geometry.rotateX(-Math.PI * 0.5);
+    const mesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({
+        color: didHit ? 0xffdf8a : 0xb8d9ff,
+        transparent: true,
+        opacity: didHit ? 0.38 : 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    mesh.position.copy(this.toVec3(this.hero.x, this.hero.y, 16));
+    mesh.userData.life = 0.16;
+    this.attackFxGroup.add(mesh);
+  }
+
+  killEnemy(enemy) {
+    enemy.hp = 0;
+    if (enemy.mesh) this.enemyGroup.remove(enemy.mesh);
+    const index = this.enemies.indexOf(enemy);
+    if (index >= 0) this.enemies.splice(index, 1);
+  }
+
+  updateEnemyHealth(enemy) {
+    const health = enemy.mesh?.userData?.health;
+    if (!health) return;
+    const frac = Math.max(0, Math.min(1, enemy.hp / enemy.maxHp));
+    health.scale.x = frac;
+    health.position.x = -18 * (1 - frac);
+  }
+
+  updateCombat(dt) {
+    this.attackCooldown = Math.max(0, this.attackCooldown - dt);
+    this.attackFlash = Math.max(0, this.attackFlash - dt);
+    this.enemySpawnTimer -= dt;
+
+    if (!this.debug.paused) {
+      if (this.enemySpawnTimer <= 0 && this.enemies.length < MAX_ENEMIES) {
+        this.enemySpawnTimer = 1.8;
+        this.spawnEnemyNearHero(760, 1500, this.enemies.length + this.enemySerial);
+      }
+      this.updateEnemies(dt);
+    }
+
+    this.updateAttackFx(dt);
+    this.updateHeroCombatVisual();
+  }
+
+  updateEnemies(dt) {
+    const actor = { state: { mountainPassAccess: true } };
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const enemy = this.enemies[i];
+      const dx = this.hero.x - enemy.x;
+      const dy = this.hero.y - enemy.y;
+      const d = Math.hypot(dx, dy) || 1;
+      enemy.attackCd = Math.max(0, enemy.attackCd - dt);
+      enemy.hitT = Math.max(0, enemy.hitT - dt);
+
+      if (d > ENEMY_DESPAWN_RADIUS) {
+        this.killEnemy(enemy);
+        continue;
+      }
+
+      if (d < ENEMY_ACTIVE_RADIUS && d > 42) {
+        const step = enemy.speed * dt;
+        const nx = enemy.x + (dx / d) * step;
+        const ny = enemy.y + (dy / d) * step;
+        if (this.world.canWalk?.(nx, ny, actor)) {
+          enemy.x = nx;
+          enemy.y = ny;
+        }
+      }
+
+      if (d <= 58 && enemy.attackCd <= 0) {
+        enemy.attackCd = enemy.kind === "brute" ? 1.1 : 0.78;
+        this.heroHp = Math.max(0, this.heroHp - enemy.damage);
+      }
+
+      if (enemy.mesh) {
+        enemy.mesh.position.copy(this.toVec3(enemy.x, enemy.y, 0));
+        enemy.mesh.rotation.y = Math.atan2(dx, dy);
+        const pulse = enemy.hitT > 0 ? 1.18 : 1;
+        enemy.mesh.scale.setScalar(pulse);
+      }
+      this.updateEnemyHealth(enemy);
+    }
+  }
+
+  updateAttackFx(dt) {
+    for (let i = this.attackFxGroup.children.length - 1; i >= 0; i--) {
+      const mesh = this.attackFxGroup.children[i];
+      mesh.userData.life = (mesh.userData.life || 0) - dt;
+      if (mesh.material) mesh.material.opacity = Math.max(0, mesh.userData.life / 0.16) * 0.38;
+      if (mesh.userData.life <= 0) {
+        this.attackFxGroup.remove(mesh);
+        mesh.geometry?.dispose?.();
+        mesh.material?.dispose?.();
+      }
+    }
+  }
+
+  updateHeroCombatVisual() {
+    if (!this.heroMarker) return;
+    const pulse = this.attackFlash > 0 ? 1.08 : 1;
+    this.heroMarker.scale.setScalar(pulse);
+  }
+
+  createDebugPanel() {
+    const panel = document.createElement("section");
+    panel.id = "debug-panel-3d";
+    panel.style.cssText = [
+      "position:fixed",
+      "right:16px",
+      "bottom:16px",
+      "z-index:8",
+      "width:min(360px,calc(100vw - 32px))",
+      "padding:12px",
+      "border-radius:10px",
+      "border:1px solid rgba(150,190,220,0.22)",
+      "background:rgba(8,13,20,0.84)",
+      "box-shadow:0 18px 44px rgba(0,0,0,0.32)",
+      "backdrop-filter:blur(10px)",
+      "color:rgba(236,242,248,0.95)",
+      "font:12px/1.35 Consolas, 'Segoe UI', monospace",
+      "display:none",
+    ].join(";");
+
+    const title = document.createElement("div");
+    title.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;font-family:'Segoe UI',Arial,sans-serif;font-weight:700;";
+    title.innerHTML = "<span>3D Debug</span><span style=\"font-weight:500;color:rgba(204,217,229,0.82)\">F3 / `</span>";
+    panel.appendChild(title);
+
+    const controls = document.createElement("div");
+    controls.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px;";
+    const buttons = [
+      ["Spawn", () => this.spawnEnemyPack(3, 240, 720)],
+      ["Clear", () => this.clearEnemies()],
+      ["Pause AI", () => { this.debug.paused = !this.debug.paused; this.updateDebugPanel(); }],
+      ["Wireframe", () => this.toggleWireframe()],
+      ["Recenter", () => this.recenter()],
+      ["Heal", () => { this.heroHp = 100; this.updateDebugPanel(); }],
+    ];
+    for (const [label, handler] of buttons) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.style.cssText = "height:30px;border-radius:8px;border:1px solid rgba(150,190,220,0.22);background:rgba(255,255,255,0.06);color:inherit;cursor:pointer;";
+      button.addEventListener("click", handler);
+      controls.appendChild(button);
+    }
+    panel.appendChild(controls);
+
+    const body = document.createElement("pre");
+    body.style.cssText = "margin:0;white-space:pre-wrap;color:rgba(217,229,240,0.92);";
+    panel.appendChild(body);
+
+    document.body.appendChild(panel);
+    this.debug.panel = panel;
+    this.debug.body = body;
+  }
+
+  toggleDebug() {
+    this.debug.enabled = !this.debug.enabled;
+    if (this.debug.panel) this.debug.panel.style.display = this.debug.enabled ? "block" : "none";
+    this.updateDebugPanel();
+  }
+
+  toggleWireframe() {
+    this.debug.wireframe = !this.debug.wireframe;
+    this.scene.traverse((obj) => {
+      const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+      for (const material of materials) {
+        if ("wireframe" in material) material.wireframe = this.debug.wireframe;
+      }
+    });
+    this.updateDebugPanel();
+  }
+
+  updateDebugStats(dt) {
+    this.debug.frames++;
+    this.debug.accum += dt;
+    this.debug.frameMs = this.debug.frameMs * 0.9 + dt * 1000 * 0.1;
+    if (this.debug.accum >= 0.5) {
+      this.debug.fps = this.debug.frames / this.debug.accum;
+      this.debug.frames = 0;
+      this.debug.accum = 0;
+    }
+  }
+
+  updateDebugPanel() {
+    if (!this.debug.body || !this.debug.enabled) return;
+    const zone = this.world?.getZoneName?.(this.hero.x, this.hero.y) || "-";
+    const rendererInfo = this.renderer.info;
+    const nearest = this.enemies.reduce((best, enemy) => {
+      const d = Math.hypot(enemy.x - this.hero.x, enemy.y - this.hero.y);
+      return d < best ? d : best;
+    }, Infinity);
+    this.debug.body.textContent = [
+      `fps ${this.debug.fps.toFixed(1)} | frame ${this.debug.frameMs.toFixed(1)}ms`,
+      `hero ${Math.round(this.hero.x)}, ${Math.round(this.hero.y)} | hp ${Math.round(this.heroHp)}/100`,
+      `zone ${zone}`,
+      `enemies ${this.enemies.length}/${MAX_ENEMIES} | nearest ${Number.isFinite(nearest) ? Math.round(nearest) : "-"}`,
+      `draw calls ${rendererInfo.render.calls} | tris ${rendererInfo.render.triangles}`,
+      `ai ${this.debug.paused ? "paused" : "live"} | wire ${this.debug.wireframe ? "on" : "off"}`,
+      "",
+      "F / Space / click: attack",
+      "N: spawn | C: clear | P: pause AI | V: wireframe",
+    ].join("\n");
+  }
+
   updateHud() {
     if (this.ui.summaryEl) {
       this.ui.summaryEl.textContent =
@@ -9588,9 +10051,13 @@ export default class World3DApp {
     this.rafId = requestAnimationFrame(this.animate);
     const dt = this.clock.getDelta();
     this.world.update?.();
-    this.updateMovement(Math.min(dt, 0.05));
+    const step = Math.min(dt, 0.05);
+    this.updateDebugStats(step);
+    this.updateMovement(step);
+    this.updateCombat(step);
     this.controls.update(dt);
     this.renderer.render(this.scene, this.camera);
+    this.updateDebugPanel();
   }
 }
 
