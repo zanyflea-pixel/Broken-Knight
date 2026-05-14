@@ -12,6 +12,8 @@ $files = @(
   "src/game.js",
   "src/input.js",
   "src/main.js",
+  "src/main3d.js",
+  "src/render3d/world3d.js",
   "src/save.js",
   "src/ui.js",
   "src/util.js",

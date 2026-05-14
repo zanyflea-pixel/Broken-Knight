@@ -38,7 +38,7 @@ const QUEST_TRACK_ROWS = [
 ];
 
 export default class Game {
-  constructor(canvas) {
+  constructor(canvas, opts = {}) {
     if (!canvas) throw new Error("Game: canvas is required");
 
     this.canvas = canvas;
@@ -56,7 +56,19 @@ export default class Game {
     this._hadBootSave = !!this._bootSaveData;
     if (Number.isFinite(+this._bootSaveData?.seed)) this.seed = this._bootSaveData.seed | 0;
 
+    this._bootStage = "";
+    this._bootProgress = 0;
+    const bootProgress = typeof opts.onBootProgress === "function" ? opts.onBootProgress : null;
+    const setBootStage = (stage, progress = null) => {
+      this._bootStage = stage;
+      if (progress != null) this._bootProgress = progress;
+      bootProgress?.(stage, progress);
+    };
+
+    setBootStage("Reading your save...", 0.08);
+    setBootStage("Laying out the world...", 0.18);
     this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
+    setBootStage("Waking the hero...", 0.38);
     this.hero = new Hero(this.world.spawn?.x ?? 0, this.world.spawn?.y ?? 0);
 
     this.enemies = [];
@@ -156,6 +168,8 @@ export default class Game {
     this._townServiceFocus = "";
 
     this._rng = new RNG(hash2(this.seed, 9001));
+    this._bootProgress = 0.44;
+    this._bootStage = "Opening the roads...";
 
     this.mouse = {
       x: this.w * 0.5,
@@ -235,6 +249,7 @@ export default class Game {
       currentRoomId: null,
       keys: 0,
       roomClearT: 0,
+      spawnQueue: [],
     };
 
     this.dev = {
@@ -291,6 +306,19 @@ export default class Game {
     this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
     this._refreshHeroTerrainSample(true);
     if (this._worldBuildMigrated) this._saveGame();
+  }
+
+  getBootProgress() {
+    const worldProgress = this.world?.getBootProgress?.() ?? 1;
+    return clamp(0.44 + worldProgress * 0.56, 0, 1);
+  }
+
+  getBootStatusText() {
+    return this.world?.getBootStatusText?.() || this._bootStage || "Building the world...";
+  }
+
+  isBootWarm() {
+    return !!this.world?.isBootWarm?.();
   }
 
   resize(w, h) {
@@ -1309,7 +1337,7 @@ export default class Game {
 
     let walkable = false;
     for (const rect of layout.walkRects || []) {
-      if (insideRect(rect, rect.kind === "room" ? 2 : 1)) {
+      if (insideRect(rect, rect.kind === "room" ? 0 : 0)) {
         walkable = true;
         break;
       }
@@ -1322,7 +1350,7 @@ export default class Game {
 
     for (const door of layout.doors || []) {
       if (door.open) continue;
-      if (insideRect(door.blocker, 0)) return false;
+      if (insideRect(door.blocker, 2)) return false;
     }
     return true;
   }
@@ -1758,6 +1786,139 @@ export default class Game {
           item.affix = "bound";
           this.hero.inventory.push(item);
           this._msg("Ward charm crafted", 1.2);
+        },
+      },
+      {
+        id: "hunter-wraps",
+        name: "Hunter Wraps",
+        color: "#d8b992",
+        desc: "Leather wrappings that toughen long marches and quick turns.",
+        requires: { hide: 6, herb: 2 },
+        resultText: "Crafts 1 uncommon boots",
+        craft: () => {
+          const item = makeGear("boots", Math.max(level, 3), "uncommon", hash2(this.seed, level, this.time | 0, 205));
+          item.name = "Hunter Wraps";
+          item.affix = "scouted";
+          this.hero.inventory.push(item);
+          this._msg("Hunter wraps crafted", 1.2);
+        },
+      },
+      {
+        id: "quicksilver-ring",
+        name: "Quicksilver Ring",
+        color: "#dfe9ff",
+        desc: "A light silver band that sharpens movement and critical timing.",
+        requires: { ore: 3, essence: 2, scrap: 2 },
+        resultText: "Crafts 1 uncommon ring",
+        craft: () => {
+          const item = makeGear("ring", Math.max(level, 3), "uncommon", hash2(this.seed, level, this.time | 0, 206));
+          item.name = "Quicksilver Ring";
+          item.affix = "nimble";
+          this.hero.inventory.push(item);
+          this._msg("Quicksilver ring crafted", 1.2);
+        },
+      },
+      {
+        id: "campfire-kit",
+        name: "Campfire Kit",
+        color: "#ffcb8e",
+        desc: "Scrap and herb bundles packed into a quick field-rest supply.",
+        requires: { herb: 2, scrap: 2, hide: 1 },
+        resultText: "Grants 1 health potion and 1 mana potion",
+        craft: () => {
+          this.hero.potions.hp = (this.hero.potions.hp || 0) + 1;
+          this.hero.potions.mana = (this.hero.potions.mana || 0) + 1;
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Campfire kit", "#ffcb8e");
+          this._msg("Campfire kit packed", 1.0);
+        },
+      },
+      {
+        id: "rune-lantern",
+        name: "Rune Lantern",
+        color: "#b9e5ff",
+        desc: "A relic lamp for deeper delves and steadier dungeon footing.",
+        requires: { essence: 4, ore: 2, hide: 2 },
+        resultText: "Crafts 1 rare trinket",
+        craft: () => {
+          const item = makeGear("trinket", Math.max(level, 4), "rare", hash2(this.seed, level, this.time | 0, 207));
+          item.name = "Rune Lantern";
+          item.affix = "delver's";
+          this.hero.inventory.push(item);
+          this._msg("Rune lantern crafted", 1.2);
+        },
+      },
+      {
+        id: "surveyor-kit",
+        name: "Surveyor Kit",
+        color: "#9ad7ff",
+        desc: "Charts the land ahead and uncovers a safer patch of the world map.",
+        requires: { herb: 1, scrap: 2, ore: 1 },
+        resultText: "Reveals the nearby map",
+        craft: () => {
+          this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Surveyed", "#9ad7ff");
+          this._msg("Surveyor kit used", 1.0);
+        },
+      },
+      {
+        id: "brigandine",
+        name: "Reinforced Brigandine",
+        color: "#e1c9ab",
+        desc: "A stronger field cuirass pieced together from hide, ore, and salvage.",
+        requires: { hide: 7, ore: 3, scrap: 4 },
+        resultText: "Crafts 1 uncommon armor",
+        craft: () => {
+          const item = makeGear("armor", Math.max(level, 4), "uncommon", hash2(this.seed, level, this.time | 0, 208));
+          item.name = "Reinforced Brigandine";
+          item.affix = "layered";
+          this.hero.inventory.push(item);
+          this._msg("Reinforced brigandine crafted", 1.2);
+        },
+      },
+      {
+        id: "wayfarer-ration",
+        name: "Wayfarer Ration",
+        color: "#f1d39c",
+        desc: "Packed herbs and hide strips that steady you for the next hard march.",
+        requires: { herb: 2, hide: 2 },
+        resultText: "Restores health and mana",
+        craft: () => {
+          const hpGain = Math.max(16, Math.round((this.hero.maxHp || 100) * 0.18));
+          const manaGain = Math.max(10, Math.round((this.hero.maxMana || 60) * 0.22));
+          this.hero.hp = Math.min(this.hero.maxHp || 100, (this.hero.hp || 0) + hpGain);
+          this.hero.mana = Math.min(this.hero.maxMana || 60, (this.hero.mana || 0) + manaGain);
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Rations", "#f1d39c");
+          this._msg("Wayfarer ration consumed", 1.0);
+        },
+      },
+      {
+        id: "river-knife",
+        name: "River Knife",
+        color: "#d9ebff",
+        desc: "A slim blade balanced for quick cuts and clean finishing strikes.",
+        requires: { scrap: 4, ore: 4, essence: 1 },
+        resultText: "Crafts 1 uncommon weapon",
+        craft: () => {
+          const item = makeGear("weapon", Math.max(level, 4), "uncommon", hash2(this.seed, level, this.time | 0, 209));
+          item.name = "River Knife";
+          item.affix = "nimble";
+          this.hero.inventory.push(item);
+          this._msg("River Knife crafted", 1.2);
+        },
+      },
+      {
+        id: "warden-seal",
+        name: "Warden Seal",
+        color: "#d8d0ff",
+        desc: "A stamped charm that hardens resolve for rough crossings and longer fights.",
+        requires: { essence: 3, scrap: 2, ore: 2 },
+        resultText: "Crafts 1 rare ring",
+        craft: () => {
+          const item = makeGear("ring", Math.max(level, 5), "rare", hash2(this.seed, level, this.time | 0, 210));
+          item.name = "Warden Seal";
+          item.affix = "steadfast";
+          this.hero.inventory.push(item);
+          this._msg("Warden seal crafted", 1.2);
         },
       },
     ];
@@ -2317,34 +2478,9 @@ export default class Game {
     for (const rect of layout?.corridors || []) {
       const gx = rect.x - rect.w * 0.5;
       const gy = rect.y - rect.h * 0.5;
-      const g = ctx.createLinearGradient(gx, gy, gx, gy + rect.h);
-      g.addColorStop(0, theme.floor1);
-      g.addColorStop(1, theme.floor2);
-      ctx.fillStyle = g;
-      ctx.fillRect(gx, gy, rect.w, rect.h);
+      this._drawDungeonStoneFloor(ctx, gx, gy, rect.w, rect.h, theme, rect, rect.orientation === "h" ? 0.92 : 0.88);
       this._drawDungeonCorridorWalls(ctx, rect, theme);
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(gx + 1, gy + 1, rect.w - 2, rect.h - 2);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.035)";
-      ctx.lineWidth = 1;
-      if (rect.orientation === "h") {
-        for (let x = gx + 26; x < gx + rect.w - 10; x += 30) {
-          ctx.beginPath();
-          ctx.moveTo(x, gy + 9);
-          ctx.lineTo(x, gy + rect.h - 9);
-          ctx.stroke();
-        }
-      } else {
-        for (let y = gy + 26; y < gy + rect.h - 10; y += 30) {
-          ctx.beginPath();
-          ctx.moveTo(gx + 9, y);
-          ctx.lineTo(gx + rect.w - 9, y);
-          ctx.stroke();
-        }
-      }
-
+      this._drawDungeonGrime(ctx, gx, gy, rect.w, rect.h, rect.seed || rect.id || `${rect.x}|${rect.y}`);
       this._drawDungeonDecor(ctx, rect.decor, theme);
     }
 
@@ -2352,47 +2488,18 @@ export default class Game {
       const gx = r.x - r.w * 0.5;
       const gy = r.y - r.h * 0.5;
       const bossRoom = r.type === "boss";
-      const g = ctx.createLinearGradient(gx, gy, gx, gy + r.h);
-      g.addColorStop(0, bossRoom ? "#332129" : r.type === "start" ? "#262d37" : theme.floor0);
-      g.addColorStop(0.55, bossRoom ? "#251922" : theme.floor1);
-      g.addColorStop(1, theme.floor2);
-      ctx.fillStyle = g;
-      ctx.fillRect(gx, gy, r.w, r.h);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.03)";
-      ctx.lineWidth = 1;
-      const tile = bossRoom ? 42 : 34;
-      for (let x = gx + 18; x < gx + r.w - 10; x += tile) {
-        ctx.beginPath();
-        ctx.moveTo(x, gy + 20);
-        ctx.lineTo(x, gy + r.h - 20);
-        ctx.stroke();
-      }
-      for (let y = gy + 18; y < gy + r.h - 10; y += tile) {
-        ctx.beginPath();
-        ctx.moveTo(gx + 20, y);
-        ctx.lineTo(gx + r.w - 20, y);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = bossRoom ? "rgba(255,111,80,0.05)" : r === room ? "rgba(139,233,255,0.05)" : theme.haze;
-      for (let i = 0; i < 5; i++) {
-        const px = gx + 70 + ((i * 127 + (r.id.length * 31)) % Math.max(90, r.w - 140));
-        const py = gy + 60 + ((i * 79 + (r.id.length * 53)) % Math.max(90, r.h - 120));
-        ctx.beginPath();
-        ctx.ellipse(px, py, 28 + (i % 2) * 12, 10 + (i % 3) * 5, (i * 0.5) % Math.PI, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      this._drawDungeonStoneFloor(ctx, gx, gy, r.w, r.h, theme, r, bossRoom ? 1.02 : r === room ? 0.96 : 0.90);
+      this._drawDungeonGrime(ctx, gx, gy, r.w, r.h, r.id || `${r.x}|${r.y}`);
 
       this._drawDungeonDecor(ctx, r.decor, theme);
       this._drawDungeonRoomWalls(ctx, r, theme, r === room);
 
-      ctx.strokeStyle = r === room ? "rgba(139,233,255,0.44)" : bossRoom ? "rgba(255,138,92,0.30)" : "rgba(255,255,255,0.06)";
+      ctx.strokeStyle = r === room ? "rgba(182,144,96,0.24)" : bossRoom ? "rgba(255,138,92,0.24)" : "rgba(255,255,255,0.04)";
       ctx.lineWidth = r === room ? 3 : 2;
       ctx.strokeRect(gx + 8, gy + 8, r.w - 16, r.h - 16);
 
-      ctx.fillStyle = "#eef4fb";
-      ctx.font = "bold 12px Arial";
+      ctx.fillStyle = "rgba(233,223,206,0.84)";
+      ctx.font = "bold 11px Arial";
       ctx.textAlign = "left";
       ctx.fillText(this._titleCase(r.type), gx + 28, gy + 28);
 
@@ -2400,7 +2507,7 @@ export default class Game {
         const cache = this._getDungeonRoomCacheAnchor(r);
         ctx.fillStyle = r.type === "key" ? "rgba(139,233,255,0.18)" : r.type === "loot" ? "rgba(255,214,110,0.18)" : "rgba(160,255,176,0.16)";
         ctx.fillRect(cache.x - 18, cache.y - 12, 36, 24);
-        ctx.strokeStyle = r.type === "key" ? "#8be9ff" : r.type === "loot" ? "#ffd86e" : "#b8f59e";
+        ctx.strokeStyle = r.type === "key" ? "#d7c18a" : r.type === "loot" ? "#ffd86e" : "#b8f59e";
         ctx.lineWidth = 2;
         ctx.strokeRect(cache.x - 17.5, cache.y - 11.5, 35, 23);
         ctx.fillStyle = "#f4fbff";
@@ -2411,43 +2518,54 @@ export default class Game {
     }
 
     for (const door of layout?.doors || []) {
-      const frameW = door.vertical ? 22 : (door.blocker.w || 22) + 8;
-      const frameH = door.vertical ? (door.blocker.h || 58) + 8 : 22;
-      const leafW = door.vertical ? 14 : Math.max(18, frameW - 10);
-      const leafH = door.vertical ? Math.max(18, frameH - 10) : 14;
-      ctx.fillStyle = "rgba(18,13,20,0.96)";
-      ctx.fillRect(door.x - frameW * 0.5, door.y - frameH * 0.5, frameW, frameH);
-      ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : door.open ? "#8be9ff" : "#dc7cff";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(door.x - frameW * 0.5 + 0.5, door.y - frameH * 0.5 + 0.5, frameW - 1, frameH - 1);
+      const blocker = door.blocker || { x: door.x, y: door.y, w: 16, h: 16 };
+      const frameW = door.vertical ? 28 : Math.max(22, (door.frameSpan || blocker.w || 22) + 12);
+      const frameH = door.vertical ? Math.max(22, (door.frameSpan || blocker.h || 58) + 12) : 28;
+      const leafW = door.vertical ? 16 : Math.max(18, frameW - 14);
+      const leafH = door.vertical ? Math.max(18, frameH - 14) : 16;
+      const frameX = door.vertical ? blocker.x : door.x;
+      const frameY = door.vertical ? door.y : blocker.y;
+      ctx.fillStyle = "rgba(18,13,20,0.98)";
+      ctx.fillRect(frameX - frameW * 0.5, frameY - frameH * 0.5, frameW, frameH);
+      ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : door.open ? "#caa46b" : "#9a8674";
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(frameX - frameW * 0.5 + 0.5, frameY - frameH * 0.5 + 0.5, frameW - 1, frameH - 1);
+      ctx.fillStyle = "rgba(74,56,39,0.96)";
+      if (door.vertical) {
+        ctx.fillRect(frameX - frameW * 0.5 + 4, frameY - frameH * 0.5, 5, frameH);
+        ctx.fillRect(frameX + frameW * 0.5 - 9, frameY - frameH * 0.5, 5, frameH);
+      } else {
+        ctx.fillRect(frameX - frameW * 0.5, frameY - frameH * 0.5 + 4, frameW, 5);
+        ctx.fillRect(frameX - frameW * 0.5, frameY + frameH * 0.5 - 9, frameW, 5);
+      }
 
       if (!door.open) {
         ctx.fillStyle = door.locked === "key" ? "rgba(126,84,26,0.95)" : "rgba(83,56,38,0.95)";
-        ctx.fillRect(door.x - leafW * 0.5, door.y - leafH * 0.5, leafW, leafH);
+        ctx.fillRect(blocker.x - blocker.w * 0.5, blocker.y - blocker.h * 0.5, blocker.w, blocker.h);
         ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : "#c8a27d";
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(door.x - leafW * 0.5 + 0.5, door.y - leafH * 0.5 + 0.5, leafW - 1, leafH - 1);
+        ctx.strokeRect(blocker.x - blocker.w * 0.5 + 0.5, blocker.y - blocker.h * 0.5 + 0.5, blocker.w - 1, blocker.h - 1);
         if (door.vertical) {
           ctx.beginPath();
-          ctx.moveTo(door.x, door.y - leafH * 0.5 + 3);
-          ctx.lineTo(door.x, door.y + leafH * 0.5 - 3);
+          ctx.moveTo(blocker.x, blocker.y - blocker.h * 0.5 + 3);
+          ctx.lineTo(blocker.x, blocker.y + blocker.h * 0.5 - 3);
           ctx.stroke();
         } else {
           ctx.beginPath();
-          ctx.moveTo(door.x - leafW * 0.5 + 3, door.y);
-          ctx.lineTo(door.x + leafW * 0.5 - 3, door.y);
+          ctx.moveTo(blocker.x - blocker.w * 0.5 + 3, blocker.y);
+          ctx.lineTo(blocker.x + blocker.w * 0.5 - 3, blocker.y);
           ctx.stroke();
         }
       } else {
-        ctx.fillStyle = "rgba(139,233,255,0.12)";
-        ctx.fillRect(door.x - leafW * 0.5, door.y - leafH * 0.5, leafW, leafH);
+        ctx.fillStyle = "rgba(212,182,128,0.07)";
+        ctx.fillRect(blocker.x - blocker.w * 0.5, blocker.y - blocker.h * 0.5, blocker.w, blocker.h);
       }
 
-      ctx.fillStyle = door.open ? "rgba(218,246,255,0.76)" : door.locked === "key" ? "#ffe6a8" : "#f0d0ff";
+      ctx.fillStyle = door.open ? "rgba(244,226,188,0.76)" : door.locked === "key" ? "#ffe6a8" : "#d8c2b0";
       ctx.font = "bold 9px Arial";
       ctx.textAlign = "center";
-      const labelY = door.vertical ? door.y - frameH * 0.5 - 8 : door.y - 13;
-      ctx.fillText(door.open ? "OPEN" : door.locked === "key" ? "KEY" : "SEALED", door.x, labelY);
+      const labelY = door.vertical ? frameY - frameH * 0.5 - 8 : frameY - 13;
+      ctx.fillText(door.open ? "OPEN" : door.locked === "key" ? "KEY" : "SEALED", frameX, labelY);
     }
 
     const ret = layout?.returnStair;
@@ -3510,6 +3628,24 @@ export default class Game {
       price: 24,
       data: { material: "scrap", amount: 2 },
     });
+    items.push({
+      kind: "material",
+      name: "Ore Satchel",
+      price: 30,
+      data: { material: "ore", amount: 2 },
+    });
+    items.push({
+      kind: "material",
+      name: "Tanner Hide Roll",
+      price: 28,
+      data: { material: "hide", amount: 2 },
+    });
+    items.push({
+      kind: "material",
+      name: "Essence Phial",
+      price: 42,
+      data: { material: "essence", amount: 1 },
+    });
     this._openShop(merchantNode, { items, discount: 0, skipCampProgress: true });
   }
 
@@ -3999,6 +4135,7 @@ export default class Game {
     this.dungeon.roomRewarded = false;
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
     this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
     this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
     const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + 150 };
@@ -4027,6 +4164,7 @@ export default class Game {
     this.dungeon.roomRewarded = false;
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
     this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
     this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
     const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + this.dungeon.room.h * 0.28 };
@@ -4096,43 +4234,45 @@ export default class Game {
       if (Math.abs(a.y - b.y) < 20) {
         const left = a.x < b.x ? a : b;
         const right = left === a ? b : a;
-        const startX = left.x + left.w * 0.5 - 26;
-        const endX = right.x - right.w * 0.5 + 26;
-        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 86, kind: "corridor", rooms: [a.id, b.id] };
+        const startX = left.x + left.w * 0.5 - 18;
+        const endX = right.x - right.w * 0.5 + 18;
+        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(44, endX - startX), h: 82, kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
           b: b.id,
-          x: corridor.x,
-          y: corridor.y,
+          x: left.x + left.w * 0.5 - 7,
+          y: left.y,
           vertical: true,
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: 20, h: corridor.h - 16 },
+          blocker: { x: left.x + left.w * 0.5 - 7, y: left.y, w: 12, h: corridor.h - 20 },
+          frameSpan: corridor.h - 10,
         };
-        addOpening(left, "right", left.y, corridor.h + 8);
-        addOpening(right, "left", right.y, corridor.h + 8);
+        addOpening(left, "right", left.y, corridor.h + 2);
+        addOpening(right, "left", right.y, corridor.h + 2);
       } else {
         const top = a.y < b.y ? a : b;
         const bottom = top === a ? b : a;
-        const startY = top.y + top.h * 0.5 - 26;
-        const endY = bottom.y - bottom.h * 0.5 + 26;
-        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 86, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
+        const startY = top.y + top.h * 0.5 - 18;
+        const endY = bottom.y - bottom.h * 0.5 + 18;
+        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 82, h: Math.max(44, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
           b: b.id,
-          x: corridor.x,
-          y: corridor.y,
+          x: top.x,
+          y: top.y + top.h * 0.5 - 7,
           vertical: false,
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 16, h: 20 },
+          blocker: { x: top.x, y: top.y + top.h * 0.5 - 7, w: corridor.w - 20, h: 12 },
+          frameSpan: corridor.w - 10,
         };
-        addOpening(top, "bottom", top.x, corridor.w + 8);
-        addOpening(bottom, "top", bottom.x, corridor.w + 8);
+        addOpening(top, "bottom", top.x, corridor.w + 2);
+        addOpening(bottom, "top", bottom.x, corridor.w + 2);
       }
       corridor.orientation = door.vertical ? "h" : "v";
       corridor.decor = [];
@@ -4381,7 +4521,7 @@ export default class Game {
       const right = room.x + room.w * 0.5;
       const top = room.y - room.h * 0.5;
       const bottom = room.y + room.h * 0.5;
-      const wall = 14;
+      const wall = 8;
       const openingsBySide = { top: [], right: [], bottom: [], left: [] };
       for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
 
@@ -4418,17 +4558,69 @@ export default class Game {
     }
 
     for (const corridor of layout.corridors || []) {
-      const wall = 10;
+      const wall = 6;
+      const trim = 28;
       if (corridor.orientation === "h") {
-        addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, corridor.w, wall);
-        addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, corridor.w, wall);
+        addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, Math.max(10, corridor.w - trim * 2), wall);
+        addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, Math.max(10, corridor.w - trim * 2), wall);
       } else {
-        addRect(corridor.x - corridor.w * 0.5 + wall * 0.5, corridor.y, wall, corridor.h);
-        addRect(corridor.x + corridor.w * 0.5 - wall * 0.5, corridor.y, wall, corridor.h);
+        addRect(corridor.x - corridor.w * 0.5 + wall * 0.5, corridor.y, wall, Math.max(10, corridor.h - trim * 2));
+        addRect(corridor.x + corridor.w * 0.5 - wall * 0.5, corridor.y, wall, Math.max(10, corridor.h - trim * 2));
       }
     }
 
     return blocked;
+  }
+
+  _drawDungeonStoneFloor(ctx, gx, gy, w, h, theme, seedRef, tone = 0.92) {
+    const g = ctx.createLinearGradient(gx, gy, gx, gy + h);
+    g.addColorStop(0, this._shadeHex(theme.floor0 || "#252830", 0.02 * tone));
+    g.addColorStop(0.55, this._shadeHex(theme.floor1 || "#1a1f27", -0.01));
+    g.addColorStop(1, this._shadeHex(theme.floor2 || "#12161d", -0.04));
+    ctx.fillStyle = g;
+    ctx.fillRect(gx, gy, w, h);
+
+    const seed = typeof seedRef === "string" ? seedRef.length * 97 : ((seedRef?.x || 0) ^ (seedRef?.y || 0) ^ (seedRef?.w || 0));
+    for (let yy = gy + 16; yy < gy + h - 12; yy += 24) {
+      for (let xx = gx + 16; xx < gx + w - 12; xx += 28) {
+        const jitter = hash2(seed, xx | 0, yy | 0);
+        const rw = 18 + (Math.abs(jitter) % 12);
+        const rh = 10 + (Math.abs(jitter >> 2) % 8);
+        const jx = (jitter & 15) - 7;
+        const jy = ((jitter >> 4) & 15) - 7;
+        ctx.fillStyle = (jitter & 1) ? "rgba(255,255,255,0.025)" : "rgba(0,0,0,0.08)";
+        ctx.fillRect(xx + jx, yy + jy, rw, rh);
+      }
+    }
+  }
+
+  _drawDungeonGrime(ctx, gx, gy, w, h, seedRef) {
+    const seed = typeof seedRef === "string" ? seedRef.length * 131 : ((seedRef?.x || 0) ^ (seedRef?.y || 0));
+    ctx.fillStyle = "rgba(0,0,0,0.16)";
+    ctx.fillRect(gx, gy, w, 10);
+    ctx.fillRect(gx, gy + h - 12, w, 12);
+    ctx.fillRect(gx, gy, 10, h);
+    ctx.fillRect(gx + w - 12, gy, 12, h);
+    for (let i = 0; i < 5; i++) {
+      const px = gx + 36 + (Math.abs(hash2(seed, i, 17)) % Math.max(24, Math.round(w - 72)));
+      const py = gy + 32 + (Math.abs(hash2(seed, i, 41)) % Math.max(24, Math.round(h - 64)));
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.10)";
+      ctx.beginPath();
+      ctx.ellipse(px, py, 24 + (i % 3) * 10, 10 + (i % 2) * 5, (i * 0.45) % Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  _shadeHex(hex, amount = 0) {
+    const raw = String(hex || "#000000").replace("#", "");
+    const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+    const n = Number.parseInt(full, 16);
+    if (!Number.isFinite(n)) return hex || "#000000";
+    const shift = Math.round(clamp(amount, -0.5, 0.5) * 255);
+    const r = clamp(((n >> 16) & 255) + shift, 0, 255) | 0;
+    const g = clamp(((n >> 8) & 255) + shift, 0, 255) | 0;
+    const b = clamp((n & 255) + shift, 0, 255) | 0;
+    return `rgb(${r},${g},${b})`;
   }
 
   _getDungeonRoom(id = this.dungeon.currentRoomId) {
@@ -4441,8 +4633,8 @@ export default class Game {
     const top = room.y - room.h * 0.5;
     const bottom = room.y + room.h * 0.5;
     const wall = 14;
-    const edge = active ? "rgba(139,233,255,0.60)" : theme.accent;
-    const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(14,17,22,0.94)";
+    const edge = active ? "rgba(215,184,126,0.56)" : "rgba(112,88,61,0.48)";
+    const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(20,17,15,0.94)";
 
     const openingsBySide = { top: [], right: [], bottom: [], left: [] };
     for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
@@ -4507,13 +4699,13 @@ export default class Game {
     const gx = rect.x - rect.w * 0.5;
     const gy = rect.y - rect.h * 0.5;
     const wall = 10;
-    const face = "rgba(13,16,22,0.95)";
+    const face = "rgba(22,18,15,0.95)";
 
     if (rect.orientation === "h") {
       ctx.fillStyle = face;
       ctx.fillRect(gx, gy, rect.w, wall);
       ctx.fillRect(gx, gy + rect.h - wall, rect.w, wall);
-      ctx.strokeStyle = theme.accent;
+      ctx.strokeStyle = "rgba(120,92,64,0.44)";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(gx + 4, gy + 1.5);
@@ -4525,7 +4717,7 @@ export default class Game {
       ctx.fillStyle = face;
       ctx.fillRect(gx, gy, wall, rect.h);
       ctx.fillRect(gx + rect.w - wall, gy, wall, rect.h);
-      ctx.strokeStyle = theme.accent;
+      ctx.strokeStyle = "rgba(120,92,64,0.44)";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(gx + 1.5, gy + 4);
@@ -4738,7 +4930,12 @@ export default class Game {
   }
 
   _spawnDungeonWave(room = this._getDungeonRoom()) {
-    if (!room || room.type === "start") return;
+    const enemies = this._makeDungeonWaveEnemies(room);
+    if (enemies.length) this.enemies.push(...enemies);
+  }
+
+  _makeDungeonWaveEnemies(room = this._getDungeonRoom()) {
+    if (!room || room.type === "start") return [];
     const floor = Math.max(1, this.dungeon.floor || 1);
     const theme = this._dungeonTheme(floor);
     const roomSeed = hash2(this.seed, floor, room.id.length, room.x | 0, room.y | 0);
@@ -4769,11 +4966,38 @@ export default class Game {
       }
     }
 
-    this.enemies.push(...enemies);
+    return enemies;
+  }
+
+  _queueDungeonWave(room = this._getDungeonRoom()) {
+    const enemies = this._makeDungeonWaveEnemies(room);
+    if (!enemies?.length) return;
+    let delay = 0;
+    for (const enemy of enemies) {
+      this.dungeon.spawnQueue.push({ enemy, delay, roomId: room.id });
+      delay += enemy?.boss ? 0.12 : 0.05;
+    }
+  }
+
+  _processDungeonSpawnQueue(dt) {
+    const queue = this.dungeon?.spawnQueue;
+    if (!this.dungeon?.active || !queue?.length) return;
+    let spawned = 0;
+    for (let i = 0; i < queue.length && spawned < 2;) {
+      queue[i].delay -= dt;
+      if (queue[i].delay > 0) {
+        i++;
+        continue;
+      }
+      this.enemies.push(queue[i].enemy);
+      queue.splice(i, 1);
+      spawned++;
+    }
   }
 
   _updateDungeonState(dt) {
     if (!this.dungeon.active || !this.dungeon.layout) return;
+    this._processDungeonSpawnQueue(dt);
 
     const roomAtHero = this._findDungeonRoomAt(this.hero.x, this.hero.y, 18);
     if (roomAtHero && roomAtHero.id !== this.dungeon.currentRoomId) {
@@ -4791,7 +5015,7 @@ export default class Game {
 
     if (!room.spawned) {
       room.spawned = true;
-      this._spawnDungeonWave(room);
+      this._queueDungeonWave(room);
     }
 
     const alive = this._dungeonHasLivingEnemies(room.id);
@@ -4859,6 +5083,7 @@ export default class Game {
     this.dungeon.currentRoomId = null;
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
 
     this.camera.x = this.hero.x;
     this.camera.y = this.hero.y;

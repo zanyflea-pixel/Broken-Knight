@@ -88,16 +88,16 @@ export default class World {
     this._terrainChunkSize = this._terrainTileSize * this._terrainChunkTiles;
     this._terrainChunkCache = new Map();
     this._terrainChunkOrder = [];
-    this._terrainChunkLimit = 240;
+    this._terrainChunkLimit = 300;
     this._propChunkCache = new Map();
     this._propChunkOrder = [];
-    this._propChunkLimit = 240;
+    this._propChunkLimit = 300;
     this._bridgeChunkCache = new Map();
     this._bridgeChunkOrder = [];
-    this._bridgeChunkLimit = 240;
+    this._bridgeChunkLimit = 300;
     this._sceneChunkCache = new Map();
     this._sceneChunkOrder = [];
-    this._sceneChunkLimit = 240;
+    this._sceneChunkLimit = 300;
     this._discoveryExportCache = null;
     this._revealed = null;
     this._mapBuildQueued = false;
@@ -472,13 +472,14 @@ export default class World {
     }
 
     if (s.isWater) return false;
-        if (s.isMountainWall) {
-          if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.34) return true;
-          return false;
-        }
-        if (this._isNearMountainWall(x, y, actor?.state?.mountainPassAccess ? 8 : 18)) {
-          if (!(actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.40)) return false;
-        }
+    if (s.isMountainWall) {
+      if (this._canUseMountainPassAt(x, y, actor, 0.2)) return true;
+      return false;
+    }
+    const passOpen = this._canUseMountainPassAt(x, y, actor, 0.26);
+    if (this._isNearMountainWall(x, y, passOpen ? 4 : 18)) {
+      if (!passOpen) return false;
+    }
     return true;
   }
 
@@ -494,6 +495,11 @@ export default class World {
       if (this._sampleCell(x + ox, y + oy).isMountainWall) return true;
     }
     return false;
+  }
+
+  _canUseMountainPassAt(x, y, actor = null, threshold = 0.34) {
+    if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > threshold) return true;
+    return this._mountainPublicPassInfluenceAt(x, y) > threshold;
   }
 
   getMoveModifier(x, y) {
@@ -562,9 +568,12 @@ export default class World {
     ctx.imageSmoothingEnabled = true;
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
-        const chunk = this._getSceneChunk(cx, cy);
-        if (!chunk) continue;
-        ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+        const chunk = this._peekSceneChunk(cx, cy);
+        if (chunk) {
+          ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+          continue;
+        }
+        this._drawSceneChunkLayers(ctx, cx, cy, chunkSize);
       }
     }
     ctx.restore();
@@ -691,6 +700,21 @@ export default class World {
     return chunk;
   }
 
+  _peekSceneChunk(chunkX, chunkY) {
+    return this._sceneChunkCache.get(`${chunkX},${chunkY}`) || null;
+  }
+
+  _drawSceneChunkLayers(ctx, chunkX, chunkY, chunkSize) {
+    const worldX = chunkX * chunkSize;
+    const worldY = chunkY * chunkSize;
+    const terrain = this._getTerrainChunk(chunkX, chunkY);
+    const props = this._getPropChunk(chunkX, chunkY);
+    const bridges = this._getBridgeChunk(chunkX, chunkY);
+    if (terrain) ctx.drawImage(terrain, worldX, worldY, chunkSize, chunkSize);
+    if (props) ctx.drawImage(props, worldX, worldY, chunkSize, chunkSize);
+    if (bridges) ctx.drawImage(bridges, worldX, worldY, chunkSize, chunkSize);
+  }
+
   _prewarmFocusChunks() {
     const chunkSize = this._terrainChunkSize || 560;
     const cx = Math.floor((this._focusX || 0) / chunkSize);
@@ -705,13 +729,15 @@ export default class World {
       }
     }
 
-    let sceneBudget = 4;
+    const budgetEnd = typeof performance !== "undefined" ? performance.now() + 1.1 : 0;
+    let sceneBudget = 2;
     for (const [tx, ty] of targets) {
       if (sceneBudget > 0 && !this._sceneChunkCache.has(`${tx},${ty}`)) {
         this._getSceneChunk(tx, ty);
         sceneBudget--;
       }
       if (sceneBudget <= 0) break;
+      if (budgetEnd && performance.now() >= budgetEnd) break;
     }
   }
 
@@ -1493,7 +1519,7 @@ export default class World {
     const edgeSprite = this._assets?.mountainEdgeSprite;
     const peakSprite = this._assets?.mountainPeakSprite;
 
-    ctx.fillStyle = "#5b6169";
+    ctx.fillStyle = "#5e646b";
     ctx.beginPath();
     ctx.moveTo(x, y + size);
     ctx.lineTo(x, crestY + 4);
@@ -1508,7 +1534,7 @@ export default class World {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = "#495058";
+    ctx.fillStyle = "#434a52";
     ctx.beginPath();
     ctx.moveTo(x + size * 0.5, crestY + 2);
     ctx.lineTo(x + size, crestY + 5);
@@ -1517,7 +1543,7 @@ export default class World {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = "rgba(198,206,214,0.20)";
+    ctx.fillStyle = "rgba(204,211,219,0.18)";
     ctx.beginPath();
     ctx.moveTo(x + 3, crestY + 5);
     ctx.lineTo(peakAX - 6, crestY);
@@ -1563,7 +1589,7 @@ export default class World {
       ctx.lineTo(x + size - 2, crestY + 6.5);
       ctx.stroke();
 
-      ctx.strokeStyle = "rgba(232,238,245,0.18)";
+      ctx.strokeStyle = "rgba(232,238,245,0.15)";
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(x + 4, crestY + 8.5);
@@ -1596,6 +1622,32 @@ export default class World {
         ctx.drawImage(peakSprite, spriteX, spriteY, spriteW, spriteH);
       }
       ctx.restore();
+    }
+
+    const mountainTexture = this._assets?.mountainTexture;
+    if (this._hasWorldImage(mountainTexture)) {
+      ctx.save();
+      ctx.globalAlpha = north ? 0.10 : 0.20;
+      ctx.drawImage(mountainTexture, x, y, size, size);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i++) {
+        const sx = x + 6 + i * 9;
+        ctx.beginPath();
+        ctx.moveTo(sx, y + 16 + ((variantA + i) % 5));
+        ctx.lineTo(sx - 5, y + size - 10);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(18,20,24,0.10)";
+      for (let i = 0; i < 3; i++) {
+        const sx = x + 14 + i * 10;
+        ctx.beginPath();
+        ctx.moveTo(sx, y + 18 + ((variantB + i) % 4));
+        ctx.lineTo(sx + 4, y + size - 8);
+        ctx.stroke();
+      }
     }
 
     if (!west) {
@@ -1669,6 +1721,11 @@ export default class World {
       }
     }
 
+    ctx.fillStyle = "rgba(66,62,56,0.16)";
+    ctx.beginPath();
+    ctx.ellipse(x + size * 0.5, y + size - 6, size * 0.34, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
     if (hasPass) this._drawMountainPathHighlight(ctx, x, y, size, 0);
   }
 
@@ -1700,9 +1757,10 @@ export default class World {
         const minY = Math.min(...crestPts.map((p) => p.y));
         const maxY = Math.max(...basePts.map((p) => p.y));
         const grad = ctx.createLinearGradient(0, minY, 0, maxY);
-        grad.addColorStop(0, "rgba(124,132,142,0.995)");
-        grad.addColorStop(0.22, "rgba(102,110,120,0.995)");
-        grad.addColorStop(1, "rgba(52,57,64,0.998)");
+        grad.addColorStop(0, "rgba(138,146,154,0.995)");
+        grad.addColorStop(0.18, "rgba(111,118,126,0.995)");
+        grad.addColorStop(0.72, "rgba(78,82,88,0.998)");
+        grad.addColorStop(1, "rgba(48,51,56,0.998)");
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.moveTo(crestPts[0].x, crestPts[0].y);
@@ -1712,18 +1770,28 @@ export default class World {
         ctx.fill();
 
         ctx.strokeStyle = "rgba(9,11,14,0.98)";
-        ctx.lineWidth = Math.max(7, range.width * 0.03);
+        ctx.lineWidth = Math.max(8, range.width * 0.034);
         ctx.beginPath();
         this._traceSmoothPath(ctx, crestPts);
         ctx.stroke();
 
-        ctx.fillStyle = "rgba(228,234,240,0.08)";
+        ctx.fillStyle = "rgba(228,234,240,0.10)";
         ctx.beginPath();
         ctx.moveTo(crestPts[0].x + range.nx * 2, crestPts[0].y + 5);
         for (let i = 1; i < crestPts.length; i++) ctx.lineTo(crestPts[i].x + range.nx * 2, crestPts[i].y + 5);
         for (let i = crestPts.length - 1; i >= 0; i--) ctx.lineTo(crestPts[i].x + range.nx * 7, crestPts[i].y + 18);
         ctx.closePath();
         ctx.fill();
+
+        ctx.strokeStyle = "rgba(32,35,39,0.36)";
+        ctx.lineWidth = Math.max(3, range.width * 0.012);
+        ctx.beginPath();
+        for (let i = 1; i < crestPts.length - 1; i += 2) {
+          const p = crestPts[i];
+          ctx.moveTo(p.x, p.y + 3);
+          ctx.lineTo(p.x + range.nx * 18, p.y + 42);
+        }
+        ctx.stroke();
       }
     }
 
@@ -1825,7 +1893,7 @@ export default class World {
 
     ctx.save();
 
-    const width = 28;
+    const width = 24;
     const visibleRoads = [];
     const pad = width + 18;
     for (const road of this.roads) {
@@ -1849,15 +1917,50 @@ export default class World {
       }
     };
 
-    ctx.strokeStyle = "#5c3f22";
-    ctx.lineWidth = width + 4;
+    ctx.strokeStyle = "rgba(40,28,16,0.32)";
+    ctx.lineWidth = width + 10;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     strokeRoads();
 
-    ctx.strokeStyle = "#c4a066";
-    ctx.lineWidth = width - 5;
+    ctx.strokeStyle = "#6b5133";
+    ctx.lineWidth = width + 2;
     strokeRoads();
+
+    ctx.strokeStyle = "#9e7a53";
+    ctx.lineWidth = width - 6;
+    strokeRoads();
+
+    ctx.strokeStyle = "rgba(214,191,156,0.34)";
+    ctx.lineWidth = Math.max(3, width * 0.22);
+    ctx.setLineDash([2, 10]);
+    strokeRoads();
+    ctx.setLineDash([]);
+
+    for (const road of visibleRoads) {
+      const pts = road.points;
+      if (!pts || pts.length < 2) continue;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+        const chipCount = Math.max(1, Math.floor(len / 120));
+        for (let j = 0; j < chipCount; j++) {
+          const t = (j + 0.45) / chipCount;
+          const px = a.x + dx * t;
+          const py = a.y + dy * t;
+          const wobble = ((hash2((px / 18) | 0, (py / 18) | 0, this.seed ^ 0x9123) >>> 0) / 4294967296 - 0.5) * 6;
+          ctx.fillStyle = j % 2 === 0 ? "rgba(188,168,138,0.20)" : "rgba(88,70,48,0.14)";
+          ctx.beginPath();
+          ctx.ellipse(px + nx * wobble, py + ny * wobble, 2.4, 1.6, Math.atan2(dy, dx), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
 
     ctx.restore();
   }
@@ -2069,10 +2172,6 @@ export default class World {
     this._drawRiverConfluences(ctx, left, top, right, bottom);
     this._drawRiverMouths(ctx, left, top, right, bottom);
     ctx.restore();
-
-    this._drawRocks(ctx, left, top, right, bottom);
-    this._drawClutter(ctx, left, top, right, bottom);
-    this._drawTrees(ctx, left, top, right, bottom);
   }
 
   _isRiverSegmentInOcean(a, b, next = null, oceanCutoff = 0.245) {
@@ -2167,8 +2266,8 @@ export default class World {
 
       const mainW = this._riverVisualWidth(band.joinBand);
       const sideW = this._riverVisualWidth(band);
-      const rx = Math.max(58, (mainW + sideW) * 0.40);
-      const ry = Math.max(42, (mainW + sideW) * 0.32);
+      const rx = Math.max(42, (mainW + sideW) * 0.26);
+      const ry = Math.max(28, (mainW + sideW) * 0.20);
 
       const main = this._riverPath(band.joinBand);
       const t = band.joinT || 0.5;
@@ -2176,21 +2275,58 @@ export default class World {
       const after = this._pointOnRiverPath(main, Math.min(1, t + 0.035));
       const angle = Math.atan2(after.y - before.y, after.x - before.x);
 
-      ctx.fillStyle = "rgba(48,120,137,0.16)";
+      ctx.fillStyle = "rgba(48,120,137,0.12)";
       ctx.beginPath();
-      ctx.ellipse(join.x, join.y, rx + 12, ry + 8, angle, 0, Math.PI * 2);
+      ctx.ellipse(join.x, join.y, rx + 8, ry + 5, angle, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "rgba(38,132,178,0.78)";
+      ctx.fillStyle = "rgba(38,132,178,0.68)";
       ctx.beginPath();
       ctx.ellipse(join.x, join.y, rx, ry, angle, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "rgba(99,190,215,0.18)";
+      ctx.fillStyle = "rgba(99,190,215,0.14)";
       ctx.beginPath();
-      ctx.ellipse(join.x - Math.cos(angle) * rx * 0.16, join.y - Math.sin(angle) * ry * 0.16, rx * 0.72, ry * 0.50, angle, 0, Math.PI * 2);
+      ctx.ellipse(join.x - Math.cos(angle) * rx * 0.12, join.y - Math.sin(angle) * ry * 0.12, rx * 0.58, ry * 0.40, angle, 0, Math.PI * 2);
       ctx.fill();
+
+      this._drawRiverConfluenceBlend(ctx, band, join);
     }
+  }
+
+  _drawRiverConfluenceBlend(ctx, band, join) {
+    const sidePath = this._riverPath(band);
+    const sidePts = sidePath.length;
+    if (sidePts < 4 || !band.joinBand) return;
+
+    const sideStart = sidePath[Math.max(0, sidePts - 4)];
+    const mainPath = this._riverPath(band.joinBand);
+    const mainAfter = this._pointOnRiverPath(mainPath, Math.min(1, (band.joinT || 0.5) + 0.04));
+    const control = {
+      x: join.x + (mainAfter.x - sideStart.x) * 0.14,
+      y: join.y + (mainAfter.y - sideStart.y) * 0.14,
+    };
+    const blendW = Math.max(18, this._riverVisualWidth(band) * 0.72);
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.strokeStyle = "rgba(35,127,178,0.66)";
+    ctx.lineWidth = blendW;
+    ctx.beginPath();
+    ctx.moveTo(sideStart.x, sideStart.y);
+    ctx.quadraticCurveTo(control.x, control.y, mainAfter.x, mainAfter.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(91,190,216,0.16)";
+    ctx.lineWidth = Math.max(10, blendW * 0.44);
+    ctx.beginPath();
+    ctx.moveTo(sideStart.x, sideStart.y);
+    ctx.quadraticCurveTo(control.x, control.y, mainAfter.x, mainAfter.y);
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   _riverVisualWidth(band) {
@@ -3143,12 +3279,18 @@ export default class World {
 
   _makeRiverBands() {
     const bands = [];
-    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west"];
-    const mainCount = 16;
+    const sideSlots = {
+      north: [0.16, 0.38, 0.62, 0.84],
+      south: [0.22, 0.48, 0.78],
+      east: [0.28, 0.68],
+      west: [0.34, 0.74],
+    };
+    const sidePlan = ["north", "south", "north", "west", "east", "south", "west", "east", "north", "south"];
+    const mainCount = sidePlan.length;
 
     for (let i = 0; i < mainCount; i++) {
-      const side = sides[i % sides.length];
-      const coast = this._makeRiverCoastTarget(side, i);
+      const side = sidePlan[i];
+      const coast = this._makeRiverCoastTarget(side, i, sideSlots[side]);
       const source = this._makeRiverSourceTarget(side, coast, i);
       const coastAnchor =
         this._findOceanShoreAnchor(side, coast, 2400) ||
@@ -3163,17 +3305,20 @@ export default class World {
         by: coastAnchor.y,
         coastSide: side,
         coastTarget: { x: coastAnchor.x, y: coastAnchor.y },
-        width: this._rng.range(0.76, 1.20),
-        bends: 64 + ((i % 4) * 12),
-        amplitude: this._rng.range(680, 1320),
+        width: this._rng.range(0.78, 1.08),
+        bends: 34 + ((i % 3) * 6),
+        amplitude: this._rng.range(260, 520),
         seed: hash2(this.seed, 101 + i * 17),
       });
     }
 
-    const tributaryCount = 32;
+    const tributaryCount = 16;
+    const joinSlots = [0.28, 0.52, 0.76];
     for (let i = 0; i < tributaryCount; i++) {
       const main = bands[i % bands.length];
-      const joinT = this._rng.range(0.28, 0.74);
+      const branchIndex = Math.floor(i / Math.max(1, bands.length));
+      const baseJoin = joinSlots[branchIndex % joinSlots.length] ?? 0.52;
+      const joinT = clamp(baseJoin + this._rng.range(-0.02, 0.02), 0.22, 0.84);
       const join = {
         x: main.ax + (main.bx - main.ax) * joinT,
         y: main.ay + (main.by - main.ay) * joinT,
@@ -3183,10 +3328,11 @@ export default class World {
       const len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len;
       const ny = dx / len;
-      const side = (i % 2 === 0 ? 1 : -1);
+      const baseSide = ((main.seed >>> (8 + branchIndex)) & 1) === 0 ? 1 : -1;
+      const side = branchIndex % 2 === 0 ? baseSide : -baseSide;
       const source = {
-        x: join.x + nx * side * this._rng.range(1200, 5000) + dx / len * this._rng.range(-1600, 1600),
-        y: join.y + ny * side * this._rng.range(1200, 5000) + dy / len * this._rng.range(-1600, 1600),
+        x: join.x + nx * side * this._rng.range(1100, 2200) + dx / len * this._rng.range(-220, 220),
+        y: join.y + ny * side * this._rng.range(1100, 2200) + dy / len * this._rng.range(-220, 220),
       };
       const sourceAnchor = this._findRiverSourceNear(source.x, source.y, 1800) || source;
       bands.push({
@@ -3194,19 +3340,192 @@ export default class World {
         ay: sourceAnchor.y,
         joinBand: main,
         joinT,
-        width: this._rng.range(0.46, 0.82),
-        bends: 44 + ((i % 3) * 10),
-        amplitude: this._rng.range(300, 720),
+        width: this._rng.range(0.40, 0.62),
+        bends: 24 + ((i % 3) * 5),
+        amplitude: this._rng.range(90, 220),
         seed: hash2(this.seed, 401 + i * 29),
       });
     }
 
-    const spawnTributaries = this._makeSpawnRiverTributaries(bands);
-    if (spawnTributaries.length) bands.push(...spawnTributaries);
-    const forcedContinuations = this._makeForcedRiverContinuations();
-    if (forcedContinuations.length) bands.push(...forcedContinuations);
+    this._mergeTouchingRiverBands(bands);
 
     return bands;
+  }
+
+  _mergeTouchingRiverBands(bands) {
+    const mains = (bands || []).filter((band) => !band.joinBand);
+    for (const main of mains) {
+      const tributaries = (bands || []).filter((band) => band.joinBand === main && !band.forcedContinuation);
+      if (tributaries.length < 2) continue;
+
+      const clusters = [];
+      const sorted = tributaries.slice().sort((a, b) => (a.joinT || 0) - (b.joinT || 0));
+      for (const tributary of sorted) {
+        const join = this._riverEndPoint(tributary);
+        let cluster = null;
+        for (const candidate of clusters) {
+          const d = Math.hypot(join.x - candidate.x, join.y - candidate.y);
+          if (d <= 720 || Math.abs((tributary.joinT || 0) - candidate.joinT) <= 0.085) {
+            cluster = candidate;
+            break;
+          }
+        }
+        if (!cluster) {
+          clusters.push({
+            x: join.x,
+            y: join.y,
+            joinT: tributary.joinT || 0.5,
+            members: [tributary],
+          });
+          continue;
+        }
+        cluster.members.push(tributary);
+        const n = cluster.members.length;
+        cluster.x = (cluster.x * (n - 1) + join.x) / n;
+        cluster.y = (cluster.y * (n - 1) + join.y) / n;
+        cluster.joinT = (cluster.joinT * (n - 1) + (tributary.joinT || 0.5)) / n;
+      }
+
+      for (const cluster of clusters) {
+        if (cluster.members.length < 2) continue;
+        const primary = cluster.members.reduce((best, band) =>
+          (band.width || 0) > (best.width || 0) ? band : best,
+        cluster.members[0]);
+        primary.joinT = cluster.joinT;
+        let offset = 0;
+        for (const tributary of cluster.members) {
+          if (tributary === primary) continue;
+          offset += 1;
+          tributary.joinBand = primary;
+          tributary.joinT = clamp(0.60 + offset * 0.1, 0.60, 0.9);
+          tributary.width *= 0.9;
+          tributary.amplitude *= 0.88;
+        }
+      }
+    }
+  }
+
+  _mergeIntersectingMainRivers(bands) {
+    const mains = (bands || []).filter((band) => !band.joinBand && !band.forcedContinuation);
+    if (mains.length < 2) return;
+
+    const sorted = mains.slice().sort((a, b) => (a.width || 0) - (b.width || 0));
+    for (const band of sorted) {
+      let best = null;
+      const path = this._riverPath(band);
+      if (!path || path.length < 8) continue;
+      const startIndex = 2;
+      const endIndex = Math.max(startIndex + 1, path.length - 3);
+      for (const target of mains) {
+        if (target === band) continue;
+        if (target.joinBand) continue;
+        if ((target.width || 0) + 0.04 < (band.width || 0)) continue;
+        if (!this._riverCanJoinBand(band, target)) continue;
+        const targetPath = this._riverPath(target);
+        const targetSegs = this._riverSegments(target);
+        if (!targetPath || targetPath.length < 8) continue;
+
+        for (let i = startIndex; i < endIndex; i += 2) {
+          const sampleFrac = i / Math.max(1, path.length - 1);
+          if (sampleFrac < 0.18 || sampleFrac > 0.88) continue;
+          const p = path[i];
+          const nearest = this._nearestPointOnRiverPath(p.x, p.y, targetPath, targetSegs);
+          if (!nearest) continue;
+          if (nearest.t < 0.14 || nearest.t > 0.92) continue;
+          if (nearest.dist > 138) continue;
+          const score = nearest.dist + Math.abs(sampleFrac - nearest.t) * 380;
+          if (!best || score < best.score) {
+            best = { target, joinT: nearest.t, score };
+          }
+        }
+      }
+
+      if (!best) continue;
+      band.joinBand = best.target;
+      band.joinT = clamp(best.joinT, 0.18, 0.9);
+      band.width *= 0.94;
+      band.amplitude *= 0.9;
+    }
+
+    for (const river of bands || []) {
+      delete river._path;
+      delete river._segments;
+      if (river.pathPoints?._metric) delete river.pathPoints._metric;
+    }
+  }
+
+  _riverCanJoinBand(band, target) {
+    if (!band || !target || band === target) return false;
+    let cur = target;
+    let guard = 0;
+    while (cur && guard++ < 64) {
+      if (cur === band) return false;
+      cur = cur.joinBand || null;
+    }
+    return true;
+  }
+
+  _normalizeRiverProblemClusters(bands) {
+    const fixes = [
+      { x: 6670, y: 4748, radius: 1700 },
+    ];
+    for (const fix of fixes) {
+      this._normalizeRiverClusterNear(bands, fix.x, fix.y, fix.radius);
+    }
+    for (const river of bands || []) {
+      delete river._path;
+      delete river._segments;
+      if (river.pathPoints?._metric) delete river.pathPoints._metric;
+    }
+  }
+
+  _normalizeRiverClusterNear(bands, x, y, radius = 1600) {
+    const radius2 = radius * radius;
+    const candidates = (bands || []).filter((band) => {
+      const path = this._riverPath(band);
+      return this._distancePointToRiverPath(x, y, path, this._riverSegments(band)) <= radius;
+    });
+    if (candidates.length < 2) return;
+
+    const primary = candidates.reduce((best, band) => {
+      const path = this._riverPath(band);
+      const segs = this._riverSegments(band);
+      const nearest = this._nearestPointOnRiverPath(x, y, path, segs);
+      if (!nearest) return best || band;
+      if (!best) return band;
+      const bestNearest = this._nearestPointOnRiverPath(x, y, this._riverPath(best), this._riverSegments(best));
+      const bandBias = (band.forcedContinuation ? -240 : 0) - (band.joinBand ? 40 : 0) - (band.width || 0) * 24;
+      const bestBias = (best.forcedContinuation ? -240 : 0) - (best.joinBand ? 40 : 0) - (best.width || 0) * 24;
+      return nearest.dist + bandBias < bestNearest.dist + bestBias ? band : best;
+    }, null);
+    if (!primary) return;
+
+    const primaryPath = this._riverPath(primary);
+    const primarySegs = this._riverSegments(primary);
+    const attach = [];
+
+    for (const band of candidates) {
+      if (band === primary) continue;
+      const sourceX = band.joinBand ? (band.ax || 0) : x;
+      const sourceY = band.joinBand ? (band.ay || 0) : y;
+      const nearest = this._nearestPointOnRiverPath(sourceX, sourceY, primaryPath, primarySegs)
+        || this._nearestPointOnRiverPath(x, y, primaryPath, primarySegs);
+      if (!nearest) continue;
+      attach.push({ band, t: nearest.t });
+    }
+
+    attach.sort((a, b) => a.t - b.t);
+    let lastT = clamp((attach[0]?.t ?? 0.34) - 0.08, 0.18, 0.74);
+    for (const item of attach) {
+      const band = item.band;
+      const targetT = clamp(Math.max(lastT + 0.09, item.t), 0.22, 0.9);
+      if (!this._riverCanJoinBand(band, primary)) continue;
+      band.joinBand = primary;
+      band.joinT = targetT;
+      band.width *= 0.92;
+      band.amplitude *= 0.84;
+      lastT = targetT;
+    }
   }
 
   _makeForcedRiverContinuations() {
@@ -3234,6 +3553,13 @@ export default class World {
         amplitude: fix.amplitude,
         seed: hash2(this.seed, 1901 + i * 61),
         forcedContinuation: true,
+        pathPoints: [
+          { x: fix.x, y: fix.y },
+          { x: fix.x + 64, y: fix.y + 520 },
+          { x: fix.x + 118, y: fix.y + 1460 },
+          { x: coastAnchor.x + 40, y: coastAnchor.y - 620 },
+          { x: coastAnchor.x, y: coastAnchor.y },
+        ],
       });
     }
 
@@ -3296,22 +3622,25 @@ export default class World {
     return out;
   }
 
-  _makeRiverCoastTarget(side, index = 0) {
+  _makeRiverCoastTarget(side, index = 0, slotList = null) {
     const edge = this.mapHalfSize * 0.95;
-    const offset = this._rng.range(-this.mapHalfSize * 0.72, this.mapHalfSize * 0.72);
-    if (side === "north") return { x: offset, y: -edge + index * 60 };
-    if (side === "south") return { x: offset, y: edge - index * 60 };
-    if (side === "east") return { x: edge - index * 60, y: offset };
-    return { x: -edge + index * 60, y: offset };
+    const slots = slotList?.length ? slotList : [0.2, 0.5, 0.8];
+    const slot = slots[index % slots.length];
+    const span = this.mapHalfSize * 1.42;
+    const offset = -span * 0.5 + span * slot + this._rng.range(-340, 340);
+    if (side === "north") return { x: offset, y: -edge };
+    if (side === "south") return { x: offset, y: edge };
+    if (side === "east") return { x: edge, y: offset };
+    return { x: -edge, y: offset };
   }
 
   _makeRiverSourceTarget(side, coast, index = 0) {
-    const inland = this._rng.range(3200, 7600);
-    const lateral = this._rng.range(-2200, 2200);
-    if (side === "north") return { x: coast.x + lateral, y: coast.y + inland + index * 120 };
-    if (side === "south") return { x: coast.x + lateral, y: coast.y - inland - index * 120 };
-    if (side === "east") return { x: coast.x - inland - index * 120, y: coast.y + lateral };
-    return { x: coast.x + inland + index * 120, y: coast.y + lateral };
+    const inward = this._rng.range(3000, 6200);
+    const lateral = this._rng.range(-900, 900);
+    if (side === "north") return { x: coast.x + lateral, y: coast.y + inward };
+    if (side === "south") return { x: coast.x + lateral, y: coast.y - inward };
+    if (side === "east") return { x: coast.x - inward, y: coast.y + lateral };
+    return { x: coast.x + inward, y: coast.y + lateral };
   }
 
   _findOceanShoreAnchor(side, target, maxDepth = 2400) {
@@ -3400,7 +3729,7 @@ export default class World {
       const ty = dy / len;
       const nx = -ty;
       const ny = tx;
-      const passCount = 3;
+      const passCount = 4;
 
       for (let i = 0; i < passCount; i++) {
         const t = passCount === 1
@@ -3409,10 +3738,12 @@ export default class World {
             ? 0.28 + ((range.seed >>> 3) & 15) / 100
             : i === 1
               ? 0.52 + ((range.seed >>> 7) & 7) / 140
-              : 0.72 + ((range.seed >>> 11) & 11) / 100;
+              : i === 2
+                ? 0.72 + ((range.seed >>> 11) & 11) / 100
+                : 0.86 + ((range.seed >>> 5) & 7) / 130;
         const px = range.ax + dx * t;
         const py = range.ay + dy * t;
-        const drift = (((range.seed >>> (i === 0 ? 15 : i === 1 ? 19 : 23)) & 15) - 7.5) * 24;
+        const drift = (((range.seed >>> (i === 0 ? 15 : i === 1 ? 19 : i === 2 ? 23 : 9)) & 15) - 7.5) * 24;
         passes.push({
           x: px + tx * drift,
           y: py + ty * drift,
@@ -3420,13 +3751,104 @@ export default class World {
           ny,
           tx,
           ty,
-          width: range.width * (0.52 + i * 0.06),
-          length: 560 + ((range.seed >>> (i === 0 ? 27 : i === 1 ? 13 : 17)) & 15) * 26,
+          width: range.width * (0.62 + i * 0.07),
+          length: 760 + ((range.seed >>> (i === 0 ? 27 : i === 1 ? 13 : i === 2 ? 17 : 21)) & 15) * 34,
+          public: true,
           rangeSeed: range.seed,
         });
       }
     }
+    passes.push(...this._makeManualMountainPasses());
     return passes;
+  }
+
+  _makeManualMountainPasses() {
+    return [
+      {
+        x: 4920,
+        y: 4520,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 260,
+        length: 980,
+        public: true,
+        rangeSeed: "manual-east-pass-0",
+      },
+      {
+        x: 5200,
+        y: 4520,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 280,
+        length: 1240,
+        public: true,
+        rangeSeed: "manual-east-pass-1",
+      },
+      {
+        x: 5480,
+        y: 4480,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 260,
+        length: 1040,
+        public: true,
+        rangeSeed: "manual-east-pass-2",
+      },
+      {
+        x: -5200,
+        y: 4200,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 280,
+        length: 1320,
+        public: true,
+        rangeSeed: "manual-west-pass-0",
+      },
+      {
+        x: -5500,
+        y: 3920,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 260,
+        length: 1120,
+        public: true,
+        rangeSeed: "manual-west-pass-1",
+      },
+      {
+        x: 1800,
+        y: 6620,
+        tx: 0,
+        ty: 1,
+        nx: 1,
+        ny: 0,
+        width: 250,
+        length: 1160,
+        public: true,
+        rangeSeed: "manual-south-pass-0",
+      },
+      {
+        x: -2100,
+        y: -6480,
+        tx: 0,
+        ty: 1,
+        nx: 1,
+        ny: 0,
+        width: 250,
+        length: 1160,
+        public: true,
+        rangeSeed: "manual-north-pass-0",
+      },
+    ];
   }
 
   _buildMountainRenderDataForRange(range) {
@@ -3533,6 +3955,24 @@ export default class World {
   _mountainPassInfluenceAt(x, y) {
     let best = 0;
     for (const pass of this._mountainPasses || []) {
+      const ox = x - pass.x;
+      const oy = y - pass.y;
+      const along = Math.abs(ox * pass.tx + oy * pass.ty);
+      const across = Math.abs(ox * pass.nx + oy * pass.ny);
+      if (along > pass.length || across > pass.width) continue;
+
+      const alongFade = clamp(1 - along / pass.length, 0, 1);
+      const acrossFade = clamp(1 - across / pass.width, 0, 1);
+      const notch = alongFade * acrossFade;
+      if (notch > best) best = notch;
+    }
+    return best;
+  }
+
+  _mountainPublicPassInfluenceAt(x, y) {
+    let best = 0;
+    for (const pass of this._mountainPasses || []) {
+      if (!pass.public) continue;
       const ox = x - pass.x;
       const oy = y - pass.y;
       const along = Math.abs(ox * pass.tx + oy * pass.ty);
@@ -3720,6 +4160,7 @@ export default class World {
       for (const item of candidates) {
         const band = item.band;
         if (!band || seen.has(band)) continue;
+        if (band._buildingPath) continue;
         seen.add(band);
         const dist = this._distancePointToRiverPath(x, y, this._riverPath(band), this._riverSegments(band));
         const widthPx = this._riverCollisionWidth(band, x, y);
@@ -3730,6 +4171,7 @@ export default class World {
     }
 
     for (const band of bands) {
+      if (band?._buildingPath) continue;
       const dist = this._distancePointToRiverPath(x, y, this._riverPath(band), this._riverSegments(band));
       const widthPx = this._riverCollisionWidth(band, x, y);
       const v = dist / Math.max(12, widthPx);
@@ -3741,56 +4183,123 @@ export default class World {
 
   _riverPath(band) {
     if (band._path?.length) return band._path;
+    if (band._buildingPath) {
+      return band._pathFallback || band.pathPoints || [
+        { x: band.ax || 0, y: band.ay || 0 },
+        { x: band.bx ?? band.ax ?? 0, y: band.by ?? band.ay ?? 0 },
+      ];
+    }
 
-    const start = this._riverStartPoint(band);
-    const end = this._riverEndPoint(band);
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len;
-    const ny = dx / len;
-    const count = Math.max(40, band.bends || 64);
-    const pts = [];
+    if (band.pathPoints?.length > 1) {
+      const pts = [];
+      for (let i = 1; i < band.pathPoints.length; i++) {
+        const a = band.pathPoints[i - 1];
+        const b = band.pathPoints[i];
+        const steps = Math.max(8, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 160));
+        if (i === 1) pts.push({ x: a.x, y: a.y });
+        for (let step = 1; step <= steps; step++) {
+          const t = step / steps;
+          pts.push({
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t,
+          });
+        }
+      }
+      this._clipRiverPathToCoast(pts, 0.245);
+      band._path = pts;
+      return pts;
+    }
 
-    for (let i = 0; i <= count; i++) {
-      const t = i / count;
-      const ease = Math.sin(t * Math.PI);
-      const baseX = start.x + dx * t;
-      const baseY = start.y + dy * t;
-      const phaseA = (band.seed % 628) * 0.01;
-      const phaseB = (band.seed % 991) * 0.008;
-      const waveA = Math.sin(t * Math.PI * 3.15 + phaseA);
-      const waveB = Math.sin(t * Math.PI * 6.2 + phaseB) * 0.28;
-      const waveC = Math.sin(t * Math.PI * 9.4 + phaseA * 0.7) * 0.10;
-      const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
-      const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
-      const bankWobble = Math.sin(t * Math.PI * 11 + phaseB) * 44 * ease;
-      const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
-      const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
+    band._buildingPath = true;
+    band._pathFallback = [
+      { x: band.ax || 0, y: band.ay || 0 },
+      { x: band.bx ?? band.ax ?? 0, y: band.by ?? band.ay ?? 0 },
+    ];
+    try {
+      const start = this._riverStartPoint(band);
+      const end = this._riverEndPoint(band);
+      band._pathFallback = [start, end];
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      const count = Math.max(40, band.bends || 64);
+      const pts = [];
 
-      let px = baseX + nx * (bend + bankWobble) + wanderX;
-      let py = baseY + ny * (bend + bankWobble) + wanderY;
-      const fromSpawnX = px - this.spawn.x;
-      const fromSpawnY = py - this.spawn.y;
-      const fromSpawn = Math.hypot(fromSpawnX, fromSpawnY);
-      const avoid = this._riverAvoidSpawnRadius || 0;
-      if (fromSpawn < avoid && fromSpawn > 0.001) {
-        const push = (avoid - fromSpawn) / avoid;
-        const pushDist = push * push * avoid * 0.92;
-        px += (fromSpawnX / fromSpawn) * pushDist;
-        py += (fromSpawnY / fromSpawn) * pushDist;
+      for (let i = 0; i <= count; i++) {
+        const t = i / count;
+        const ease = Math.sin(t * Math.PI);
+        const baseX = start.x + dx * t;
+        const baseY = start.y + dy * t;
+        const phaseA = (band.seed % 628) * 0.01;
+        const phaseB = (band.seed % 991) * 0.008;
+        const waveA = Math.sin(t * Math.PI * 3.15 + phaseA);
+        const waveB = Math.sin(t * Math.PI * 6.2 + phaseB) * 0.28;
+        const waveC = Math.sin(t * Math.PI * 9.4 + phaseA * 0.7) * 0.10;
+        const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
+        const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
+        const bankWobble = Math.sin(t * Math.PI * 11 + phaseB) * 44 * ease;
+        const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
+        const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
+
+        let px = baseX + nx * (bend + bankWobble) + wanderX;
+        let py = baseY + ny * (bend + bankWobble) + wanderY;
+        const fromSpawnX = px - this.spawn.x;
+        const fromSpawnY = py - this.spawn.y;
+        const fromSpawn = Math.hypot(fromSpawnX, fromSpawnY);
+        const avoid = this._riverAvoidSpawnRadius || 0;
+        if (fromSpawn < avoid && fromSpawn > 0.001) {
+          const push = (avoid - fromSpawn) / avoid;
+          const pushDist = push * push * avoid * 0.92;
+          px += (fromSpawnX / fromSpawn) * pushDist;
+          py += (fromSpawnY / fromSpawn) * pushDist;
+        }
+
+        pts.push({ x: px, y: py });
       }
 
-      pts.push({ x: px, y: py });
-    }
+      if (band.joinBand) {
+        this._blendRiverJoin(pts, band);
+      }
 
-    if (!band.joinBand) {
-      this._extendRiverHeadwaterPath(pts, band);
-      this._clipRiverPathToCoast(pts, 0.245);
-    }
+      if (!band.joinBand) {
+        this._extendRiverHeadwaterPath(pts, band);
+        this._clipRiverPathToCoast(pts, 0.245);
+      }
 
-    band._path = pts;
-    return pts;
+      band._path = pts;
+      return pts;
+    } finally {
+      band._buildingPath = false;
+      delete band._pathFallback;
+    }
+  }
+
+  _blendRiverJoin(pts, band) {
+    if (!pts?.length || pts.length < 6 || !band?.joinBand) return;
+    const main = this._riverPath(band.joinBand);
+    const joinT = band.joinT || 0.5;
+    const join = this._pointOnRiverPath(main, joinT);
+    const before = this._pointOnRiverPath(main, Math.max(0, joinT - 0.03));
+    const after = this._pointOnRiverPath(main, Math.min(1, joinT + 0.03));
+    const tx = after.x - before.x;
+    const ty = after.y - before.y;
+    const len = Math.hypot(tx, ty) || 1;
+    const ux = tx / len;
+    const uy = ty / len;
+    const blendCount = Math.min(7, pts.length - 1);
+
+    for (let i = 0; i < blendCount; i++) {
+      const idx = pts.length - 1 - i;
+      const frac = 1 - i / Math.max(1, blendCount - 1);
+      const back = 42 + i * 30;
+      const targetX = join.x - ux * back;
+      const targetY = join.y - uy * back;
+      pts[idx].x = pts[idx].x * (1 - frac) + targetX * frac;
+      pts[idx].y = pts[idx].y * (1 - frac) + targetY * frac;
+    }
+    pts[pts.length - 1] = { x: join.x, y: join.y };
   }
 
   _extendRiverHeadwaterPath(pts, band) {
@@ -3805,7 +4314,7 @@ export default class World {
     const nx = -uy;
     const ny = ux;
     const extra = [];
-    const maxSteps = 10;
+    const maxSteps = 18;
 
     for (let i = 1; i <= maxSteps; i++) {
       const dist = 110 * i;
@@ -3819,7 +4328,7 @@ export default class World {
       const sample = this._sampleCellRaw(px, py);
       if (sample.isWater) break;
       extra.push({ x: px, y: py });
-      if (sample.isMountain || sample.zone === "mountain" || sample.zone === "highlands" || this._groundAt(px, py) >= 0.42) {
+      if (sample.isMountain || sample.zone === "mountain" || this._riverSourceHeadwaterScore(px, py, sample) >= 2.25 || this._groundAt(px, py) >= 0.46) {
         break;
       }
     }
@@ -4014,6 +4523,7 @@ export default class World {
 
   _findRiverSourceNear(x, y, radius = 2200) {
     let fallback = null;
+    let bestScore = -Infinity;
     for (let r = 0; r <= radius; r += 90) {
       for (let a = 0; a < Math.PI * 2; a += Math.PI / 18) {
         const px = x + Math.cos(a) * r;
@@ -4022,7 +4532,11 @@ export default class World {
         if (raw.isWater || raw.isMountain) continue;
         if (this._isCoastalLandPoint(px, py)) continue;
         if (this._groundAt(px, py) < 0.275) continue;
-        if (!fallback) fallback = { x: px, y: py };
+        const score = this._riverSourceHeadwaterScore(px, py, raw);
+        if (score > bestScore) {
+          bestScore = score;
+          fallback = { x: px, y: py };
+        }
         if (this._isRiverSourceHeadwaterPoint(px, py)) return { x: px, y: py };
       }
     }
@@ -4031,18 +4545,24 @@ export default class World {
 
   _isRiverSourceHeadwaterPoint(x, y) {
     const raw = this._sampleCellRaw(x, y);
-    if (raw.isWater || raw.isMountain) return false;
+    return this._riverSourceHeadwaterScore(x, y, raw) >= 2.1;
+  }
 
+  _riverSourceHeadwaterScore(x, y, raw = this._sampleCellRaw(x, y)) {
+    if (raw.isWater || raw.isMountain) return -999;
     const ground = this._groundAt(x, y);
     const moisture = this._moistureAt(x, y);
     const mountainNear = this._isNearMountainWall(x, y, 320);
     const highlandish = ground >= 0.42 || raw.zone === "highlands" || raw.zone === "stone flats";
     const forested = raw.zone === "forest" || raw.zone === "deep wilds" || raw.zone === "greenwood";
-
-    if (mountainNear && ground >= 0.34) return true;
-    if (highlandish && moisture >= 0.30) return true;
-    if (ground >= 0.38 && forested) return true;
-    return false;
+    let score = 0;
+    if (mountainNear) score += 1.5;
+    if (highlandish) score += 0.7;
+    if (forested) score += 0.45;
+    if (moisture >= 0.30) score += 0.45;
+    if (ground >= 0.40) score += 0.35;
+    if (raw.zone === "stone flats") score -= 0.25;
+    return score;
   }
 
   _isCoastalLandPoint(x, y) {
@@ -4134,6 +4654,38 @@ export default class World {
       if (d2 < best2) best2 = d2;
     }
     return Math.sqrt(best2);
+  }
+
+  _nearestPointOnRiverPath(px, py, pts, segments = null) {
+    if (!pts?.length || pts.length < 2) return null;
+    const segs = segments || this._segmentsFromPoints(pts);
+    const metric = this._riverPathMetric(pts);
+    const lengths = metric.lengths || [];
+    const total = metric.total || 1;
+    let traversed = 0;
+    let best = null;
+
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const t = clamp(((px - seg.ax) * seg.dx + (py - seg.ay) * seg.dy) / seg.len2, 0, 1);
+      const qx = seg.ax + seg.dx * t;
+      const qy = seg.ay + seg.dy * t;
+      const ox = px - qx;
+      const oy = py - qy;
+      const d2 = ox * ox + oy * oy;
+      if (!best || d2 < best.d2) {
+        best = {
+          d2,
+          dist: Math.sqrt(d2),
+          x: qx,
+          y: qy,
+          t: clamp((traversed + (lengths[i] || 0) * t) / total, 0, 1),
+        };
+      }
+      traversed += lengths[i] || 0;
+    }
+
+    return best;
   }
 
   _segmentsFromPoints(pts) {
@@ -4349,6 +4901,9 @@ export default class World {
       }
     }
 
+    this._ensureRegionalAccessDocks(id);
+    id = ((this.docks || []).reduce((m, d) => Math.max(m, d.id || 0), id - 1)) + 1;
+
     for (const [x, y] of shrineSeeds) {
       const p = findLand(x, y, 460);
       if (p) this.shrines.push({ id: id++, x: p.x, y: p.y });
@@ -4374,6 +4929,24 @@ export default class World {
     }
 
     this._sanitizePoiPlacements();
+  }
+
+  _ensureRegionalAccessDocks(nextId = 1) {
+    const edge = this.mapHalfSize * 0.9;
+    const seeds = [
+      [0, edge], [0, -edge], [edge, 0], [-edge, 0],
+      [edge * 0.72, edge * 0.72], [-edge * 0.72, edge * 0.72],
+      [edge * 0.72, -edge * 0.72], [-edge * 0.72, -edge * 0.72],
+      [edge * 0.48, edge], [-edge * 0.48, edge], [edge * 0.48, -edge], [-edge * 0.48, -edge],
+    ];
+    let id = nextId;
+    for (const [x, y] of seeds) {
+      const shore = this._findShorePatchNear(x, y, 1200);
+      if (!shore) continue;
+      const tooClose = (this.docks || []).some((dock) => Math.hypot(dock.x - shore.x, dock.y - shore.y) < 720);
+      if (tooClose) continue;
+      this.docks.push({ id: id++, x: shore.x, y: shore.y, generatedRegional: true });
+    }
   }
 
   _sanitizePoiPlacements() {
@@ -4409,6 +4982,7 @@ export default class World {
     for (const p of this.camps) add(p, "camp");
     for (const p of this.docks) add(p, "dock");
     for (const p of this.dungeons) add(p, "dungeon");
+    for (const p of this._getPublicPassRoadNodes()) add(p, "pass");
 
     const starterDistances = [760];
     const starterAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
@@ -4457,8 +5031,39 @@ export default class World {
       connected.push(next);
     }
 
+    const loopNodes = mainNodes.filter((n) => n.type !== "starter" && n.type !== "spawn");
+    for (const node of loopNodes) {
+      const neighbors = loopNodes
+        .filter((other) => other !== node)
+        .map((other) => ({
+          other,
+          dist: Math.hypot(other.x - node.x, other.y - node.y),
+        }))
+        .filter((entry) => entry.dist >= 520 && entry.dist <= 3600)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, node.type === "pass" || node.type === "dock" ? 3 : 2);
+      for (const entry of neighbors) {
+        const width = node.type === "dock" || entry.other.type === "dock" ? 24 : 22;
+        this._addRoadSegment(node, entry.other, width, true);
+      }
+    }
+
     this._mapDirty = true;
     this._rebuildRoadPath();
+  }
+
+  _getPublicPassRoadNodes() {
+    const out = [];
+    const seen = new Set();
+    for (const pass of this._mountainPasses || []) {
+      if (!pass?.public) continue;
+      const key = `${Math.round(pass.x / 80)}|${Math.round(pass.y / 80)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const safe = this._findSafeLandPatchNear(pass.x, pass.y, 260) || { x: pass.x, y: pass.y };
+      out.push({ x: safe.x, y: safe.y });
+    }
+    return out;
   }
 
   _rebuildRoadPath() {
@@ -4699,8 +5304,8 @@ export default class World {
 
   _repairMissingBridges(candidates) {
     const out = [...(candidates || [])];
-    const bridgeGapLimit = 492;
-    const hardBridgeGapLimit = 620;
+    const bridgeGapLimit = 760;
+    const hardBridgeGapLimit = 920;
     const nearBridge = (x, y, radius = 88) =>
       out.some((b) => Math.hypot((b.cx || 0) - x, (b.cy || 0) - y) < radius);
     const sampleWaterCrossing = (ax, ay, bx, by) => {
@@ -4782,7 +5387,7 @@ export default class World {
         if (nearBridge(midX, midY, 96)) continue;
 
         const span = Math.hypot(landAfter.x - landBefore.x, landAfter.y - landBefore.y);
-        if (span < 24 || span > 388) continue;
+        if (span < 24 || span > 520) continue;
 
         const angle = Math.atan2(dy, dx);
         const shoreInset = Math.min(6, Math.max(2, (road.width || 24) * 0.08));
@@ -4821,8 +5426,8 @@ export default class World {
   }
 
   _ensureEndpointDockAccess() {
-    const endpointBridgeGap = 492;
-    const endpointPassageGap = 720;
+    const endpointBridgeGap = 760;
+    const endpointPassageGap = 1200;
     for (const road of this.roads || []) {
       const pts = road?.points;
       if (!pts || pts.length < 2) continue;
@@ -4841,7 +5446,7 @@ export default class World {
           const dx = water.shoreB.x - water.shoreA.x;
           const dy = water.shoreB.y - water.shoreA.y;
           const span = Math.hypot(dx, dy);
-          if (span >= 24 && span <= 492) {
+          if (span >= 24 && span <= 620) {
             const angle = Math.atan2(dy, dx);
             const dirX = span > 0 ? dx / span : 1;
             const dirY = span > 0 ? dy / span : 0;
@@ -4852,7 +5457,7 @@ export default class World {
               y: water.shoreB.y - dirY * shoreInset,
             };
             const bridgeSpan = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
-            if (bridgeSpan >= 20 && bridgeSpan <= 334) {
+            if (bridgeSpan >= 20 && bridgeSpan <= 520) {
               this.bridges.push({
                 cx: (start.x + endPoint.x) * 0.5,
                 cy: (start.y + endPoint.y) * 0.5,
@@ -5477,10 +6082,16 @@ export default class World {
 
   _queueWarmupTasks() {
     this._warmupTasks = [
+      () => this._buildMapPreviewWarmupChunk(),
       () => this._generateTreesChunk(),
       () => this._generateRocksChunk(),
       () => this._generateClutterChunk(),
     ];
+  }
+
+  _buildMapPreviewWarmupChunk() {
+    this._buildMapPreview();
+    return !this._mapBuildState;
   }
 
   _runWarmupTasks() {
@@ -5499,6 +6110,42 @@ export default class World {
       if (this._warmupTasks[0]()) this._warmupTasks.shift();
       else break;
     }
+  }
+
+  getBootProgress() {
+    const steps = [
+      this._mapPreviewBuildProgress(),
+      this._generatorProgress(this._treeBuildState),
+      this._generatorProgress(this._rockBuildState),
+      this._generatorProgress(this._clutterBuildState),
+    ];
+    const done = steps.reduce((sum, value) => sum + clamp(value, 0, 1), 0);
+    return clamp(done / Math.max(1, steps.length), 0, 1);
+  }
+
+  getBootStatusText() {
+    const progress = Math.round(this.getBootProgress() * 100);
+    if (this._mapBuildState) return `Charting maps... ${progress}%`;
+    if (this._treeBuildState) return `Planting forests... ${progress}%`;
+    if (this._rockBuildState) return `Setting stone... ${progress}%`;
+    if (this._clutterBuildState) return `Placing details... ${progress}%`;
+    return "Ready";
+  }
+
+  isBootWarm() {
+    return !this._mapBuildState && !this._treeBuildState && !this._rockBuildState && !this._clutterBuildState && !this._warmupTasks?.length;
+  }
+
+  _mapPreviewBuildProgress() {
+    if (this._mapInfo?.size >= (this._mapPreviewSize || 0) && !this._mapBuildState) return 1;
+    const state = this._mapBuildState;
+    if (!state?.size) return 0;
+    return clamp((state.row || 0) / Math.max(1, state.size), 0, 1);
+  }
+
+  _generatorProgress(state) {
+    if (!state) return 1;
+    return clamp((state.index || 0) / Math.max(1, state.count || 1), 0, 1);
   }
 
   _buildMountainRenderDataChunk() {
@@ -5680,7 +6327,7 @@ export default class World {
     if (!this._treeBuildState) {
       this._treeBuildState = {
         index: 0,
-        count: 2800,
+        count: 3320,
         spawnBias: 1.45,
       };
     }
@@ -5785,7 +6432,7 @@ export default class World {
     if (!this._rockBuildState) {
       this._rockBuildState = {
         index: 0,
-        count: 620,
+        count: 760,
       };
     }
 
@@ -5797,12 +6444,12 @@ export default class World {
       const tx = this._rng.range(-this.mapHalfSize + 420, this.mapHalfSize - 420);
       const ty = this._rng.range(-this.mapHalfSize + 420, this.mapHalfSize - 420);
       const s = this._sampleCell(tx, ty);
-      if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain") && !s.isWater && !s.bridge && !s.road) {
+      if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain" || s.zone === "old fields") && !s.isWater && !s.bridge && !s.road) {
         this._addRock({
           x: tx,
           y: ty,
           seed: (this.seed + state.index * 311 + 41) >>> 0,
-          scale: s.zone === "mountain" ? 1.1 + this._rng.next() * 0.55 : 0.7 + this._rng.next() * 0.45,
+          scale: s.zone === "mountain" ? 1.1 + this._rng.next() * 0.55 : s.zone === "old fields" ? 0.46 + this._rng.next() * 0.24 : 0.7 + this._rng.next() * 0.45,
           zone: s.zone,
         });
         if (this._rng.next() < 0.34) {
@@ -5843,7 +6490,7 @@ export default class World {
     if (!this._clutterBuildState) {
       this._clutterBuildState = {
         index: 0,
-        count: 1100,
+        count: 1360,
       };
     }
 
@@ -5953,6 +6600,7 @@ export default class World {
     const centerX = (left + right) * 0.5;
     const centerY = (top + bottom) * 0.5;
     const farTreeDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.42;
+    const mountainHeavyView = this._isNearMountainWall(centerX, centerY, 240);
 
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
@@ -5973,6 +6621,10 @@ export default class World {
             if (t.scale < 0.4 && (t.seed & 1) === 0) continue;
             if (t.scale < 0.3 && (t.seed & 3) !== 0) continue;
           }
+          if (mountainHeavyView && this._isNearMountainWall(t.x, t.y, 96)) {
+            if ((t.seed & 3) !== 0) continue;
+            if (dist2 > farTreeDist2 * 0.44) continue;
+          }
           if (this._isNearBridgeDeck(t.x, t.y, 26)) continue;
           if (this._isNearRiverChannel(t.x, t.y, 16)) continue;
           this._drawTree(ctx, t.x, t.y, t.seed, t.scale);
@@ -5989,6 +6641,7 @@ export default class World {
     const centerX = (left + right) * 0.5;
     const centerY = (top + bottom) * 0.5;
     const farClutterDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.30;
+    const mountainHeavyView = this._isNearMountainWall(centerX, centerY, 240);
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
     const bx1 = Math.floor(cullRight / bucketSize);
@@ -6007,6 +6660,10 @@ export default class World {
           if (dist2 > farClutterDist2) {
             if ((item.seed & 1) === 0) continue;
             if (item.scale < 0.5 && (item.seed & 3) !== 0) continue;
+          }
+          if (mountainHeavyView && this._isNearMountainWall(item.x, item.y, 88)) {
+            if ((item.seed & 7) !== 0) continue;
+            if (dist2 > farClutterDist2 * 0.34) continue;
           }
           if (this._isNearBridgeDeck(item.x, item.y, 22)) continue;
           this._drawClutterItem(ctx, item);

@@ -35,7 +35,7 @@ export default class UI {
     this._miniFrameT = 0;
     this._lastMiniHeroX = 0;
     this._lastMiniHeroY = 0;
-    this._controlsCollapsed = false;
+    this._controlsCollapsed = true;
     this._controlsToggleRect = null;
     this._profilerCopyRect = null;
     this._spikeCopyRect = null;
@@ -523,24 +523,13 @@ export default class UI {
       font: "bold 10px 'Segoe UI', Arial",
     });
 
-    const statY = y + 118;
-    const statGap = 8;
-    const statW = Math.floor((innerW - statGap * 2) / 3);
-    this._drawPill(ctx, innerX, statY, statW, 22, `DMG ${stats.dmg || 0}`, {
-      fill: "rgba(255,255,255,0.06)",
-      stroke: "rgba(255,255,255,0.12)",
-      textColor: "#9fb1c7",
-    });
-    this._drawPill(ctx, innerX + statW + statGap, statY, statW, 22, `ARM ${stats.armor || 0}`, {
-      fill: "rgba(255,255,255,0.06)",
-      stroke: "rgba(255,255,255,0.12)",
-      textColor: "#9fb1c7",
-    });
-    this._drawPill(ctx, innerX + (statW + statGap) * 2, statY, statW, 22, `CRIT ${Math.round((stats.crit || 0) * 100)}%`, {
-      fill: "rgba(255,255,255,0.06)",
-      stroke: "rgba(255,255,255,0.12)",
-      textColor: "#9fb1c7",
-    });
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(innerX, y + 116, innerW, 24);
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.strokeRect(innerX + 0.5, y + 116.5, innerW - 1, 23);
+    ctx.fillStyle = "#93a8bf";
+    ctx.font = "12px Arial";
+    this._drawFitText(ctx, "Press I for your full stats, gear loadout, and crafting.", innerX + 10, y + 132, innerW - 20, 9);
 
     ctx.restore();
   }
@@ -2594,7 +2583,34 @@ export default class UI {
     ctx.font = "bold 15px Arial";
     ctx.fillText("Equipped", rightX + 12, rightY + 22);
 
-    this._drawHeroPortrait(ctx, hero, rightX + rightW - 96, rightY + 14, 74, 92);
+    this._drawHeroPortrait(ctx, hero, rightX + rightW - 118, rightY + 12, 96, 118);
+
+    const stats = hero.getStats?.() || {};
+    const statsBoxX = rightX + 12;
+    const statsBoxY = rightY + 36;
+    const statsBoxW = Math.max(176, rightW - 146);
+    const statsBoxH = 92;
+    ctx.fillStyle = "rgba(123,170,227,0.08)";
+    ctx.fillRect(statsBoxX, statsBoxY, statsBoxW, statsBoxH);
+    ctx.strokeStyle = "rgba(144,187,241,0.18)";
+    ctx.strokeRect(statsBoxX + 0.5, statsBoxY + 0.5, statsBoxW - 1, statsBoxH - 1);
+    ctx.fillStyle = "#dce6f4";
+    ctx.font = "bold 12px Arial";
+    ctx.fillText("Adventurer Stats", statsBoxX + 10, statsBoxY + 16);
+    const statLines = [
+      [`HP ${Math.round(hero.hp || 0)}/${Math.round(hero.maxHp || stats.maxHp || 0)}`, `Mana ${Math.round(hero.mana || 0)}/${Math.round(hero.maxMana || stats.maxMana || 0)}`],
+      [`Damage ${Math.round(stats.dmg || 0)}`, `Armor ${Math.round(stats.armor || 0)}`],
+      [`Crit ${Math.round((stats.crit || 0) * 100)}%`, `Crit Power x${(stats.critMult || 1.5).toFixed(2)}`],
+      [`Move ${Math.round((stats.move || 1) * 100)}%`, `Gold ${hero.gold || 0}`],
+    ];
+    ctx.font = "12px Arial";
+    for (let i = 0; i < statLines.length; i++) {
+      const yy = statsBoxY + 34 + i * 14;
+      ctx.fillStyle = "#e8eef8";
+      this._drawFitText(ctx, statLines[i][0], statsBoxX + 10, yy, Math.max(74, statsBoxW * 0.46), 8);
+      ctx.fillStyle = "#b2c0d3";
+      this._drawFitText(ctx, statLines[i][1], statsBoxX + Math.max(92, statsBoxW * 0.52), yy, Math.max(74, statsBoxW * 0.42), 8);
+    }
 
     const materials = [
       { label: "Herbs", count: game?.progress?.herbs || 0, color: "#dff2de" },
@@ -2603,7 +2619,7 @@ export default class UI {
       { label: "Hide", count: game?.progress?.materials?.hide || 0, color: "#e0c09d" },
       { label: "Essence", count: game?.progress?.materials?.essence || 0, color: "#e2ccff" },
     ];
-    const materialY = rightY + 36;
+    const materialY = rightY + 138;
     const materialW = Math.max(168, rightW - 132);
     ctx.fillStyle = "rgba(126,210,126,0.10)";
     ctx.fillRect(rightX + 12, materialY, materialW, 72);
@@ -2628,28 +2644,36 @@ export default class UI {
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const item = equip[slot];
-      const iy = rightY + 126 + i * 26;
-      const textW = Math.max(80, rightW - 220);
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const cardX = rightX + 12 + col * Math.floor((rightW - 30) * 0.5);
+      const cardY = rightY + 226 + row * 48;
+      const cardW = Math.floor((rightW - 36) * 0.5);
+      const textW = Math.max(74, cardW - 18);
 
+      ctx.fillStyle = "rgba(255,255,255,0.045)";
+      ctx.fillRect(cardX, cardY - 14, cardW, 38);
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.strokeRect(cardX + 0.5, cardY - 13.5, cardW - 1, 37);
       ctx.fillStyle = "#9db0c8";
-      ctx.font = "12px Arial";
-      ctx.fillText(slot.toUpperCase(), rightX + 12, iy);
+      ctx.font = "11px Arial";
+      ctx.fillText(slot.toUpperCase(), cardX + 8, cardY - 1);
 
       ctx.fillStyle = item?.color || "#dce6f4";
-      ctx.font = "bold 13px Arial";
-      this._drawFitText(ctx, item?.name || "-", rightX + 104, iy, textW);
+      ctx.font = "bold 12px Arial";
+      this._drawFitText(ctx, item?.name || "-", cardX + 8, cardY + 14, textW);
 
       if (item?.stats) {
         ctx.fillStyle = "#8ea1b8";
-        ctx.font = "11px Arial";
-        this._drawFitText(ctx, this._statSummary(item.stats), rightX + 104, iy + 13, textW);
+        ctx.font = "10px Arial";
+        this._drawFitText(ctx, this._statSummary(item.stats), cardX + 8, cardY + 26, textW);
       }
     }
 
     const pickedEntry = entries[selected];
     const picked = pickedEntry?.item;
     const statX = rightX + 12;
-    let sy = rightY + 292;
+    let sy = rightY + 382;
 
     ctx.fillStyle = "#dce6f4";
     ctx.font = "bold 15px Arial";
@@ -3011,12 +3035,11 @@ export default class UI {
     const innerH = h - inset * 2;
     const badgeY = y + h - 19;
     const cx = x + w * 0.5;
-    const portraitBodyTop = innerY + 8;
     const portraitBodyBottom = y + h - 24;
     const headY = y + 30;
-    const chestY = y + 58;
-    const chestW = Math.max(22, Math.round(w * 0.36));
-    const bodyH = Math.max(22, Math.round(h * 0.20));
+    const chestY = y + 61;
+    const chestW = Math.max(28, Math.round(w * 0.38));
+    const bodyH = Math.max(30, Math.round(h * 0.26));
     const armorTier = armor?.stats?.armor || 0;
     const weaponTier = weapon?.stats?.dmg || 0;
 
@@ -3049,77 +3072,107 @@ export default class UI {
     ctx.fillRect(x, y, w, h);
 
     if (this._hasUiImage(portraitImg)) {
-      const cropX = Math.round(portraitImg.naturalWidth * 0.18);
-      const cropY = Math.round(portraitImg.naturalHeight * 0.10);
-      const cropW = Math.round(portraitImg.naturalWidth * 0.64);
-      const cropH = Math.round(portraitImg.naturalHeight * 0.74);
-      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 4, innerY + 4, innerW - 8, innerH - 8);
+      const cropX = Math.round(portraitImg.naturalWidth * 0.22);
+      const cropY = Math.round(portraitImg.naturalHeight * 0.08);
+      const cropW = Math.round(portraitImg.naturalWidth * 0.56);
+      const cropH = Math.round(portraitImg.naturalHeight * 0.72);
+      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 3, innerY + 2, innerW - 6, innerH - 2);
     }
 
-    ctx.fillStyle = "rgba(0,0,0,0.12)";
-    ctx.fillRect(innerX, innerY + innerH * 0.58, innerW, innerH * 0.34);
+    ctx.fillStyle = "rgba(0,0,0,0.14)";
+    ctx.fillRect(innerX, innerY + innerH * 0.60, innerW, innerH * 0.28);
+
+    ctx.fillStyle = "rgba(45,24,28,0.48)";
+    ctx.beginPath();
+    ctx.moveTo(cx - 19, chestY + 1);
+    ctx.lineTo(cx - 28, portraitBodyBottom - 8);
+    ctx.lineTo(cx - 10, portraitBodyBottom - 3);
+    ctx.lineTo(cx, chestY + 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 19, chestY + 1);
+    ctx.lineTo(cx + 28, portraitBodyBottom - 8);
+    ctx.lineTo(cx + 10, portraitBodyBottom - 3);
+    ctx.lineTo(cx, chestY + 18);
+    ctx.closePath();
+    ctx.fill();
 
     ctx.fillStyle = armorColor;
     ctx.globalAlpha = 0.88;
     ctx.beginPath();
-    ctx.moveTo(cx - chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
-    ctx.lineTo(cx - chestW * 0.34, chestY + 10);
-    ctx.quadraticCurveTo(cx, chestY - 4, cx + chestW * 0.34, chestY + 10);
-    ctx.lineTo(cx + chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
-    ctx.quadraticCurveTo(cx, Math.min(portraitBodyBottom + 6, chestY + bodyH + 6), cx - chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.moveTo(cx - chestW * 0.58, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.lineTo(cx - chestW * 0.40, chestY + 9);
+    ctx.quadraticCurveTo(cx, chestY - 6, cx + chestW * 0.40, chestY + 9);
+    ctx.lineTo(cx + chestW * 0.58, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.quadraticCurveTo(cx, Math.min(portraitBodyBottom + 6, chestY + bodyH + 6), cx - chestW * 0.58, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - chestW * 0.70, chestY + 11);
+    ctx.quadraticCurveTo(cx - chestW * 0.52, chestY - 3, cx - chestW * 0.22, chestY + 8);
+    ctx.lineTo(cx - chestW * 0.30, chestY + 19);
+    ctx.lineTo(cx - chestW * 0.66, chestY + 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + chestW * 0.70, chestY + 11);
+    ctx.quadraticCurveTo(cx + chestW * 0.52, chestY - 3, cx + chestW * 0.22, chestY + 8);
+    ctx.lineTo(cx + chestW * 0.30, chestY + 19);
+    ctx.lineTo(cx + chestW * 0.66, chestY + 20);
     ctx.closePath();
     ctx.fill();
 
     ctx.globalAlpha = 1;
     ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.fillRect(cx - chestW * 0.32, chestY + 11, chestW * 0.64, armorTier >= 16 ? 4 : 3);
-    ctx.fillRect(cx - 2, chestY + 6, 4, bodyH - 2);
+    ctx.fillRect(cx - chestW * 0.28, chestY + 12, chestW * 0.56, armorTier >= 16 ? 4 : 3);
+    ctx.fillRect(cx - 2, chestY + 7, 4, bodyH - 1);
     if (armorTier >= 10) {
-      ctx.fillRect(cx - chestW * 0.24, chestY + 21, chestW * 0.48, 3);
+      ctx.fillRect(cx - chestW * 0.22, chestY + 22, chestW * 0.44, 3);
     }
     if (armorTier >= 18) {
-      ctx.fillRect(cx - chestW * 0.36, chestY + 31, chestW * 0.72, 3);
+      ctx.fillRect(cx - chestW * 0.32, chestY + 31, chestW * 0.64, 3);
     }
 
     if (helm) {
       ctx.fillStyle = helmColor;
       ctx.globalAlpha = 0.94;
       ctx.beginPath();
-      ctx.moveTo(cx - 15, headY + 16);
-      ctx.quadraticCurveTo(cx, headY - 2, cx + 16, headY + 17);
-      ctx.lineTo(cx + 10, headY + 27);
-      ctx.lineTo(cx - 10, headY + 27);
+      ctx.moveTo(cx - 13, headY + 17);
+      ctx.quadraticCurveTo(cx, headY + 1, cx + 13, headY + 17);
+      ctx.lineTo(cx + 9, headY + 28);
+      ctx.lineTo(cx - 9, headY + 28);
       ctx.closePath();
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.fillStyle = "rgba(255,255,255,0.24)";
-      ctx.fillRect(cx - 9, headY + 18, 18, 3);
+      ctx.fillRect(cx - 8, headY + 18, 16, 3);
       if ((helm?.stats?.armor || 0) >= 8 || helm?.rarity === "epic") {
         ctx.fillRect(cx - 2, headY + 21, 4, 9);
       }
     }
 
     ctx.strokeStyle = weaponColor;
-    ctx.lineWidth = weaponTier >= 18 ? 5.5 : weaponTier >= 10 ? 4.8 : 4;
+    ctx.lineWidth = weaponTier >= 18 ? 5.2 : weaponTier >= 10 ? 4.4 : 3.8;
     ctx.beginPath();
-    ctx.moveTo(x + w - 23, y + 33);
-    ctx.lineTo(x + w - 28, y + 73);
+    ctx.moveTo(cx + 16, chestY + 5);
+    ctx.lineTo(cx + 25, y + 94);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.52)";
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = "rgba(255,255,255,0.44)";
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(x + w - 22, y + 33);
-    ctx.lineTo(x + w - 26, y + 71);
+    ctx.moveTo(cx + 16, chestY + 6);
+    ctx.lineTo(cx + 23, y + 89);
     ctx.stroke();
     ctx.fillStyle = "#bf8d57";
-    ctx.fillRect(x + w - 32, y + 67, 10, 4);
+    ctx.fillRect(cx + 17, y + 66, 10, 4);
     ctx.fillStyle = "#eef5ff";
-    ctx.fillRect(x + w - 24, y + 30, 4, 5);
+    ctx.fillRect(cx + 16, chestY + 4, 4, 6);
 
     ctx.fillStyle = bootsColor;
     ctx.globalAlpha = 0.85;
-    ctx.fillRect(cx - 14, y + h - 27, 10, 5);
-    ctx.fillRect(cx + 4, y + h - 27, 10, 5);
+    ctx.fillRect(cx - 12, y + h - 27, 8, 5);
+    ctx.fillRect(cx + 4, y + h - 27, 8, 5);
     ctx.globalAlpha = 1;
 
     if (ring) {
@@ -3153,6 +3206,29 @@ export default class UI {
     ctx.fillRect(x + Math.floor(w * 0.51), badgeY + 3, Math.max(12, Math.floor(w * 0.18)), 4);
     ctx.fillStyle = trinketColor;
     ctx.fillRect(x + Math.floor(w * 0.74), badgeY + 3, Math.max(8, Math.floor(w * 0.10)), 4);
+
+    const chips = [
+      { label: "W", color: weaponColor, x: x + w - 19, y: y + 10 },
+      { label: "A", color: armorColor, x: x + 10, y: y + h - 34 },
+      { label: "H", color: helm ? helmColor : "rgba(255,255,255,0.18)", x: x + 10, y: y + 10 },
+      { label: "T", color: trinket ? trinketColor : ringColor, x: x + w - 19, y: y + h - 34 },
+    ];
+    ctx.font = "bold 9px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const chip of chips) {
+      ctx.fillStyle = "rgba(9,12,18,0.92)";
+      ctx.beginPath();
+      ctx.arc(chip.x, chip.y, 8.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = chip.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(chip.x, chip.y, 7.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = chip.color;
+      ctx.fillText(chip.label, chip.x, chip.y + 0.5);
+    }
     ctx.restore();
   }
 

@@ -18,6 +18,7 @@ if (!ctx) {
 }
 const bootLoading = document.getElementById("boot-loading");
 const bootLoadingStatus = document.getElementById("boot-loading-status");
+const bootLoadingPercent = document.getElementById("boot-loading-percent");
 
 let game = null;
 let rafId = 0;
@@ -30,6 +31,10 @@ let resizeQueued = false;
 let renderScale = 1;
 let frameEmaMs = 16.67;
 let dynamicScaleCooldown = 0;
+let bootVisualProgress = 0;
+let bootTargetProgress = 0;
+let bootLoadingShownAt = 0;
+const BOOT_MIN_VISIBLE_MS = 1350;
 
 const STEP = 1 / 60;
 const MAX_FRAME = 0.05;
@@ -160,9 +165,42 @@ function setBootLoadingStatus(text) {
   if (bootLoadingStatus) bootLoadingStatus.textContent = text;
 }
 
+function clamp01(v) {
+  return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+}
+
+function setBootLoadingPercent(progress = 0) {
+  const p = clamp01(progress);
+  if (bootLoadingPercent) bootLoadingPercent.textContent = `${Math.round(p * 100)}%`;
+  const card = bootLoading?.querySelector?.(".boot-card");
+  if (card) card.style.setProperty("--boot-progress", `${Math.round(p * 100)}%`);
+}
+
+function setBootLoadingTarget(progress = 0, immediate = false) {
+  bootTargetProgress = Math.max(bootTargetProgress, clamp01(progress));
+  if (immediate) {
+    bootVisualProgress = bootTargetProgress;
+    setBootLoadingPercent(bootVisualProgress);
+  }
+}
+
+function tickBootLoadingVisual(dt = STEP) {
+  if (!bootLoading || bootLoading.style.display === "none") return;
+  const gap = bootTargetProgress - bootVisualProgress;
+  if (gap <= 0.0005) return;
+  const maxStep = Math.max(0.004, dt * 0.18);
+  const easedStep = Math.max(maxStep, gap * 0.1);
+  bootVisualProgress = Math.min(bootTargetProgress, bootVisualProgress + easedStep);
+  setBootLoadingPercent(bootVisualProgress);
+}
+
 function showBootLoading(text = "Building the world...") {
   if (!bootLoading) return;
   setBootLoadingStatus(text);
+  bootVisualProgress = 0;
+  bootTargetProgress = 0;
+  bootLoadingShownAt = performance.now();
+  setBootLoadingPercent(0);
   bootLoading.classList.remove("is-hidden");
   bootLoading.style.display = "flex";
 }
@@ -213,10 +251,22 @@ function tick(now) {
 
     render();
     game?.noteFrame?.(frame);
+    updateBootLoadingProgress();
+    tickBootLoadingVisual(frame);
     maybeAdjustRenderScale();
   } catch (err) {
     showFatalError(err);
   }
+}
+
+function updateBootLoadingProgress() {
+  if (!bootLoading || bootLoading.style.display === "none" || !game) return;
+  const progress = game.getBootProgress?.() ?? 1;
+  const status = game.getBootStatusText?.() || "Building the world...";
+  setBootLoadingStatus(status);
+  setBootLoadingTarget(progress);
+  const shownLongEnough = performance.now() - bootLoadingShownAt >= BOOT_MIN_VISIBLE_MS;
+  if ((game.isBootWarm?.() || progress >= 0.999) && bootVisualProgress >= 0.995 && shownLongEnough) hideBootLoading();
 }
 
 function maybeAdjustRenderScale() {
@@ -274,25 +324,39 @@ function boot() {
   if (booted) return;
   booted = true;
   showBootLoading("Preparing startup...");
+  setBootLoadingTarget(0.04, true);
   resizeCanvas();
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      try {
-        showBootLoading("Building the world...");
-        game = new Game(canvas);
+    setBootLoadingStatus("Reading your save...");
+    setBootLoadingTarget(0.12);
+    setTimeout(() => {
+      setBootLoadingStatus("Packing your gear...");
+      setBootLoadingTarget(0.22);
+      setTimeout(() => {
+        setBootLoadingStatus("Building the world...");
+        setBootLoadingTarget(0.34);
+        setTimeout(() => {
+          try {
+            game = new Game(canvas, {
+              onBootProgress: (status, progress) => {
+                setBootLoadingStatus(status || "Building the world...");
+                if (progress != null) setBootLoadingTarget(progress);
+              },
+            });
 
-        if (game?.resize) {
-          const { w, h } = getCssSize();
-          game.resize(w, h);
-        }
+            if (game?.resize) {
+              const { w, h } = getCssSize();
+              game.resize(w, h);
+            }
 
-        hideBootLoading();
-        focusCanvas();
-        startLoop();
-      } catch (err) {
-        showFatalError(err);
-      }
-    });
+            focusCanvas();
+            startLoop();
+          } catch (err) {
+            showFatalError(err);
+          }
+        }, 220);
+      }, 180);
+    }, 120);
   });
 }
 

@@ -105,6 +105,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\update-project-snaps
   <meta charset="utf-8" />
   <title>Broke Knight</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="./favicon.ico" sizes="any" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="shortcut icon" href="./favicon.ico" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/"
+      }
+    }
+  </script>
   <style>
     :root {
       color-scheme: dark;
@@ -128,117 +139,122 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\update-project-snaps
     }
 
     body {
-      display: block;
-    }
-
-    #game-shell {
-      position: fixed;
-      inset: 0;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
       background:
-        radial-gradient(circle at 50% 12%, rgba(82, 116, 150, 0.20), rgba(0, 0, 0, 0) 34%),
+        radial-gradient(circle at 50% 12%, rgba(82, 116, 150, 0.18), rgba(0, 0, 0, 0) 34%),
         linear-gradient(180deg, #060a10 0%, #080c12 58%, #05070b 100%);
     }
 
-    #overworld {
+    #three-root {
+      position: fixed;
+      inset: 0;
+    }
+
+    #three-canvas {
       display: block;
       width: 100%;
       height: 100%;
       outline: none;
       cursor: crosshair;
-      image-rendering: auto;
       touch-action: none;
     }
 
-    #noscript-msg {
+    .hud {
       position: fixed;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      padding: 14px 18px;
+      left: 16px;
+      top: 16px;
+      z-index: 5;
+      max-width: min(390px, calc(100vw - 32px));
+      padding: 14px 16px;
       border-radius: 12px;
-      background: rgba(10, 14, 22, 0.92);
-      color: rgba(240, 244, 252, 0.96);
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-      font-size: 14px;
-      line-height: 1.4;
-      z-index: 10;
+      background: rgba(8, 13, 20, 0.78);
+      border: 1px solid rgba(150, 190, 220, 0.18);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(10px);
+      color: rgba(236, 242, 248, 0.95);
     }
 
-    #boot-loading {
-      position: fixed;
-      inset: 0;
-      z-index: 12;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      pointer-events: none;
-      background:
-        radial-gradient(circle at 50% 18%, rgba(90, 124, 158, 0.18), rgba(0, 0, 0, 0) 34%),
-        linear-gradient(180deg, rgba(8, 12, 18, 0.94) 0%, rgba(5, 8, 12, 0.98) 100%);
-      opacity: 1;
-      transition: opacity 180ms ease;
-    }
-
-    #boot-loading.is-hidden {
-      opacity: 0;
-    }
-
-    .boot-card {
-      min-width: 260px;
-      max-width: min(92vw, 420px);
-      padding: 20px 22px 18px;
-      border-radius: 14px;
-      background: rgba(10, 16, 24, 0.88);
-      border: 1px solid rgba(144, 194, 235, 0.18);
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
-      color: rgba(236, 242, 248, 0.96);
-      text-align: center;
-    }
-
-    .boot-title {
+    .hud h1 {
       margin: 0 0 8px;
       font-size: 18px;
       font-weight: 700;
-      letter-spacing: 0.02em;
     }
 
-    .boot-status {
+    .hud p {
       margin: 0;
       font-size: 13px;
-      color: rgba(199, 216, 232, 0.86);
+      line-height: 1.45;
+      color: rgba(204, 217, 229, 0.88);
     }
 
-    .boot-bar {
-      position: relative;
-      width: 100%;
-      height: 8px;
-      margin-top: 14px;
+    .hud-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 12px;
+      margin-top: 12px;
+      font-size: 12px;
+    }
+
+    .hud-grid div {
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .hud-label {
+      display: block;
+      margin-bottom: 3px;
+      color: rgba(164, 190, 210, 0.9);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .hud-actions {
+      position: fixed;
+      right: 16px;
+      top: 16px;
+      z-index: 5;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .hud-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 108px;
+      height: 38px;
+      padding: 0 14px;
       border-radius: 999px;
-      overflow: hidden;
-      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(150, 190, 220, 0.2);
+      background: rgba(8, 13, 20, 0.78);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+      color: rgba(236, 242, 248, 0.95);
+      text-decoration: none;
+      font-size: 13px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
     }
 
-    .boot-bar::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      width: 42%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, rgba(118, 191, 255, 0.28), rgba(134, 220, 247, 0.9));
-      animation: boot-slide 1.2s ease-in-out infinite;
+    .hud-button:hover {
+      border-color: rgba(168, 214, 246, 0.34);
+      background: rgba(11, 17, 25, 0.9);
     }
 
-    @keyframes boot-slide {
-      0% { transform: translateX(-120%); }
-      50% { transform: translateX(110%); }
-      100% { transform: translateX(240%); }
-    }
-
-    .js-ready #noscript-msg {
-      display: none;
+    .footer-note {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      z-index: 5;
+      max-width: min(520px, calc(100vw - 32px));
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(8, 13, 20, 0.72);
+      border: 1px solid rgba(150, 190, 220, 0.16);
+      color: rgba(204, 217, 229, 0.88);
+      font-size: 12px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(10px);
     }
 
     #fatal-error {
@@ -262,24 +278,32 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\update-project-snaps
   </style>
 </head>
 <body>
-  <div id="game-shell">
-    <canvas id="overworld" tabindex="0" aria-label="Broke Knight game canvas"></canvas>
+  <div id="three-root">
+    <canvas id="three-canvas" tabindex="0" aria-label="Broke Knight 3D world"></canvas>
   </div>
 
-  <div id="boot-loading" aria-live="polite">
-    <div class="boot-card">
-      <p class="boot-title">Broke Knight</p>
-      <p class="boot-status" id="boot-loading-status">Building the world...</p>
-      <div class="boot-bar" aria-hidden="true"></div>
+  <aside class="hud" aria-live="polite">
+    <h1>Broke Knight 3D</h1>
+    <p id="three-summary">Building the full world in 3D.</p>
+    <div class="hud-grid">
+      <div><span class="hud-label">Seed</span><span id="hud-seed">-</span></div>
+      <div><span class="hud-label">Hero</span><span id="hud-hero">-</span></div>
+      <div><span class="hud-label">Roads</span><span id="hud-roads">-</span></div>
+      <div><span class="hud-label">Rivers</span><span id="hud-rivers">-</span></div>
+      <div><span class="hud-label">Bridges</span><span id="hud-bridges">-</span></div>
+      <div><span class="hud-label">Towns</span><span id="hud-towns">-</span></div>
     </div>
+  </aside>
+
+  <div class="hud-actions">
+    <button class="hud-button" id="recenter-camera" type="button">Recenter</button>
   </div>
 
-  <div id="noscript-msg">Enable JavaScript to run Broke Knight.</div>
+  <div class="footer-note">
+    WASD or arrows to move. Hold Shift to run. Drag to orbit, right-drag to pan, mouse wheel to zoom.
+  </div>
 
-  <script>
-    document.documentElement.classList.add("js-ready");
-  </script>
-  <script type="module" src="./src/main.js"></script>
+  <script type="module" src="./src/main3d.js"></script>
 </body>
 </html>
 
@@ -2434,7 +2458,7 @@ const QUEST_TRACK_ROWS = [
 ];
 
 export default class Game {
-  constructor(canvas) {
+  constructor(canvas, opts = {}) {
     if (!canvas) throw new Error("Game: canvas is required");
 
     this.canvas = canvas;
@@ -2452,7 +2476,19 @@ export default class Game {
     this._hadBootSave = !!this._bootSaveData;
     if (Number.isFinite(+this._bootSaveData?.seed)) this.seed = this._bootSaveData.seed | 0;
 
+    this._bootStage = "";
+    this._bootProgress = 0;
+    const bootProgress = typeof opts.onBootProgress === "function" ? opts.onBootProgress : null;
+    const setBootStage = (stage, progress = null) => {
+      this._bootStage = stage;
+      if (progress != null) this._bootProgress = progress;
+      bootProgress?.(stage, progress);
+    };
+
+    setBootStage("Reading your save...", 0.08);
+    setBootStage("Laying out the world...", 0.18);
     this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
+    setBootStage("Waking the hero...", 0.38);
     this.hero = new Hero(this.world.spawn?.x ?? 0, this.world.spawn?.y ?? 0);
 
     this.enemies = [];
@@ -2552,6 +2588,8 @@ export default class Game {
     this._townServiceFocus = "";
 
     this._rng = new RNG(hash2(this.seed, 9001));
+    this._bootProgress = 0.44;
+    this._bootStage = "Opening the roads...";
 
     this.mouse = {
       x: this.w * 0.5,
@@ -2631,6 +2669,7 @@ export default class Game {
       currentRoomId: null,
       keys: 0,
       roomClearT: 0,
+      spawnQueue: [],
     };
 
     this.dev = {
@@ -2687,6 +2726,19 @@ export default class Game {
     this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
     this._refreshHeroTerrainSample(true);
     if (this._worldBuildMigrated) this._saveGame();
+  }
+
+  getBootProgress() {
+    const worldProgress = this.world?.getBootProgress?.() ?? 1;
+    return clamp(0.44 + worldProgress * 0.56, 0, 1);
+  }
+
+  getBootStatusText() {
+    return this.world?.getBootStatusText?.() || this._bootStage || "Building the world...";
+  }
+
+  isBootWarm() {
+    return !!this.world?.isBootWarm?.();
   }
 
   resize(w, h) {
@@ -3705,7 +3757,7 @@ export default class Game {
 
     let walkable = false;
     for (const rect of layout.walkRects || []) {
-      if (insideRect(rect, rect.kind === "room" ? 2 : 1)) {
+      if (insideRect(rect, rect.kind === "room" ? 0 : 0)) {
         walkable = true;
         break;
       }
@@ -3718,7 +3770,7 @@ export default class Game {
 
     for (const door of layout.doors || []) {
       if (door.open) continue;
-      if (insideRect(door.blocker, 0)) return false;
+      if (insideRect(door.blocker, 2)) return false;
     }
     return true;
   }
@@ -4154,6 +4206,139 @@ export default class Game {
           item.affix = "bound";
           this.hero.inventory.push(item);
           this._msg("Ward charm crafted", 1.2);
+        },
+      },
+      {
+        id: "hunter-wraps",
+        name: "Hunter Wraps",
+        color: "#d8b992",
+        desc: "Leather wrappings that toughen long marches and quick turns.",
+        requires: { hide: 6, herb: 2 },
+        resultText: "Crafts 1 uncommon boots",
+        craft: () => {
+          const item = makeGear("boots", Math.max(level, 3), "uncommon", hash2(this.seed, level, this.time | 0, 205));
+          item.name = "Hunter Wraps";
+          item.affix = "scouted";
+          this.hero.inventory.push(item);
+          this._msg("Hunter wraps crafted", 1.2);
+        },
+      },
+      {
+        id: "quicksilver-ring",
+        name: "Quicksilver Ring",
+        color: "#dfe9ff",
+        desc: "A light silver band that sharpens movement and critical timing.",
+        requires: { ore: 3, essence: 2, scrap: 2 },
+        resultText: "Crafts 1 uncommon ring",
+        craft: () => {
+          const item = makeGear("ring", Math.max(level, 3), "uncommon", hash2(this.seed, level, this.time | 0, 206));
+          item.name = "Quicksilver Ring";
+          item.affix = "nimble";
+          this.hero.inventory.push(item);
+          this._msg("Quicksilver ring crafted", 1.2);
+        },
+      },
+      {
+        id: "campfire-kit",
+        name: "Campfire Kit",
+        color: "#ffcb8e",
+        desc: "Scrap and herb bundles packed into a quick field-rest supply.",
+        requires: { herb: 2, scrap: 2, hide: 1 },
+        resultText: "Grants 1 health potion and 1 mana potion",
+        craft: () => {
+          this.hero.potions.hp = (this.hero.potions.hp || 0) + 1;
+          this.hero.potions.mana = (this.hero.potions.mana || 0) + 1;
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Campfire kit", "#ffcb8e");
+          this._msg("Campfire kit packed", 1.0);
+        },
+      },
+      {
+        id: "rune-lantern",
+        name: "Rune Lantern",
+        color: "#b9e5ff",
+        desc: "A relic lamp for deeper delves and steadier dungeon footing.",
+        requires: { essence: 4, ore: 2, hide: 2 },
+        resultText: "Crafts 1 rare trinket",
+        craft: () => {
+          const item = makeGear("trinket", Math.max(level, 4), "rare", hash2(this.seed, level, this.time | 0, 207));
+          item.name = "Rune Lantern";
+          item.affix = "delver's";
+          this.hero.inventory.push(item);
+          this._msg("Rune lantern crafted", 1.2);
+        },
+      },
+      {
+        id: "surveyor-kit",
+        name: "Surveyor Kit",
+        color: "#9ad7ff",
+        desc: "Charts the land ahead and uncovers a safer patch of the world map.",
+        requires: { herb: 1, scrap: 2, ore: 1 },
+        resultText: "Reveals the nearby map",
+        craft: () => {
+          this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Surveyed", "#9ad7ff");
+          this._msg("Surveyor kit used", 1.0);
+        },
+      },
+      {
+        id: "brigandine",
+        name: "Reinforced Brigandine",
+        color: "#e1c9ab",
+        desc: "A stronger field cuirass pieced together from hide, ore, and salvage.",
+        requires: { hide: 7, ore: 3, scrap: 4 },
+        resultText: "Crafts 1 uncommon armor",
+        craft: () => {
+          const item = makeGear("armor", Math.max(level, 4), "uncommon", hash2(this.seed, level, this.time | 0, 208));
+          item.name = "Reinforced Brigandine";
+          item.affix = "layered";
+          this.hero.inventory.push(item);
+          this._msg("Reinforced brigandine crafted", 1.2);
+        },
+      },
+      {
+        id: "wayfarer-ration",
+        name: "Wayfarer Ration",
+        color: "#f1d39c",
+        desc: "Packed herbs and hide strips that steady you for the next hard march.",
+        requires: { herb: 2, hide: 2 },
+        resultText: "Restores health and mana",
+        craft: () => {
+          const hpGain = Math.max(16, Math.round((this.hero.maxHp || 100) * 0.18));
+          const manaGain = Math.max(10, Math.round((this.hero.maxMana || 60) * 0.22));
+          this.hero.hp = Math.min(this.hero.maxHp || 100, (this.hero.hp || 0) + hpGain);
+          this.hero.mana = Math.min(this.hero.maxMana || 60, (this.hero.mana || 0) + manaGain);
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Rations", "#f1d39c");
+          this._msg("Wayfarer ration consumed", 1.0);
+        },
+      },
+      {
+        id: "river-knife",
+        name: "River Knife",
+        color: "#d9ebff",
+        desc: "A slim blade balanced for quick cuts and clean finishing strikes.",
+        requires: { scrap: 4, ore: 4, essence: 1 },
+        resultText: "Crafts 1 uncommon weapon",
+        craft: () => {
+          const item = makeGear("weapon", Math.max(level, 4), "uncommon", hash2(this.seed, level, this.time | 0, 209));
+          item.name = "River Knife";
+          item.affix = "nimble";
+          this.hero.inventory.push(item);
+          this._msg("River Knife crafted", 1.2);
+        },
+      },
+      {
+        id: "warden-seal",
+        name: "Warden Seal",
+        color: "#d8d0ff",
+        desc: "A stamped charm that hardens resolve for rough crossings and longer fights.",
+        requires: { essence: 3, scrap: 2, ore: 2 },
+        resultText: "Crafts 1 rare ring",
+        craft: () => {
+          const item = makeGear("ring", Math.max(level, 5), "rare", hash2(this.seed, level, this.time | 0, 210));
+          item.name = "Warden Seal";
+          item.affix = "steadfast";
+          this.hero.inventory.push(item);
+          this._msg("Warden seal crafted", 1.2);
         },
       },
     ];
@@ -4713,34 +4898,9 @@ export default class Game {
     for (const rect of layout?.corridors || []) {
       const gx = rect.x - rect.w * 0.5;
       const gy = rect.y - rect.h * 0.5;
-      const g = ctx.createLinearGradient(gx, gy, gx, gy + rect.h);
-      g.addColorStop(0, theme.floor1);
-      g.addColorStop(1, theme.floor2);
-      ctx.fillStyle = g;
-      ctx.fillRect(gx, gy, rect.w, rect.h);
+      this._drawDungeonStoneFloor(ctx, gx, gy, rect.w, rect.h, theme, rect, rect.orientation === "h" ? 0.92 : 0.88);
       this._drawDungeonCorridorWalls(ctx, rect, theme);
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(gx + 1, gy + 1, rect.w - 2, rect.h - 2);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.035)";
-      ctx.lineWidth = 1;
-      if (rect.orientation === "h") {
-        for (let x = gx + 26; x < gx + rect.w - 10; x += 30) {
-          ctx.beginPath();
-          ctx.moveTo(x, gy + 9);
-          ctx.lineTo(x, gy + rect.h - 9);
-          ctx.stroke();
-        }
-      } else {
-        for (let y = gy + 26; y < gy + rect.h - 10; y += 30) {
-          ctx.beginPath();
-          ctx.moveTo(gx + 9, y);
-          ctx.lineTo(gx + rect.w - 9, y);
-          ctx.stroke();
-        }
-      }
-
+      this._drawDungeonGrime(ctx, gx, gy, rect.w, rect.h, rect.seed || rect.id || `${rect.x}|${rect.y}`);
       this._drawDungeonDecor(ctx, rect.decor, theme);
     }
 
@@ -4748,47 +4908,18 @@ export default class Game {
       const gx = r.x - r.w * 0.5;
       const gy = r.y - r.h * 0.5;
       const bossRoom = r.type === "boss";
-      const g = ctx.createLinearGradient(gx, gy, gx, gy + r.h);
-      g.addColorStop(0, bossRoom ? "#332129" : r.type === "start" ? "#262d37" : theme.floor0);
-      g.addColorStop(0.55, bossRoom ? "#251922" : theme.floor1);
-      g.addColorStop(1, theme.floor2);
-      ctx.fillStyle = g;
-      ctx.fillRect(gx, gy, r.w, r.h);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.03)";
-      ctx.lineWidth = 1;
-      const tile = bossRoom ? 42 : 34;
-      for (let x = gx + 18; x < gx + r.w - 10; x += tile) {
-        ctx.beginPath();
-        ctx.moveTo(x, gy + 20);
-        ctx.lineTo(x, gy + r.h - 20);
-        ctx.stroke();
-      }
-      for (let y = gy + 18; y < gy + r.h - 10; y += tile) {
-        ctx.beginPath();
-        ctx.moveTo(gx + 20, y);
-        ctx.lineTo(gx + r.w - 20, y);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = bossRoom ? "rgba(255,111,80,0.05)" : r === room ? "rgba(139,233,255,0.05)" : theme.haze;
-      for (let i = 0; i < 5; i++) {
-        const px = gx + 70 + ((i * 127 + (r.id.length * 31)) % Math.max(90, r.w - 140));
-        const py = gy + 60 + ((i * 79 + (r.id.length * 53)) % Math.max(90, r.h - 120));
-        ctx.beginPath();
-        ctx.ellipse(px, py, 28 + (i % 2) * 12, 10 + (i % 3) * 5, (i * 0.5) % Math.PI, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      this._drawDungeonStoneFloor(ctx, gx, gy, r.w, r.h, theme, r, bossRoom ? 1.02 : r === room ? 0.96 : 0.90);
+      this._drawDungeonGrime(ctx, gx, gy, r.w, r.h, r.id || `${r.x}|${r.y}`);
 
       this._drawDungeonDecor(ctx, r.decor, theme);
       this._drawDungeonRoomWalls(ctx, r, theme, r === room);
 
-      ctx.strokeStyle = r === room ? "rgba(139,233,255,0.44)" : bossRoom ? "rgba(255,138,92,0.30)" : "rgba(255,255,255,0.06)";
+      ctx.strokeStyle = r === room ? "rgba(182,144,96,0.24)" : bossRoom ? "rgba(255,138,92,0.24)" : "rgba(255,255,255,0.04)";
       ctx.lineWidth = r === room ? 3 : 2;
       ctx.strokeRect(gx + 8, gy + 8, r.w - 16, r.h - 16);
 
-      ctx.fillStyle = "#eef4fb";
-      ctx.font = "bold 12px Arial";
+      ctx.fillStyle = "rgba(233,223,206,0.84)";
+      ctx.font = "bold 11px Arial";
       ctx.textAlign = "left";
       ctx.fillText(this._titleCase(r.type), gx + 28, gy + 28);
 
@@ -4796,7 +4927,7 @@ export default class Game {
         const cache = this._getDungeonRoomCacheAnchor(r);
         ctx.fillStyle = r.type === "key" ? "rgba(139,233,255,0.18)" : r.type === "loot" ? "rgba(255,214,110,0.18)" : "rgba(160,255,176,0.16)";
         ctx.fillRect(cache.x - 18, cache.y - 12, 36, 24);
-        ctx.strokeStyle = r.type === "key" ? "#8be9ff" : r.type === "loot" ? "#ffd86e" : "#b8f59e";
+        ctx.strokeStyle = r.type === "key" ? "#d7c18a" : r.type === "loot" ? "#ffd86e" : "#b8f59e";
         ctx.lineWidth = 2;
         ctx.strokeRect(cache.x - 17.5, cache.y - 11.5, 35, 23);
         ctx.fillStyle = "#f4fbff";
@@ -4807,43 +4938,54 @@ export default class Game {
     }
 
     for (const door of layout?.doors || []) {
-      const frameW = door.vertical ? 22 : (door.blocker.w || 22) + 8;
-      const frameH = door.vertical ? (door.blocker.h || 58) + 8 : 22;
-      const leafW = door.vertical ? 14 : Math.max(18, frameW - 10);
-      const leafH = door.vertical ? Math.max(18, frameH - 10) : 14;
-      ctx.fillStyle = "rgba(18,13,20,0.96)";
-      ctx.fillRect(door.x - frameW * 0.5, door.y - frameH * 0.5, frameW, frameH);
-      ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : door.open ? "#8be9ff" : "#dc7cff";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(door.x - frameW * 0.5 + 0.5, door.y - frameH * 0.5 + 0.5, frameW - 1, frameH - 1);
+      const blocker = door.blocker || { x: door.x, y: door.y, w: 16, h: 16 };
+      const frameW = door.vertical ? 28 : Math.max(22, (door.frameSpan || blocker.w || 22) + 12);
+      const frameH = door.vertical ? Math.max(22, (door.frameSpan || blocker.h || 58) + 12) : 28;
+      const leafW = door.vertical ? 16 : Math.max(18, frameW - 14);
+      const leafH = door.vertical ? Math.max(18, frameH - 14) : 16;
+      const frameX = door.vertical ? blocker.x : door.x;
+      const frameY = door.vertical ? door.y : blocker.y;
+      ctx.fillStyle = "rgba(18,13,20,0.98)";
+      ctx.fillRect(frameX - frameW * 0.5, frameY - frameH * 0.5, frameW, frameH);
+      ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : door.open ? "#caa46b" : "#9a8674";
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(frameX - frameW * 0.5 + 0.5, frameY - frameH * 0.5 + 0.5, frameW - 1, frameH - 1);
+      ctx.fillStyle = "rgba(74,56,39,0.96)";
+      if (door.vertical) {
+        ctx.fillRect(frameX - frameW * 0.5 + 4, frameY - frameH * 0.5, 5, frameH);
+        ctx.fillRect(frameX + frameW * 0.5 - 9, frameY - frameH * 0.5, 5, frameH);
+      } else {
+        ctx.fillRect(frameX - frameW * 0.5, frameY - frameH * 0.5 + 4, frameW, 5);
+        ctx.fillRect(frameX - frameW * 0.5, frameY + frameH * 0.5 - 9, frameW, 5);
+      }
 
       if (!door.open) {
         ctx.fillStyle = door.locked === "key" ? "rgba(126,84,26,0.95)" : "rgba(83,56,38,0.95)";
-        ctx.fillRect(door.x - leafW * 0.5, door.y - leafH * 0.5, leafW, leafH);
+        ctx.fillRect(blocker.x - blocker.w * 0.5, blocker.y - blocker.h * 0.5, blocker.w, blocker.h);
         ctx.strokeStyle = door.locked === "key" ? "#ffd86e" : "#c8a27d";
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(door.x - leafW * 0.5 + 0.5, door.y - leafH * 0.5 + 0.5, leafW - 1, leafH - 1);
+        ctx.strokeRect(blocker.x - blocker.w * 0.5 + 0.5, blocker.y - blocker.h * 0.5 + 0.5, blocker.w - 1, blocker.h - 1);
         if (door.vertical) {
           ctx.beginPath();
-          ctx.moveTo(door.x, door.y - leafH * 0.5 + 3);
-          ctx.lineTo(door.x, door.y + leafH * 0.5 - 3);
+          ctx.moveTo(blocker.x, blocker.y - blocker.h * 0.5 + 3);
+          ctx.lineTo(blocker.x, blocker.y + blocker.h * 0.5 - 3);
           ctx.stroke();
         } else {
           ctx.beginPath();
-          ctx.moveTo(door.x - leafW * 0.5 + 3, door.y);
-          ctx.lineTo(door.x + leafW * 0.5 - 3, door.y);
+          ctx.moveTo(blocker.x - blocker.w * 0.5 + 3, blocker.y);
+          ctx.lineTo(blocker.x + blocker.w * 0.5 - 3, blocker.y);
           ctx.stroke();
         }
       } else {
-        ctx.fillStyle = "rgba(139,233,255,0.12)";
-        ctx.fillRect(door.x - leafW * 0.5, door.y - leafH * 0.5, leafW, leafH);
+        ctx.fillStyle = "rgba(212,182,128,0.07)";
+        ctx.fillRect(blocker.x - blocker.w * 0.5, blocker.y - blocker.h * 0.5, blocker.w, blocker.h);
       }
 
-      ctx.fillStyle = door.open ? "rgba(218,246,255,0.76)" : door.locked === "key" ? "#ffe6a8" : "#f0d0ff";
+      ctx.fillStyle = door.open ? "rgba(244,226,188,0.76)" : door.locked === "key" ? "#ffe6a8" : "#d8c2b0";
       ctx.font = "bold 9px Arial";
       ctx.textAlign = "center";
-      const labelY = door.vertical ? door.y - frameH * 0.5 - 8 : door.y - 13;
-      ctx.fillText(door.open ? "OPEN" : door.locked === "key" ? "KEY" : "SEALED", door.x, labelY);
+      const labelY = door.vertical ? frameY - frameH * 0.5 - 8 : frameY - 13;
+      ctx.fillText(door.open ? "OPEN" : door.locked === "key" ? "KEY" : "SEALED", frameX, labelY);
     }
 
     const ret = layout?.returnStair;
@@ -5906,6 +6048,24 @@ export default class Game {
       price: 24,
       data: { material: "scrap", amount: 2 },
     });
+    items.push({
+      kind: "material",
+      name: "Ore Satchel",
+      price: 30,
+      data: { material: "ore", amount: 2 },
+    });
+    items.push({
+      kind: "material",
+      name: "Tanner Hide Roll",
+      price: 28,
+      data: { material: "hide", amount: 2 },
+    });
+    items.push({
+      kind: "material",
+      name: "Essence Phial",
+      price: 42,
+      data: { material: "essence", amount: 1 },
+    });
     this._openShop(merchantNode, { items, discount: 0, skipCampProgress: true });
   }
 
@@ -6395,6 +6555,7 @@ export default class Game {
     this.dungeon.roomRewarded = false;
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
     this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
     this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
     const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + 150 };
@@ -6423,6 +6584,7 @@ export default class Game {
     this.dungeon.roomRewarded = false;
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
     this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
     this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
     const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + this.dungeon.room.h * 0.28 };
@@ -6492,43 +6654,45 @@ export default class Game {
       if (Math.abs(a.y - b.y) < 20) {
         const left = a.x < b.x ? a : b;
         const right = left === a ? b : a;
-        const startX = left.x + left.w * 0.5 - 26;
-        const endX = right.x - right.w * 0.5 + 26;
-        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(56, endX - startX), h: 86, kind: "corridor", rooms: [a.id, b.id] };
+        const startX = left.x + left.w * 0.5 - 18;
+        const endX = right.x - right.w * 0.5 + 18;
+        corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(44, endX - startX), h: 82, kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
           b: b.id,
-          x: corridor.x,
-          y: corridor.y,
+          x: left.x + left.w * 0.5 - 7,
+          y: left.y,
           vertical: true,
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: 20, h: corridor.h - 16 },
+          blocker: { x: left.x + left.w * 0.5 - 7, y: left.y, w: 12, h: corridor.h - 20 },
+          frameSpan: corridor.h - 10,
         };
-        addOpening(left, "right", left.y, corridor.h + 8);
-        addOpening(right, "left", right.y, corridor.h + 8);
+        addOpening(left, "right", left.y, corridor.h + 2);
+        addOpening(right, "left", right.y, corridor.h + 2);
       } else {
         const top = a.y < b.y ? a : b;
         const bottom = top === a ? b : a;
-        const startY = top.y + top.h * 0.5 - 26;
-        const endY = bottom.y - bottom.h * 0.5 + 26;
-        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 86, h: Math.max(56, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
+        const startY = top.y + top.h * 0.5 - 18;
+        const endY = bottom.y - bottom.h * 0.5 + 18;
+        corridor = { x: top.x, y: (startY + endY) * 0.5, w: 82, h: Math.max(44, endY - startY), kind: "corridor", rooms: [a.id, b.id] };
         door = {
           id: `${a.id}_${b.id}`,
           a: a.id,
           b: b.id,
-          x: corridor.x,
-          y: corridor.y,
+          x: top.x,
+          y: top.y + top.h * 0.5 - 7,
           vertical: false,
           open: locked === "none",
           locked,
           label,
-          blocker: { x: corridor.x, y: corridor.y, w: corridor.w - 16, h: 20 },
+          blocker: { x: top.x, y: top.y + top.h * 0.5 - 7, w: corridor.w - 20, h: 12 },
+          frameSpan: corridor.w - 10,
         };
-        addOpening(top, "bottom", top.x, corridor.w + 8);
-        addOpening(bottom, "top", bottom.x, corridor.w + 8);
+        addOpening(top, "bottom", top.x, corridor.w + 2);
+        addOpening(bottom, "top", bottom.x, corridor.w + 2);
       }
       corridor.orientation = door.vertical ? "h" : "v";
       corridor.decor = [];
@@ -6777,7 +6941,7 @@ export default class Game {
       const right = room.x + room.w * 0.5;
       const top = room.y - room.h * 0.5;
       const bottom = room.y + room.h * 0.5;
-      const wall = 14;
+      const wall = 8;
       const openingsBySide = { top: [], right: [], bottom: [], left: [] };
       for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
 
@@ -6814,17 +6978,69 @@ export default class Game {
     }
 
     for (const corridor of layout.corridors || []) {
-      const wall = 10;
+      const wall = 6;
+      const trim = 28;
       if (corridor.orientation === "h") {
-        addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, corridor.w, wall);
-        addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, corridor.w, wall);
+        addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, Math.max(10, corridor.w - trim * 2), wall);
+        addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, Math.max(10, corridor.w - trim * 2), wall);
       } else {
-        addRect(corridor.x - corridor.w * 0.5 + wall * 0.5, corridor.y, wall, corridor.h);
-        addRect(corridor.x + corridor.w * 0.5 - wall * 0.5, corridor.y, wall, corridor.h);
+        addRect(corridor.x - corridor.w * 0.5 + wall * 0.5, corridor.y, wall, Math.max(10, corridor.h - trim * 2));
+        addRect(corridor.x + corridor.w * 0.5 - wall * 0.5, corridor.y, wall, Math.max(10, corridor.h - trim * 2));
       }
     }
 
     return blocked;
+  }
+
+  _drawDungeonStoneFloor(ctx, gx, gy, w, h, theme, seedRef, tone = 0.92) {
+    const g = ctx.createLinearGradient(gx, gy, gx, gy + h);
+    g.addColorStop(0, this._shadeHex(theme.floor0 || "#252830", 0.02 * tone));
+    g.addColorStop(0.55, this._shadeHex(theme.floor1 || "#1a1f27", -0.01));
+    g.addColorStop(1, this._shadeHex(theme.floor2 || "#12161d", -0.04));
+    ctx.fillStyle = g;
+    ctx.fillRect(gx, gy, w, h);
+
+    const seed = typeof seedRef === "string" ? seedRef.length * 97 : ((seedRef?.x || 0) ^ (seedRef?.y || 0) ^ (seedRef?.w || 0));
+    for (let yy = gy + 16; yy < gy + h - 12; yy += 24) {
+      for (let xx = gx + 16; xx < gx + w - 12; xx += 28) {
+        const jitter = hash2(seed, xx | 0, yy | 0);
+        const rw = 18 + (Math.abs(jitter) % 12);
+        const rh = 10 + (Math.abs(jitter >> 2) % 8);
+        const jx = (jitter & 15) - 7;
+        const jy = ((jitter >> 4) & 15) - 7;
+        ctx.fillStyle = (jitter & 1) ? "rgba(255,255,255,0.025)" : "rgba(0,0,0,0.08)";
+        ctx.fillRect(xx + jx, yy + jy, rw, rh);
+      }
+    }
+  }
+
+  _drawDungeonGrime(ctx, gx, gy, w, h, seedRef) {
+    const seed = typeof seedRef === "string" ? seedRef.length * 131 : ((seedRef?.x || 0) ^ (seedRef?.y || 0));
+    ctx.fillStyle = "rgba(0,0,0,0.16)";
+    ctx.fillRect(gx, gy, w, 10);
+    ctx.fillRect(gx, gy + h - 12, w, 12);
+    ctx.fillRect(gx, gy, 10, h);
+    ctx.fillRect(gx + w - 12, gy, 12, h);
+    for (let i = 0; i < 5; i++) {
+      const px = gx + 36 + (Math.abs(hash2(seed, i, 17)) % Math.max(24, Math.round(w - 72)));
+      const py = gy + 32 + (Math.abs(hash2(seed, i, 41)) % Math.max(24, Math.round(h - 64)));
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.10)";
+      ctx.beginPath();
+      ctx.ellipse(px, py, 24 + (i % 3) * 10, 10 + (i % 2) * 5, (i * 0.45) % Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  _shadeHex(hex, amount = 0) {
+    const raw = String(hex || "#000000").replace("#", "");
+    const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+    const n = Number.parseInt(full, 16);
+    if (!Number.isFinite(n)) return hex || "#000000";
+    const shift = Math.round(clamp(amount, -0.5, 0.5) * 255);
+    const r = clamp(((n >> 16) & 255) + shift, 0, 255) | 0;
+    const g = clamp(((n >> 8) & 255) + shift, 0, 255) | 0;
+    const b = clamp((n & 255) + shift, 0, 255) | 0;
+    return `rgb(${r},${g},${b})`;
   }
 
   _getDungeonRoom(id = this.dungeon.currentRoomId) {
@@ -6837,8 +7053,8 @@ export default class Game {
     const top = room.y - room.h * 0.5;
     const bottom = room.y + room.h * 0.5;
     const wall = 14;
-    const edge = active ? "rgba(139,233,255,0.60)" : theme.accent;
-    const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(14,17,22,0.94)";
+    const edge = active ? "rgba(215,184,126,0.56)" : "rgba(112,88,61,0.48)";
+    const face = room.type === "boss" ? "rgba(24,14,18,0.96)" : "rgba(20,17,15,0.94)";
 
     const openingsBySide = { top: [], right: [], bottom: [], left: [] };
     for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
@@ -6903,13 +7119,13 @@ export default class Game {
     const gx = rect.x - rect.w * 0.5;
     const gy = rect.y - rect.h * 0.5;
     const wall = 10;
-    const face = "rgba(13,16,22,0.95)";
+    const face = "rgba(22,18,15,0.95)";
 
     if (rect.orientation === "h") {
       ctx.fillStyle = face;
       ctx.fillRect(gx, gy, rect.w, wall);
       ctx.fillRect(gx, gy + rect.h - wall, rect.w, wall);
-      ctx.strokeStyle = theme.accent;
+      ctx.strokeStyle = "rgba(120,92,64,0.44)";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(gx + 4, gy + 1.5);
@@ -6921,7 +7137,7 @@ export default class Game {
       ctx.fillStyle = face;
       ctx.fillRect(gx, gy, wall, rect.h);
       ctx.fillRect(gx + rect.w - wall, gy, wall, rect.h);
-      ctx.strokeStyle = theme.accent;
+      ctx.strokeStyle = "rgba(120,92,64,0.44)";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(gx + 1.5, gy + 4);
@@ -7134,7 +7350,12 @@ export default class Game {
   }
 
   _spawnDungeonWave(room = this._getDungeonRoom()) {
-    if (!room || room.type === "start") return;
+    const enemies = this._makeDungeonWaveEnemies(room);
+    if (enemies.length) this.enemies.push(...enemies);
+  }
+
+  _makeDungeonWaveEnemies(room = this._getDungeonRoom()) {
+    if (!room || room.type === "start") return [];
     const floor = Math.max(1, this.dungeon.floor || 1);
     const theme = this._dungeonTheme(floor);
     const roomSeed = hash2(this.seed, floor, room.id.length, room.x | 0, room.y | 0);
@@ -7165,11 +7386,38 @@ export default class Game {
       }
     }
 
-    this.enemies.push(...enemies);
+    return enemies;
+  }
+
+  _queueDungeonWave(room = this._getDungeonRoom()) {
+    const enemies = this._makeDungeonWaveEnemies(room);
+    if (!enemies?.length) return;
+    let delay = 0;
+    for (const enemy of enemies) {
+      this.dungeon.spawnQueue.push({ enemy, delay, roomId: room.id });
+      delay += enemy?.boss ? 0.12 : 0.05;
+    }
+  }
+
+  _processDungeonSpawnQueue(dt) {
+    const queue = this.dungeon?.spawnQueue;
+    if (!this.dungeon?.active || !queue?.length) return;
+    let spawned = 0;
+    for (let i = 0; i < queue.length && spawned < 2;) {
+      queue[i].delay -= dt;
+      if (queue[i].delay > 0) {
+        i++;
+        continue;
+      }
+      this.enemies.push(queue[i].enemy);
+      queue.splice(i, 1);
+      spawned++;
+    }
   }
 
   _updateDungeonState(dt) {
     if (!this.dungeon.active || !this.dungeon.layout) return;
+    this._processDungeonSpawnQueue(dt);
 
     const roomAtHero = this._findDungeonRoomAt(this.hero.x, this.hero.y, 18);
     if (roomAtHero && roomAtHero.id !== this.dungeon.currentRoomId) {
@@ -7187,7 +7435,7 @@ export default class Game {
 
     if (!room.spawned) {
       room.spawned = true;
-      this._spawnDungeonWave(room);
+      this._queueDungeonWave(room);
     }
 
     const alive = this._dungeonHasLivingEnemies(room.id);
@@ -7255,6 +7503,7 @@ export default class Game {
     this.dungeon.currentRoomId = null;
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
 
     this.camera.x = this.hero.x;
     this.camera.y = this.hero.y;
@@ -8147,6 +8396,7 @@ if (!ctx) {
 }
 const bootLoading = document.getElementById("boot-loading");
 const bootLoadingStatus = document.getElementById("boot-loading-status");
+const bootLoadingPercent = document.getElementById("boot-loading-percent");
 
 let game = null;
 let rafId = 0;
@@ -8159,6 +8409,10 @@ let resizeQueued = false;
 let renderScale = 1;
 let frameEmaMs = 16.67;
 let dynamicScaleCooldown = 0;
+let bootVisualProgress = 0;
+let bootTargetProgress = 0;
+let bootLoadingShownAt = 0;
+const BOOT_MIN_VISIBLE_MS = 1350;
 
 const STEP = 1 / 60;
 const MAX_FRAME = 0.05;
@@ -8289,9 +8543,42 @@ function setBootLoadingStatus(text) {
   if (bootLoadingStatus) bootLoadingStatus.textContent = text;
 }
 
+function clamp01(v) {
+  return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+}
+
+function setBootLoadingPercent(progress = 0) {
+  const p = clamp01(progress);
+  if (bootLoadingPercent) bootLoadingPercent.textContent = `${Math.round(p * 100)}%`;
+  const card = bootLoading?.querySelector?.(".boot-card");
+  if (card) card.style.setProperty("--boot-progress", `${Math.round(p * 100)}%`);
+}
+
+function setBootLoadingTarget(progress = 0, immediate = false) {
+  bootTargetProgress = Math.max(bootTargetProgress, clamp01(progress));
+  if (immediate) {
+    bootVisualProgress = bootTargetProgress;
+    setBootLoadingPercent(bootVisualProgress);
+  }
+}
+
+function tickBootLoadingVisual(dt = STEP) {
+  if (!bootLoading || bootLoading.style.display === "none") return;
+  const gap = bootTargetProgress - bootVisualProgress;
+  if (gap <= 0.0005) return;
+  const maxStep = Math.max(0.004, dt * 0.18);
+  const easedStep = Math.max(maxStep, gap * 0.1);
+  bootVisualProgress = Math.min(bootTargetProgress, bootVisualProgress + easedStep);
+  setBootLoadingPercent(bootVisualProgress);
+}
+
 function showBootLoading(text = "Building the world...") {
   if (!bootLoading) return;
   setBootLoadingStatus(text);
+  bootVisualProgress = 0;
+  bootTargetProgress = 0;
+  bootLoadingShownAt = performance.now();
+  setBootLoadingPercent(0);
   bootLoading.classList.remove("is-hidden");
   bootLoading.style.display = "flex";
 }
@@ -8342,10 +8629,22 @@ function tick(now) {
 
     render();
     game?.noteFrame?.(frame);
+    updateBootLoadingProgress();
+    tickBootLoadingVisual(frame);
     maybeAdjustRenderScale();
   } catch (err) {
     showFatalError(err);
   }
+}
+
+function updateBootLoadingProgress() {
+  if (!bootLoading || bootLoading.style.display === "none" || !game) return;
+  const progress = game.getBootProgress?.() ?? 1;
+  const status = game.getBootStatusText?.() || "Building the world...";
+  setBootLoadingStatus(status);
+  setBootLoadingTarget(progress);
+  const shownLongEnough = performance.now() - bootLoadingShownAt >= BOOT_MIN_VISIBLE_MS;
+  if ((game.isBootWarm?.() || progress >= 0.999) && bootVisualProgress >= 0.995 && shownLongEnough) hideBootLoading();
 }
 
 function maybeAdjustRenderScale() {
@@ -8403,25 +8702,39 @@ function boot() {
   if (booted) return;
   booted = true;
   showBootLoading("Preparing startup...");
+  setBootLoadingTarget(0.04, true);
   resizeCanvas();
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      try {
-        showBootLoading("Building the world...");
-        game = new Game(canvas);
+    setBootLoadingStatus("Reading your save...");
+    setBootLoadingTarget(0.12);
+    setTimeout(() => {
+      setBootLoadingStatus("Packing your gear...");
+      setBootLoadingTarget(0.22);
+      setTimeout(() => {
+        setBootLoadingStatus("Building the world...");
+        setBootLoadingTarget(0.34);
+        setTimeout(() => {
+          try {
+            game = new Game(canvas, {
+              onBootProgress: (status, progress) => {
+                setBootLoadingStatus(status || "Building the world...");
+                if (progress != null) setBootLoadingTarget(progress);
+              },
+            });
 
-        if (game?.resize) {
-          const { w, h } = getCssSize();
-          game.resize(w, h);
-        }
+            if (game?.resize) {
+              const { w, h } = getCssSize();
+              game.resize(w, h);
+            }
 
-        hideBootLoading();
-        focusCanvas();
-        startLoop();
-      } catch (err) {
-        showFatalError(err);
-      }
-    });
+            focusCanvas();
+            startLoop();
+          } catch (err) {
+            showFatalError(err);
+          }
+        }, 220);
+      }, 180);
+    }, 120);
   });
 }
 
@@ -8471,6 +8784,815 @@ window.addEventListener("beforeunload", () => {
 canvas.addEventListener("mousedown", () => {
   focusCanvas();
 });
+
+
+===== ./src/main3d.js =====
+import World3DApp from "./render3d/world3d.js";
+
+const canvas = document.getElementById("three-canvas");
+if (!canvas) {
+  throw new Error('Missing <canvas id="three-canvas"> in index-3d.html');
+}
+
+const app = new World3DApp(canvas, {
+  summaryEl: document.getElementById("three-summary"),
+  seedEl: document.getElementById("hud-seed"),
+  heroEl: document.getElementById("hud-hero"),
+  roadsEl: document.getElementById("hud-roads"),
+  riversEl: document.getElementById("hud-rivers"),
+  bridgesEl: document.getElementById("hud-bridges"),
+  townsEl: document.getElementById("hud-towns"),
+  recenterBtn: document.getElementById("recenter-camera"),
+});
+
+window.addEventListener("error", (event) => {
+  console.error("Broke Knight 3D crashed:", event.error || event.message || event);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("Broke Knight 3D promise rejection:", event.reason || event);
+});
+
+app.start();
+
+
+===== ./src/render3d/world3d.js =====
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+import Save from "../save.js";
+import World from "../world.js";
+
+const SAVE_KEY = "broke-knight-save-v106";
+const TERRAIN_SIZE = 24000;
+const TERRAIN_SEGMENTS = 168;
+const RIVER_SAMPLE_STRIDE = 4;
+const ROAD_SAMPLE_STRIDE = 3;
+const WALK_SPEED = 560;
+const RUN_SPEED = 920;
+const FOLLOW_LERP = 0.16;
+
+export default class World3DApp {
+  constructor(canvas, ui = {}) {
+    this.canvas = canvas;
+    this.ui = ui;
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance",
+    });
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x0a1118);
+    this.scene.fog = new THREE.FogExp2(0x0a1118, 0.00007);
+
+    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 8, 60000);
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.maxPolarAngle = Math.PI * 0.46;
+    this.controls.minDistance = 260;
+    this.controls.maxDistance = 7200;
+    this.controls.screenSpacePanning = false;
+
+    this.clock = new THREE.Clock();
+    this.rafId = 0;
+    this.world = null;
+    this.save = new Save(SAVE_KEY);
+    this.saveData = null;
+    this.hero = { x: 0, y: 0 };
+    this.heroMarker = null;
+    this.heroHeading = 0;
+    this.keys = new Set();
+    this.lastSaveAt = 0;
+
+    this.resize = this.resize.bind(this);
+    this.animate = this.animate.bind(this);
+    this.recenter = this.recenter.bind(this);
+    this.onKeyDown = this.onKeyDown.bind(this);
+    this.onKeyUp = this.onKeyUp.bind(this);
+  }
+
+  start() {
+    this.saveData = this.save.load() || null;
+    const seed = Number.isFinite(+this.saveData?.seed) ? this.saveData.seed | 0 : (Date.now() & 0x7fffffff);
+
+    this.world = new World(seed, {
+      viewW: window.innerWidth,
+      viewH: window.innerHeight,
+    });
+
+    this.hero.x = Number.isFinite(+this.saveData?.hero?.x) ? +this.saveData.hero.x : this.world.spawn.x;
+    this.hero.y = Number.isFinite(+this.saveData?.hero?.y) ? +this.saveData.hero.y : this.world.spawn.y;
+
+    this.buildScene();
+    this.updateHud();
+    this.recenter();
+
+    window.addEventListener("resize", this.resize);
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", () => this.keys.clear());
+    this.ui.recenterBtn?.addEventListener("click", this.recenter);
+    this.animate();
+  }
+
+  buildScene() {
+    this.scene.clear();
+    this.finishWorldWarmup();
+
+    this.addLights();
+    this.addSkyDome();
+    this.addTerrain();
+    this.addWater();
+    this.addRoads();
+    this.addRivers();
+    this.addBridges();
+    this.addDocks();
+    this.addSettlements();
+    this.addWorldProps();
+    this.addLandmarks();
+    this.addHeroMarker();
+  }
+
+  finishWorldWarmup() {
+    let guard = 0;
+    while (!this.world.isBootWarm?.() && guard < 8000) {
+      this.world.update?.();
+      guard++;
+    }
+  }
+
+  addLights() {
+    const ambient = new THREE.HemisphereLight(0xb7d7ff, 0x3a3024, 1.1);
+    this.scene.add(ambient);
+
+    const sun = new THREE.DirectionalLight(0xfff2d7, 2.15);
+    sun.position.set(2600, 3800, 1400);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 400;
+    sun.shadow.camera.far = 9000;
+    sun.shadow.camera.left = -4200;
+    sun.shadow.camera.right = 4200;
+    sun.shadow.camera.top = 4200;
+    sun.shadow.camera.bottom = -4200;
+    this.scene.add(sun);
+  }
+
+  addSkyDome() {
+    const skyGeo = new THREE.SphereGeometry(28000, 32, 18);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms: {
+        topColor: { value: new THREE.Color(0x24384f) },
+        bottomColor: { value: new THREE.Color(0x091017) },
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 bottomColor;
+        varying vec3 vWorldPosition;
+        void main() {
+          float h = normalize(vWorldPosition + vec3(0.0, 2000.0, 0.0)).y;
+          float t = clamp(pow(max(h, 0.0), 0.75), 0.0, 1.0);
+          gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
+        }
+      `,
+      depthWrite: false,
+    });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    this.scene.add(sky);
+  }
+
+  addTerrain() {
+    const geometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+    geometry.rotateX(-Math.PI * 0.5);
+    const pos = geometry.attributes.position;
+    const colors = [];
+
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      const worldX = x;
+      const worldY = z;
+      const sample = this.world._sampleCell(worldX, worldY);
+      const height = this.heightAt(worldX, worldY, sample);
+      pos.setY(i, height);
+      const color = this.colorForSample(sample);
+      colors.push(color.r, color.g, color.b);
+    }
+
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.96,
+      metalness: 0.02,
+      flatShading: false,
+    });
+
+    const terrain = new THREE.Mesh(geometry, material);
+    terrain.receiveShadow = true;
+    terrain.castShadow = false;
+    this.scene.add(terrain);
+    this.terrainMesh = terrain;
+  }
+
+  addWater() {
+    const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 1, 1);
+    geo.rotateX(-Math.PI * 0.5);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x1b3f5f,
+      transparent: true,
+      opacity: 0.72,
+      roughness: 0.18,
+      metalness: 0.04,
+    });
+    const water = new THREE.Mesh(geo, mat);
+    water.position.y = 8;
+    this.scene.add(water);
+  }
+
+  addRoads() {
+    const group = new THREE.Group();
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x6a5236,
+      roughness: 1,
+      metalness: 0.01,
+    });
+    const wornMat = new THREE.MeshStandardMaterial({
+      color: 0xa98a63,
+      roughness: 0.95,
+      metalness: 0,
+    });
+
+    for (const road of this.world.roads || []) {
+      const pts = this.samplePolyline(road.points || [], ROAD_SAMPLE_STRIDE);
+      if (pts.length < 2) continue;
+      const curvePoints = pts.map((p) => this.toVec3(p.x, p.y, 18)).filter(Boolean);
+      if (curvePoints.length < 2) continue;
+      const curve = new THREE.CatmullRomCurve3(curvePoints);
+      const width = Math.max(6, (road.width || 28) * 0.28);
+
+      const roadTube = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, Math.max(16, curvePoints.length * 3), width, 6, false),
+        baseMat
+      );
+      roadTube.castShadow = true;
+      roadTube.receiveShadow = true;
+      group.add(roadTube);
+
+      const wornTube = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, Math.max(14, curvePoints.length * 2), width * 0.42, 5, false),
+        wornMat
+      );
+      wornTube.position.y += 0.8;
+      group.add(wornTube);
+    }
+
+    this.scene.add(group);
+  }
+
+  addRivers() {
+    const group = new THREE.Group();
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: 0x3c80c8,
+      emissive: 0x173352,
+      emissiveIntensity: 0.2,
+      roughness: 0.22,
+      metalness: 0.03,
+      transparent: true,
+      opacity: 0.9,
+    });
+
+    for (const band of this.world._riverBands || []) {
+      const rawPath = this.world._riverPath(band) || [];
+      const pts = this.samplePolyline(rawPath, RIVER_SAMPLE_STRIDE);
+      if (pts.length < 2) continue;
+      const curvePoints = pts.map((p) => this.toVec3(p.x, p.y, 12)).filter(Boolean);
+      if (curvePoints.length < 2) continue;
+      const curve = new THREE.CatmullRomCurve3(curvePoints);
+      const width = Math.max(6, this.world._riverVisualWidth?.(band) ? this.world._riverVisualWidth(band) * 0.24 : 10);
+      const mesh = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, Math.max(20, curvePoints.length * 3), width, 8, false),
+        waterMat
+      );
+      mesh.receiveShadow = false;
+      mesh.castShadow = false;
+      group.add(mesh);
+    }
+
+    this.scene.add(group);
+  }
+
+  addBridges() {
+    const group = new THREE.Group();
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x8c6943,
+      roughness: 0.93,
+      metalness: 0.02,
+    });
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0x5b4127,
+      roughness: 0.95,
+      metalness: 0.03,
+    });
+
+    for (const bridge of this.world.bridges || []) {
+      const length = Math.max(24, bridge.length || 80);
+      const width = Math.max(16, (bridge.width || 34) * 0.4);
+      const center = this.toVec3(bridge.cx, bridge.cy, 28);
+      const angle = -(bridge.angle || 0);
+
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(length, 5, width), woodMat);
+      deck.position.copy(center);
+      deck.rotation.y = angle;
+      deck.castShadow = true;
+      deck.receiveShadow = true;
+      group.add(deck);
+
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(length, 4, 2.2), railMat);
+        rail.position.copy(center);
+        rail.position.y += 5;
+        rail.rotation.y = angle;
+        const offset = new THREE.Vector3(0, 0, side * (width * 0.45));
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+        rail.position.add(offset);
+        group.add(rail);
+      }
+    }
+
+    this.scene.add(group);
+  }
+
+  addDocks() {
+    const group = new THREE.Group();
+    const dockMat = new THREE.MeshStandardMaterial({
+      color: 0x8a6b47,
+      roughness: 0.95,
+      metalness: 0.02,
+    });
+    const poleMat = new THREE.MeshStandardMaterial({
+      color: 0x5d4228,
+      roughness: 0.98,
+      metalness: 0.02,
+    });
+
+    for (const dock of this.world.docks || []) {
+      const pos = this.toVec3(dock.x, dock.y, 22);
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(44, 4, 26), dockMat);
+      deck.position.copy(pos);
+      deck.castShadow = true;
+      group.add(deck);
+
+      for (const side of [-1, 1]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 10, 6), poleMat);
+        post.position.set(pos.x + side * 18, pos.y - 3, pos.z + 9);
+        group.add(post);
+      }
+    }
+
+    this.scene.add(group);
+  }
+
+  addSettlements() {
+    const group = new THREE.Group();
+    const townMat = new THREE.MeshStandardMaterial({
+      color: 0xc4b18c,
+      roughness: 0.92,
+      metalness: 0.01,
+    });
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: 0x5f4030,
+      roughness: 0.96,
+      metalness: 0.01,
+    });
+    const campMat = new THREE.MeshStandardMaterial({
+      color: 0x7e674a,
+      roughness: 0.96,
+      metalness: 0.01,
+    });
+
+    const addHouse = (x, y, sx, sz, h) => {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(sx, h, sz), townMat);
+      body.position.copy(this.toVec3(x, y, h * 0.5 + 14));
+      body.castShadow = true;
+      body.receiveShadow = true;
+      group.add(body);
+
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(sx, sz) * 0.7, h * 0.58, 4), roofMat);
+      roof.position.copy(this.toVec3(x, y, h + 18));
+      roof.rotation.y = Math.PI * 0.25;
+      roof.castShadow = true;
+      group.add(roof);
+    };
+
+    if (this.world.startTown) {
+      addHouse(this.world.startTown.x, this.world.startTown.y, 120, 100, 58);
+      for (const building of this.world.startTown.buildings || []) {
+        addHouse(
+          this.world.startTown.x + (building.x || 0),
+          this.world.startTown.y + (building.y || 0),
+          Math.max(26, (building.w || 40) * 0.85),
+          Math.max(24, (building.h || 40) * 0.85),
+          34
+        );
+      }
+    }
+
+    for (const town of this.world.towns || []) {
+      addHouse(town.x, town.y, 70, 56, 38);
+    }
+
+    for (const camp of this.world.camps || []) {
+      const tent = new THREE.Mesh(new THREE.ConeGeometry(14, 18, 4), campMat);
+      tent.position.copy(this.toVec3(camp.x, camp.y, 18));
+      tent.rotation.y = Math.PI * 0.25;
+      tent.castShadow = true;
+      group.add(tent);
+    }
+
+    this.scene.add(group);
+  }
+
+  addLandmarks() {
+    const group = new THREE.Group();
+    const mats = {
+      waystone: new THREE.MeshStandardMaterial({ color: 0x7fe8ff, emissive: 0x174a5c, emissiveIntensity: 0.45, roughness: 0.65 }),
+      dungeon: new THREE.MeshStandardMaterial({ color: 0x5e3a76, emissive: 0x28113d, emissiveIntensity: 0.55, roughness: 0.9 }),
+      shrine: new THREE.MeshStandardMaterial({ color: 0xe6d8b6, emissive: 0x4d3a16, emissiveIntensity: 0.28, roughness: 0.72 }),
+      cache: new THREE.MeshStandardMaterial({ color: 0xd4a650, roughness: 0.62, metalness: 0.18 }),
+      herb: new THREE.MeshStandardMaterial({ color: 0x80d66e, emissive: 0x1b4818, emissiveIntensity: 0.2, roughness: 0.86 }),
+      secret: new THREE.MeshStandardMaterial({ color: 0xbfd7c8, emissive: 0x243a32, emissiveIntensity: 0.2, roughness: 0.8 }),
+      dragon: new THREE.MeshStandardMaterial({ color: 0x9d4434, emissive: 0x47150f, emissiveIntensity: 0.38, roughness: 0.82 }),
+    };
+
+    const addBeacon = (x, y, color, height = 140, radius = 7) => {
+      const beacon = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius * 0.45, height, 10, 1, true),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.26, depthWrite: false })
+      );
+      beacon.position.copy(this.toVec3(x, y, height * 0.5 + 28));
+      group.add(beacon);
+    };
+
+    for (const w of this.world.waystones || []) {
+      const stone = new THREE.Mesh(new THREE.ConeGeometry(16, 58, 5), mats.waystone);
+      stone.position.copy(this.toVec3(w.x, w.y, 42));
+      stone.castShadow = true;
+      group.add(stone);
+      addBeacon(w.x, w.y, 0x7fe8ff, 180, 5);
+    }
+
+    for (const d of this.world.dungeons || []) {
+      const gate = new THREE.Mesh(new THREE.TorusGeometry(32, 6, 10, 28), mats.dungeon);
+      gate.position.copy(this.toVec3(d.x, d.y, 48));
+      gate.rotation.x = Math.PI * 0.5;
+      gate.castShadow = true;
+      group.add(gate);
+      addBeacon(d.x, d.y, 0xdc7cff, 210, 7);
+    }
+
+    for (const s of this.world.shrines || []) {
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(22, 28, 12, 8), mats.shrine);
+      base.position.copy(this.toVec3(s.x, s.y, 18));
+      base.castShadow = true;
+      group.add(base);
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(8, 10, 48, 8), mats.shrine);
+      pillar.position.copy(this.toVec3(s.x, s.y, 46));
+      pillar.castShadow = true;
+      group.add(pillar);
+    }
+
+    for (const c of this.world.caches || []) {
+      const chest = new THREE.Mesh(new THREE.BoxGeometry(26, 18, 18), mats.cache);
+      chest.position.copy(this.toVec3(c.x, c.y, 22));
+      chest.castShadow = true;
+      group.add(chest);
+    }
+
+    for (const herb of this.world.herbs || []) {
+      const sprout = new THREE.Mesh(new THREE.ConeGeometry(8, 26, 5), mats.herb);
+      sprout.position.copy(this.toVec3(herb.x, herb.y, 22));
+      sprout.castShadow = true;
+      group.add(sprout);
+    }
+
+    for (const s of this.world.secrets || []) {
+      const marker = new THREE.Mesh(new THREE.OctahedronGeometry(14), mats.secret);
+      marker.position.copy(this.toVec3(s.x, s.y, 32));
+      marker.castShadow = true;
+      group.add(marker);
+    }
+
+    for (const lair of this.world.dragonLairs || []) {
+      const mound = new THREE.Mesh(new THREE.ConeGeometry(48, 70, 7), mats.dragon);
+      mound.position.copy(this.toVec3(lair.x, lair.y, 46));
+      mound.castShadow = true;
+      group.add(mound);
+      addBeacon(lair.x, lair.y, 0xff8a5c, 240, 9);
+    }
+
+    this.scene.add(group);
+  }
+
+  addWorldProps() {
+    const group = new THREE.Group();
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4c3523, roughness: 0.96 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x355f35, roughness: 0.98 });
+    const ashLeafMat = new THREE.MeshStandardMaterial({ color: 0x696363, roughness: 0.98 });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x7d817f, roughness: 0.94 });
+    const brushMat = new THREE.MeshStandardMaterial({ color: 0x6b7b4b, roughness: 0.98 });
+
+    for (const tree of this.world._trees || []) {
+      const sample = this.world._sampleCell(tree.x, tree.y);
+      const scale = Math.max(0.7, tree.scale || 1);
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(4 * scale, 6 * scale, 34 * scale, 6), trunkMat);
+      trunk.position.copy(this.toVec3(tree.x, tree.y, 26 * scale));
+      trunk.castShadow = true;
+      group.add(trunk);
+
+      const leaves = new THREE.Mesh(
+        new THREE.ConeGeometry(20 * scale, 58 * scale, 8),
+        sample.zone === "ashlands" || sample.zone === "ash fields" ? ashLeafMat : leafMat
+      );
+      leaves.position.copy(this.toVec3(tree.x, tree.y, 64 * scale));
+      leaves.castShadow = true;
+      group.add(leaves);
+    }
+
+    for (const rock of this.world._rocks || []) {
+      const scale = Math.max(0.7, rock.scale || 1);
+      const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(12 * scale, 0), rockMat);
+      mesh.position.copy(this.toVec3(rock.x, rock.y, 16 * scale));
+      mesh.rotation.set((rock.seed || 0) * 0.01, (rock.seed || 0) * 0.013, 0);
+      mesh.castShadow = true;
+      group.add(mesh);
+    }
+
+    for (const item of this.world._clutter || []) {
+      const scale = Math.max(0.55, item.scale || 1);
+      const mesh = new THREE.Mesh(new THREE.ConeGeometry(7 * scale, 18 * scale, 5), brushMat);
+      mesh.position.copy(this.toVec3(item.x, item.y, 14 * scale));
+      mesh.castShadow = true;
+      group.add(mesh);
+    }
+
+    this.scene.add(group);
+  }
+
+  addHeroMarker() {
+    const group = new THREE.Group();
+
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(12, 30, 6, 12),
+      new THREE.MeshStandardMaterial({
+        color: 0xd9dde6,
+        roughness: 0.6,
+        metalness: 0.2,
+      })
+    );
+    body.position.set(0, 30, 0);
+    body.castShadow = true;
+    group.add(body);
+
+    const cloak = new THREE.Mesh(
+      new THREE.ConeGeometry(12, 24, 6),
+      new THREE.MeshStandardMaterial({
+        color: 0x4c5f72,
+        roughness: 0.94,
+        metalness: 0,
+      })
+    );
+    cloak.position.set(0, 24, -9);
+    cloak.castShadow = true;
+    group.add(cloak);
+
+    const blade = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 34, 4),
+      new THREE.MeshStandardMaterial({ color: 0xb8c4cf, roughness: 0.48, metalness: 0.36 })
+    );
+    blade.position.set(10, 30, -5);
+    blade.rotation.z = -0.42;
+    blade.castShadow = true;
+    group.add(blade);
+
+    group.position.copy(this.toVec3(this.hero.x, this.hero.y, 0));
+    this.heroMarker = group;
+    this.scene.add(group);
+  }
+
+  samplePolyline(points, stride = 1) {
+    if (!points?.length) return [];
+    const out = [];
+    let prev = null;
+    for (let i = 0; i < points.length; i += Math.max(1, stride)) {
+      const point = points[i];
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+      if (prev && Math.hypot(point.x - prev.x, point.y - prev.y) < 1) continue;
+      out.push(point);
+      prev = point;
+    }
+    const last = points[points.length - 1];
+    if (last && Number.isFinite(last.x) && Number.isFinite(last.y)) {
+      const tail = out[out.length - 1];
+      if (!tail || Math.hypot(last.x - tail.x, last.y - tail.y) >= 1) out.push(last);
+    }
+    return out;
+  }
+
+  colorForSample(sample) {
+    if (sample.isWater) return new THREE.Color(0x23496b);
+    switch (sample.zone) {
+      case "mountain":
+        return new THREE.Color(0x717782);
+      case "stone flats":
+        return new THREE.Color(0x8b8477);
+      case "ashlands":
+        return new THREE.Color(0x625252);
+      case "old fields":
+        return new THREE.Color(0x71804f);
+      case "highlands":
+        return new THREE.Color(0x657458);
+      case "forest":
+        return new THREE.Color(0x44603d);
+      case "meadow":
+      default:
+        return new THREE.Color(0x5e7745);
+    }
+  }
+
+  heightAt(x, y, sample = null) {
+    const s = sample || this.world._sampleCell(x, y);
+    const ground = this.world._groundAt(x, y);
+    const ridge = this.world._mountainInfluenceAt?.(x, y) || 0;
+    const pass = this.world._mountainPassInfluenceAt?.(x, y) || 0;
+    let h = Math.max(0, ground - 0.18) * 240;
+    h += ridge * 260;
+    h -= pass * 80;
+    if (s.zone === "mountain") h += 180;
+    if (s.zone === "stone flats") h += 70;
+    if (s.isWater) h = Math.min(h, 4);
+    return h;
+  }
+
+  toVec3(x, y, lift = 0) {
+    return new THREE.Vector3(x, this.heightAt(x, y) + lift, y);
+  }
+
+  recenter() {
+    const target = this.toVec3(this.hero.x, this.hero.y, 26);
+    this.controls.target.copy(target);
+    this.camera.position.set(target.x + 980, target.y + 760, target.z + 980);
+    this.camera.lookAt(target);
+    this.controls.update();
+  }
+
+  onKeyDown(event) {
+    const key = this.normalizeKey(event);
+    if (!key) return;
+    this.keys.add(key);
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Shift"].includes(key)) {
+      event.preventDefault();
+    }
+  }
+
+  onKeyUp(event) {
+    const key = this.normalizeKey(event);
+    if (!key) return;
+    this.keys.delete(key);
+  }
+
+  normalizeKey(event) {
+    if (!event) return "";
+    if (event.code === "Space") return " ";
+    if (event.key === "Shift") return "Shift";
+    if (event.key?.startsWith("Arrow")) return event.key;
+    return String(event.key || "").toLowerCase();
+  }
+
+  updateMovement(dt) {
+    const forwardKey = this.keys.has("w") || this.keys.has("ArrowUp");
+    const backKey = this.keys.has("s") || this.keys.has("ArrowDown");
+    const leftKey = this.keys.has("a") || this.keys.has("ArrowLeft");
+    const rightKey = this.keys.has("d") || this.keys.has("ArrowRight");
+    const mx = (rightKey ? 1 : 0) - (leftKey ? 1 : 0);
+    const mz = (forwardKey ? 1 : 0) - (backKey ? 1 : 0);
+    if (!mx && !mz) return;
+
+    const forward = new THREE.Vector3()
+      .subVectors(this.controls.target, this.camera.position)
+      .setY(0);
+    if (forward.lengthSq() < 0.001) forward.set(0, 0, -1);
+    forward.normalize();
+
+    const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+    const move = new THREE.Vector3()
+      .addScaledVector(forward, mz)
+      .addScaledVector(right, mx);
+    if (move.lengthSq() < 0.0001) return;
+    move.normalize();
+
+    const modifier = this.world.getMoveModifier?.(this.hero.x, this.hero.y) || 1;
+    const speed = (this.keys.has("Shift") ? RUN_SPEED : WALK_SPEED) * modifier;
+    this.tryMove(move.x * speed * dt, move.z * speed * dt);
+    this.heroHeading = Math.atan2(move.x, move.z);
+    this.updateHeroMarker();
+    this.updateFollowCamera();
+    this.updateHud();
+    this.saveHeroSoon();
+  }
+
+  tryMove(dx, dy) {
+    const actor = { state: { mountainPassAccess: true } };
+    const nextX = this.hero.x + dx;
+    const nextY = this.hero.y + dy;
+    if (this.world.canWalk?.(nextX, nextY, actor)) {
+      this.hero.x = nextX;
+      this.hero.y = nextY;
+      return;
+    }
+    if (this.world.canWalk?.(nextX, this.hero.y, actor)) this.hero.x = nextX;
+    if (this.world.canWalk?.(this.hero.x, nextY, actor)) this.hero.y = nextY;
+  }
+
+  updateHeroMarker() {
+    if (!this.heroMarker) return;
+    this.heroMarker.position.copy(this.toVec3(this.hero.x, this.hero.y, 0));
+    this.heroMarker.rotation.y = this.heroHeading;
+  }
+
+  updateFollowCamera() {
+    const desired = this.toVec3(this.hero.x, this.hero.y, 26);
+    const before = this.controls.target.clone();
+    this.controls.target.lerp(desired, FOLLOW_LERP);
+    this.camera.position.add(new THREE.Vector3().subVectors(this.controls.target, before));
+  }
+
+  saveHeroSoon() {
+    const now = performance.now();
+    if (now - this.lastSaveAt < 900) return;
+    this.lastSaveAt = now;
+    const next = this.saveData || {};
+    next.seed = this.world.seed;
+    next.worldBuild = this.world.buildId || next.worldBuild || "";
+    next.hero = {
+      ...(next.hero || {}),
+      x: this.hero.x,
+      y: this.hero.y,
+    };
+    this.saveData = next;
+    this.save.save(next);
+  }
+
+  updateHud() {
+    if (this.ui.summaryEl) {
+      this.ui.summaryEl.textContent =
+        "3D world is live: same seed, roads, rivers, bridges, towns, camps, dungeons, shrines, caches, herbs, secrets, and dragon lairs.";
+    }
+    if (this.ui.seedEl) this.ui.seedEl.textContent = String(this.world.seed);
+    if (this.ui.heroEl) this.ui.heroEl.textContent = `${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}`;
+    if (this.ui.roadsEl) this.ui.roadsEl.textContent = `${this.world.roads?.length || 0} paths`;
+    if (this.ui.riversEl) this.ui.riversEl.textContent = `${this.world._riverBands?.length || 0} rivers`;
+    if (this.ui.bridgesEl) this.ui.bridgesEl.textContent = `${this.world.bridges?.length || 0} bridges / ${this.world.docks?.length || 0} docks`;
+    const townCount = (this.world.towns?.length || 0) + (this.world.startTown ? 1 : 0);
+    if (this.ui.townsEl) this.ui.townsEl.textContent = `${townCount} settlements`;
+  }
+
+  resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, false);
+  }
+
+  animate() {
+    this.rafId = requestAnimationFrame(this.animate);
+    const dt = this.clock.getDelta();
+    this.world.update?.();
+    this.updateMovement(Math.min(dt, 0.05));
+    this.controls.update(dt);
+    this.renderer.render(this.scene, this.camera);
+  }
+}
 
 
 ===== ./src/save.js =====
@@ -8902,7 +10024,7 @@ export default class UI {
     this._miniFrameT = 0;
     this._lastMiniHeroX = 0;
     this._lastMiniHeroY = 0;
-    this._controlsCollapsed = false;
+    this._controlsCollapsed = true;
     this._controlsToggleRect = null;
     this._profilerCopyRect = null;
     this._spikeCopyRect = null;
@@ -9390,24 +10512,13 @@ export default class UI {
       font: "bold 10px 'Segoe UI', Arial",
     });
 
-    const statY = y + 118;
-    const statGap = 8;
-    const statW = Math.floor((innerW - statGap * 2) / 3);
-    this._drawPill(ctx, innerX, statY, statW, 22, `DMG ${stats.dmg || 0}`, {
-      fill: "rgba(255,255,255,0.06)",
-      stroke: "rgba(255,255,255,0.12)",
-      textColor: "#9fb1c7",
-    });
-    this._drawPill(ctx, innerX + statW + statGap, statY, statW, 22, `ARM ${stats.armor || 0}`, {
-      fill: "rgba(255,255,255,0.06)",
-      stroke: "rgba(255,255,255,0.12)",
-      textColor: "#9fb1c7",
-    });
-    this._drawPill(ctx, innerX + (statW + statGap) * 2, statY, statW, 22, `CRIT ${Math.round((stats.crit || 0) * 100)}%`, {
-      fill: "rgba(255,255,255,0.06)",
-      stroke: "rgba(255,255,255,0.12)",
-      textColor: "#9fb1c7",
-    });
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(innerX, y + 116, innerW, 24);
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.strokeRect(innerX + 0.5, y + 116.5, innerW - 1, 23);
+    ctx.fillStyle = "#93a8bf";
+    ctx.font = "12px Arial";
+    this._drawFitText(ctx, "Press I for your full stats, gear loadout, and crafting.", innerX + 10, y + 132, innerW - 20, 9);
 
     ctx.restore();
   }
@@ -11461,7 +12572,34 @@ export default class UI {
     ctx.font = "bold 15px Arial";
     ctx.fillText("Equipped", rightX + 12, rightY + 22);
 
-    this._drawHeroPortrait(ctx, hero, rightX + rightW - 96, rightY + 14, 74, 92);
+    this._drawHeroPortrait(ctx, hero, rightX + rightW - 118, rightY + 12, 96, 118);
+
+    const stats = hero.getStats?.() || {};
+    const statsBoxX = rightX + 12;
+    const statsBoxY = rightY + 36;
+    const statsBoxW = Math.max(176, rightW - 146);
+    const statsBoxH = 92;
+    ctx.fillStyle = "rgba(123,170,227,0.08)";
+    ctx.fillRect(statsBoxX, statsBoxY, statsBoxW, statsBoxH);
+    ctx.strokeStyle = "rgba(144,187,241,0.18)";
+    ctx.strokeRect(statsBoxX + 0.5, statsBoxY + 0.5, statsBoxW - 1, statsBoxH - 1);
+    ctx.fillStyle = "#dce6f4";
+    ctx.font = "bold 12px Arial";
+    ctx.fillText("Adventurer Stats", statsBoxX + 10, statsBoxY + 16);
+    const statLines = [
+      [`HP ${Math.round(hero.hp || 0)}/${Math.round(hero.maxHp || stats.maxHp || 0)}`, `Mana ${Math.round(hero.mana || 0)}/${Math.round(hero.maxMana || stats.maxMana || 0)}`],
+      [`Damage ${Math.round(stats.dmg || 0)}`, `Armor ${Math.round(stats.armor || 0)}`],
+      [`Crit ${Math.round((stats.crit || 0) * 100)}%`, `Crit Power x${(stats.critMult || 1.5).toFixed(2)}`],
+      [`Move ${Math.round((stats.move || 1) * 100)}%`, `Gold ${hero.gold || 0}`],
+    ];
+    ctx.font = "12px Arial";
+    for (let i = 0; i < statLines.length; i++) {
+      const yy = statsBoxY + 34 + i * 14;
+      ctx.fillStyle = "#e8eef8";
+      this._drawFitText(ctx, statLines[i][0], statsBoxX + 10, yy, Math.max(74, statsBoxW * 0.46), 8);
+      ctx.fillStyle = "#b2c0d3";
+      this._drawFitText(ctx, statLines[i][1], statsBoxX + Math.max(92, statsBoxW * 0.52), yy, Math.max(74, statsBoxW * 0.42), 8);
+    }
 
     const materials = [
       { label: "Herbs", count: game?.progress?.herbs || 0, color: "#dff2de" },
@@ -11470,7 +12608,7 @@ export default class UI {
       { label: "Hide", count: game?.progress?.materials?.hide || 0, color: "#e0c09d" },
       { label: "Essence", count: game?.progress?.materials?.essence || 0, color: "#e2ccff" },
     ];
-    const materialY = rightY + 36;
+    const materialY = rightY + 138;
     const materialW = Math.max(168, rightW - 132);
     ctx.fillStyle = "rgba(126,210,126,0.10)";
     ctx.fillRect(rightX + 12, materialY, materialW, 72);
@@ -11495,28 +12633,36 @@ export default class UI {
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const item = equip[slot];
-      const iy = rightY + 126 + i * 26;
-      const textW = Math.max(80, rightW - 220);
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const cardX = rightX + 12 + col * Math.floor((rightW - 30) * 0.5);
+      const cardY = rightY + 226 + row * 48;
+      const cardW = Math.floor((rightW - 36) * 0.5);
+      const textW = Math.max(74, cardW - 18);
 
+      ctx.fillStyle = "rgba(255,255,255,0.045)";
+      ctx.fillRect(cardX, cardY - 14, cardW, 38);
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.strokeRect(cardX + 0.5, cardY - 13.5, cardW - 1, 37);
       ctx.fillStyle = "#9db0c8";
-      ctx.font = "12px Arial";
-      ctx.fillText(slot.toUpperCase(), rightX + 12, iy);
+      ctx.font = "11px Arial";
+      ctx.fillText(slot.toUpperCase(), cardX + 8, cardY - 1);
 
       ctx.fillStyle = item?.color || "#dce6f4";
-      ctx.font = "bold 13px Arial";
-      this._drawFitText(ctx, item?.name || "-", rightX + 104, iy, textW);
+      ctx.font = "bold 12px Arial";
+      this._drawFitText(ctx, item?.name || "-", cardX + 8, cardY + 14, textW);
 
       if (item?.stats) {
         ctx.fillStyle = "#8ea1b8";
-        ctx.font = "11px Arial";
-        this._drawFitText(ctx, this._statSummary(item.stats), rightX + 104, iy + 13, textW);
+        ctx.font = "10px Arial";
+        this._drawFitText(ctx, this._statSummary(item.stats), cardX + 8, cardY + 26, textW);
       }
     }
 
     const pickedEntry = entries[selected];
     const picked = pickedEntry?.item;
     const statX = rightX + 12;
-    let sy = rightY + 292;
+    let sy = rightY + 382;
 
     ctx.fillStyle = "#dce6f4";
     ctx.font = "bold 15px Arial";
@@ -11878,12 +13024,11 @@ export default class UI {
     const innerH = h - inset * 2;
     const badgeY = y + h - 19;
     const cx = x + w * 0.5;
-    const portraitBodyTop = innerY + 8;
     const portraitBodyBottom = y + h - 24;
     const headY = y + 30;
-    const chestY = y + 58;
-    const chestW = Math.max(22, Math.round(w * 0.36));
-    const bodyH = Math.max(22, Math.round(h * 0.20));
+    const chestY = y + 61;
+    const chestW = Math.max(28, Math.round(w * 0.38));
+    const bodyH = Math.max(30, Math.round(h * 0.26));
     const armorTier = armor?.stats?.armor || 0;
     const weaponTier = weapon?.stats?.dmg || 0;
 
@@ -11916,77 +13061,107 @@ export default class UI {
     ctx.fillRect(x, y, w, h);
 
     if (this._hasUiImage(portraitImg)) {
-      const cropX = Math.round(portraitImg.naturalWidth * 0.18);
-      const cropY = Math.round(portraitImg.naturalHeight * 0.10);
-      const cropW = Math.round(portraitImg.naturalWidth * 0.64);
-      const cropH = Math.round(portraitImg.naturalHeight * 0.74);
-      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 4, innerY + 4, innerW - 8, innerH - 8);
+      const cropX = Math.round(portraitImg.naturalWidth * 0.22);
+      const cropY = Math.round(portraitImg.naturalHeight * 0.08);
+      const cropW = Math.round(portraitImg.naturalWidth * 0.56);
+      const cropH = Math.round(portraitImg.naturalHeight * 0.72);
+      ctx.drawImage(portraitImg, cropX, cropY, cropW, cropH, innerX + 3, innerY + 2, innerW - 6, innerH - 2);
     }
 
-    ctx.fillStyle = "rgba(0,0,0,0.12)";
-    ctx.fillRect(innerX, innerY + innerH * 0.58, innerW, innerH * 0.34);
+    ctx.fillStyle = "rgba(0,0,0,0.14)";
+    ctx.fillRect(innerX, innerY + innerH * 0.60, innerW, innerH * 0.28);
+
+    ctx.fillStyle = "rgba(45,24,28,0.48)";
+    ctx.beginPath();
+    ctx.moveTo(cx - 19, chestY + 1);
+    ctx.lineTo(cx - 28, portraitBodyBottom - 8);
+    ctx.lineTo(cx - 10, portraitBodyBottom - 3);
+    ctx.lineTo(cx, chestY + 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 19, chestY + 1);
+    ctx.lineTo(cx + 28, portraitBodyBottom - 8);
+    ctx.lineTo(cx + 10, portraitBodyBottom - 3);
+    ctx.lineTo(cx, chestY + 18);
+    ctx.closePath();
+    ctx.fill();
 
     ctx.fillStyle = armorColor;
     ctx.globalAlpha = 0.88;
     ctx.beginPath();
-    ctx.moveTo(cx - chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
-    ctx.lineTo(cx - chestW * 0.34, chestY + 10);
-    ctx.quadraticCurveTo(cx, chestY - 4, cx + chestW * 0.34, chestY + 10);
-    ctx.lineTo(cx + chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
-    ctx.quadraticCurveTo(cx, Math.min(portraitBodyBottom + 6, chestY + bodyH + 6), cx - chestW * 0.54, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.moveTo(cx - chestW * 0.58, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.lineTo(cx - chestW * 0.40, chestY + 9);
+    ctx.quadraticCurveTo(cx, chestY - 6, cx + chestW * 0.40, chestY + 9);
+    ctx.lineTo(cx + chestW * 0.58, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.quadraticCurveTo(cx, Math.min(portraitBodyBottom + 6, chestY + bodyH + 6), cx - chestW * 0.58, Math.min(portraitBodyBottom, chestY + bodyH));
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - chestW * 0.70, chestY + 11);
+    ctx.quadraticCurveTo(cx - chestW * 0.52, chestY - 3, cx - chestW * 0.22, chestY + 8);
+    ctx.lineTo(cx - chestW * 0.30, chestY + 19);
+    ctx.lineTo(cx - chestW * 0.66, chestY + 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + chestW * 0.70, chestY + 11);
+    ctx.quadraticCurveTo(cx + chestW * 0.52, chestY - 3, cx + chestW * 0.22, chestY + 8);
+    ctx.lineTo(cx + chestW * 0.30, chestY + 19);
+    ctx.lineTo(cx + chestW * 0.66, chestY + 20);
     ctx.closePath();
     ctx.fill();
 
     ctx.globalAlpha = 1;
     ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.fillRect(cx - chestW * 0.32, chestY + 11, chestW * 0.64, armorTier >= 16 ? 4 : 3);
-    ctx.fillRect(cx - 2, chestY + 6, 4, bodyH - 2);
+    ctx.fillRect(cx - chestW * 0.28, chestY + 12, chestW * 0.56, armorTier >= 16 ? 4 : 3);
+    ctx.fillRect(cx - 2, chestY + 7, 4, bodyH - 1);
     if (armorTier >= 10) {
-      ctx.fillRect(cx - chestW * 0.24, chestY + 21, chestW * 0.48, 3);
+      ctx.fillRect(cx - chestW * 0.22, chestY + 22, chestW * 0.44, 3);
     }
     if (armorTier >= 18) {
-      ctx.fillRect(cx - chestW * 0.36, chestY + 31, chestW * 0.72, 3);
+      ctx.fillRect(cx - chestW * 0.32, chestY + 31, chestW * 0.64, 3);
     }
 
     if (helm) {
       ctx.fillStyle = helmColor;
       ctx.globalAlpha = 0.94;
       ctx.beginPath();
-      ctx.moveTo(cx - 15, headY + 16);
-      ctx.quadraticCurveTo(cx, headY - 2, cx + 16, headY + 17);
-      ctx.lineTo(cx + 10, headY + 27);
-      ctx.lineTo(cx - 10, headY + 27);
+      ctx.moveTo(cx - 13, headY + 17);
+      ctx.quadraticCurveTo(cx, headY + 1, cx + 13, headY + 17);
+      ctx.lineTo(cx + 9, headY + 28);
+      ctx.lineTo(cx - 9, headY + 28);
       ctx.closePath();
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.fillStyle = "rgba(255,255,255,0.24)";
-      ctx.fillRect(cx - 9, headY + 18, 18, 3);
+      ctx.fillRect(cx - 8, headY + 18, 16, 3);
       if ((helm?.stats?.armor || 0) >= 8 || helm?.rarity === "epic") {
         ctx.fillRect(cx - 2, headY + 21, 4, 9);
       }
     }
 
     ctx.strokeStyle = weaponColor;
-    ctx.lineWidth = weaponTier >= 18 ? 5.5 : weaponTier >= 10 ? 4.8 : 4;
+    ctx.lineWidth = weaponTier >= 18 ? 5.2 : weaponTier >= 10 ? 4.4 : 3.8;
     ctx.beginPath();
-    ctx.moveTo(x + w - 23, y + 33);
-    ctx.lineTo(x + w - 28, y + 73);
+    ctx.moveTo(cx + 16, chestY + 5);
+    ctx.lineTo(cx + 25, y + 94);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.52)";
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = "rgba(255,255,255,0.44)";
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(x + w - 22, y + 33);
-    ctx.lineTo(x + w - 26, y + 71);
+    ctx.moveTo(cx + 16, chestY + 6);
+    ctx.lineTo(cx + 23, y + 89);
     ctx.stroke();
     ctx.fillStyle = "#bf8d57";
-    ctx.fillRect(x + w - 32, y + 67, 10, 4);
+    ctx.fillRect(cx + 17, y + 66, 10, 4);
     ctx.fillStyle = "#eef5ff";
-    ctx.fillRect(x + w - 24, y + 30, 4, 5);
+    ctx.fillRect(cx + 16, chestY + 4, 4, 6);
 
     ctx.fillStyle = bootsColor;
     ctx.globalAlpha = 0.85;
-    ctx.fillRect(cx - 14, y + h - 27, 10, 5);
-    ctx.fillRect(cx + 4, y + h - 27, 10, 5);
+    ctx.fillRect(cx - 12, y + h - 27, 8, 5);
+    ctx.fillRect(cx + 4, y + h - 27, 8, 5);
     ctx.globalAlpha = 1;
 
     if (ring) {
@@ -12020,6 +13195,29 @@ export default class UI {
     ctx.fillRect(x + Math.floor(w * 0.51), badgeY + 3, Math.max(12, Math.floor(w * 0.18)), 4);
     ctx.fillStyle = trinketColor;
     ctx.fillRect(x + Math.floor(w * 0.74), badgeY + 3, Math.max(8, Math.floor(w * 0.10)), 4);
+
+    const chips = [
+      { label: "W", color: weaponColor, x: x + w - 19, y: y + 10 },
+      { label: "A", color: armorColor, x: x + 10, y: y + h - 34 },
+      { label: "H", color: helm ? helmColor : "rgba(255,255,255,0.18)", x: x + 10, y: y + 10 },
+      { label: "T", color: trinket ? trinketColor : ringColor, x: x + w - 19, y: y + h - 34 },
+    ];
+    ctx.font = "bold 9px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const chip of chips) {
+      ctx.fillStyle = "rgba(9,12,18,0.92)";
+      ctx.beginPath();
+      ctx.arc(chip.x, chip.y, 8.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = chip.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(chip.x, chip.y, 7.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = chip.color;
+      ctx.fillText(chip.label, chip.x, chip.y + 0.5);
+    }
     ctx.restore();
   }
 
@@ -12603,16 +13801,16 @@ export default class World {
     this._terrainChunkSize = this._terrainTileSize * this._terrainChunkTiles;
     this._terrainChunkCache = new Map();
     this._terrainChunkOrder = [];
-    this._terrainChunkLimit = 240;
+    this._terrainChunkLimit = 300;
     this._propChunkCache = new Map();
     this._propChunkOrder = [];
-    this._propChunkLimit = 240;
+    this._propChunkLimit = 300;
     this._bridgeChunkCache = new Map();
     this._bridgeChunkOrder = [];
-    this._bridgeChunkLimit = 240;
+    this._bridgeChunkLimit = 300;
     this._sceneChunkCache = new Map();
     this._sceneChunkOrder = [];
-    this._sceneChunkLimit = 240;
+    this._sceneChunkLimit = 300;
     this._discoveryExportCache = null;
     this._revealed = null;
     this._mapBuildQueued = false;
@@ -12987,13 +14185,14 @@ export default class World {
     }
 
     if (s.isWater) return false;
-        if (s.isMountainWall) {
-          if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.34) return true;
-          return false;
-        }
-        if (this._isNearMountainWall(x, y, actor?.state?.mountainPassAccess ? 8 : 18)) {
-          if (!(actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > 0.40)) return false;
-        }
+    if (s.isMountainWall) {
+      if (this._canUseMountainPassAt(x, y, actor, 0.2)) return true;
+      return false;
+    }
+    const passOpen = this._canUseMountainPassAt(x, y, actor, 0.26);
+    if (this._isNearMountainWall(x, y, passOpen ? 4 : 18)) {
+      if (!passOpen) return false;
+    }
     return true;
   }
 
@@ -13009,6 +14208,11 @@ export default class World {
       if (this._sampleCell(x + ox, y + oy).isMountainWall) return true;
     }
     return false;
+  }
+
+  _canUseMountainPassAt(x, y, actor = null, threshold = 0.34) {
+    if (actor?.state?.mountainPassAccess && this._mountainPassInfluenceAt(x, y) > threshold) return true;
+    return this._mountainPublicPassInfluenceAt(x, y) > threshold;
   }
 
   getMoveModifier(x, y) {
@@ -13077,9 +14281,12 @@ export default class World {
     ctx.imageSmoothingEnabled = true;
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
-        const chunk = this._getSceneChunk(cx, cy);
-        if (!chunk) continue;
-        ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+        const chunk = this._peekSceneChunk(cx, cy);
+        if (chunk) {
+          ctx.drawImage(chunk, cx * chunkSize, cy * chunkSize, chunkSize, chunkSize);
+          continue;
+        }
+        this._drawSceneChunkLayers(ctx, cx, cy, chunkSize);
       }
     }
     ctx.restore();
@@ -13206,6 +14413,21 @@ export default class World {
     return chunk;
   }
 
+  _peekSceneChunk(chunkX, chunkY) {
+    return this._sceneChunkCache.get(`${chunkX},${chunkY}`) || null;
+  }
+
+  _drawSceneChunkLayers(ctx, chunkX, chunkY, chunkSize) {
+    const worldX = chunkX * chunkSize;
+    const worldY = chunkY * chunkSize;
+    const terrain = this._getTerrainChunk(chunkX, chunkY);
+    const props = this._getPropChunk(chunkX, chunkY);
+    const bridges = this._getBridgeChunk(chunkX, chunkY);
+    if (terrain) ctx.drawImage(terrain, worldX, worldY, chunkSize, chunkSize);
+    if (props) ctx.drawImage(props, worldX, worldY, chunkSize, chunkSize);
+    if (bridges) ctx.drawImage(bridges, worldX, worldY, chunkSize, chunkSize);
+  }
+
   _prewarmFocusChunks() {
     const chunkSize = this._terrainChunkSize || 560;
     const cx = Math.floor((this._focusX || 0) / chunkSize);
@@ -13220,13 +14442,15 @@ export default class World {
       }
     }
 
-    let sceneBudget = 4;
+    const budgetEnd = typeof performance !== "undefined" ? performance.now() + 1.1 : 0;
+    let sceneBudget = 2;
     for (const [tx, ty] of targets) {
       if (sceneBudget > 0 && !this._sceneChunkCache.has(`${tx},${ty}`)) {
         this._getSceneChunk(tx, ty);
         sceneBudget--;
       }
       if (sceneBudget <= 0) break;
+      if (budgetEnd && performance.now() >= budgetEnd) break;
     }
   }
 
@@ -14008,7 +15232,7 @@ export default class World {
     const edgeSprite = this._assets?.mountainEdgeSprite;
     const peakSprite = this._assets?.mountainPeakSprite;
 
-    ctx.fillStyle = "#5b6169";
+    ctx.fillStyle = "#5e646b";
     ctx.beginPath();
     ctx.moveTo(x, y + size);
     ctx.lineTo(x, crestY + 4);
@@ -14023,7 +15247,7 @@ export default class World {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = "#495058";
+    ctx.fillStyle = "#434a52";
     ctx.beginPath();
     ctx.moveTo(x + size * 0.5, crestY + 2);
     ctx.lineTo(x + size, crestY + 5);
@@ -14032,7 +15256,7 @@ export default class World {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = "rgba(198,206,214,0.20)";
+    ctx.fillStyle = "rgba(204,211,219,0.18)";
     ctx.beginPath();
     ctx.moveTo(x + 3, crestY + 5);
     ctx.lineTo(peakAX - 6, crestY);
@@ -14078,7 +15302,7 @@ export default class World {
       ctx.lineTo(x + size - 2, crestY + 6.5);
       ctx.stroke();
 
-      ctx.strokeStyle = "rgba(232,238,245,0.18)";
+      ctx.strokeStyle = "rgba(232,238,245,0.15)";
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(x + 4, crestY + 8.5);
@@ -14111,6 +15335,32 @@ export default class World {
         ctx.drawImage(peakSprite, spriteX, spriteY, spriteW, spriteH);
       }
       ctx.restore();
+    }
+
+    const mountainTexture = this._assets?.mountainTexture;
+    if (this._hasWorldImage(mountainTexture)) {
+      ctx.save();
+      ctx.globalAlpha = north ? 0.10 : 0.20;
+      ctx.drawImage(mountainTexture, x, y, size, size);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i++) {
+        const sx = x + 6 + i * 9;
+        ctx.beginPath();
+        ctx.moveTo(sx, y + 16 + ((variantA + i) % 5));
+        ctx.lineTo(sx - 5, y + size - 10);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(18,20,24,0.10)";
+      for (let i = 0; i < 3; i++) {
+        const sx = x + 14 + i * 10;
+        ctx.beginPath();
+        ctx.moveTo(sx, y + 18 + ((variantB + i) % 4));
+        ctx.lineTo(sx + 4, y + size - 8);
+        ctx.stroke();
+      }
     }
 
     if (!west) {
@@ -14184,6 +15434,11 @@ export default class World {
       }
     }
 
+    ctx.fillStyle = "rgba(66,62,56,0.16)";
+    ctx.beginPath();
+    ctx.ellipse(x + size * 0.5, y + size - 6, size * 0.34, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
     if (hasPass) this._drawMountainPathHighlight(ctx, x, y, size, 0);
   }
 
@@ -14215,9 +15470,10 @@ export default class World {
         const minY = Math.min(...crestPts.map((p) => p.y));
         const maxY = Math.max(...basePts.map((p) => p.y));
         const grad = ctx.createLinearGradient(0, minY, 0, maxY);
-        grad.addColorStop(0, "rgba(124,132,142,0.995)");
-        grad.addColorStop(0.22, "rgba(102,110,120,0.995)");
-        grad.addColorStop(1, "rgba(52,57,64,0.998)");
+        grad.addColorStop(0, "rgba(138,146,154,0.995)");
+        grad.addColorStop(0.18, "rgba(111,118,126,0.995)");
+        grad.addColorStop(0.72, "rgba(78,82,88,0.998)");
+        grad.addColorStop(1, "rgba(48,51,56,0.998)");
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.moveTo(crestPts[0].x, crestPts[0].y);
@@ -14227,18 +15483,28 @@ export default class World {
         ctx.fill();
 
         ctx.strokeStyle = "rgba(9,11,14,0.98)";
-        ctx.lineWidth = Math.max(7, range.width * 0.03);
+        ctx.lineWidth = Math.max(8, range.width * 0.034);
         ctx.beginPath();
         this._traceSmoothPath(ctx, crestPts);
         ctx.stroke();
 
-        ctx.fillStyle = "rgba(228,234,240,0.08)";
+        ctx.fillStyle = "rgba(228,234,240,0.10)";
         ctx.beginPath();
         ctx.moveTo(crestPts[0].x + range.nx * 2, crestPts[0].y + 5);
         for (let i = 1; i < crestPts.length; i++) ctx.lineTo(crestPts[i].x + range.nx * 2, crestPts[i].y + 5);
         for (let i = crestPts.length - 1; i >= 0; i--) ctx.lineTo(crestPts[i].x + range.nx * 7, crestPts[i].y + 18);
         ctx.closePath();
         ctx.fill();
+
+        ctx.strokeStyle = "rgba(32,35,39,0.36)";
+        ctx.lineWidth = Math.max(3, range.width * 0.012);
+        ctx.beginPath();
+        for (let i = 1; i < crestPts.length - 1; i += 2) {
+          const p = crestPts[i];
+          ctx.moveTo(p.x, p.y + 3);
+          ctx.lineTo(p.x + range.nx * 18, p.y + 42);
+        }
+        ctx.stroke();
       }
     }
 
@@ -14340,7 +15606,7 @@ export default class World {
 
     ctx.save();
 
-    const width = 28;
+    const width = 24;
     const visibleRoads = [];
     const pad = width + 18;
     for (const road of this.roads) {
@@ -14364,15 +15630,50 @@ export default class World {
       }
     };
 
-    ctx.strokeStyle = "#5c3f22";
-    ctx.lineWidth = width + 4;
+    ctx.strokeStyle = "rgba(40,28,16,0.32)";
+    ctx.lineWidth = width + 10;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     strokeRoads();
 
-    ctx.strokeStyle = "#c4a066";
-    ctx.lineWidth = width - 5;
+    ctx.strokeStyle = "#6b5133";
+    ctx.lineWidth = width + 2;
     strokeRoads();
+
+    ctx.strokeStyle = "#9e7a53";
+    ctx.lineWidth = width - 6;
+    strokeRoads();
+
+    ctx.strokeStyle = "rgba(214,191,156,0.34)";
+    ctx.lineWidth = Math.max(3, width * 0.22);
+    ctx.setLineDash([2, 10]);
+    strokeRoads();
+    ctx.setLineDash([]);
+
+    for (const road of visibleRoads) {
+      const pts = road.points;
+      if (!pts || pts.length < 2) continue;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+        const chipCount = Math.max(1, Math.floor(len / 120));
+        for (let j = 0; j < chipCount; j++) {
+          const t = (j + 0.45) / chipCount;
+          const px = a.x + dx * t;
+          const py = a.y + dy * t;
+          const wobble = ((hash2((px / 18) | 0, (py / 18) | 0, this.seed ^ 0x9123) >>> 0) / 4294967296 - 0.5) * 6;
+          ctx.fillStyle = j % 2 === 0 ? "rgba(188,168,138,0.20)" : "rgba(88,70,48,0.14)";
+          ctx.beginPath();
+          ctx.ellipse(px + nx * wobble, py + ny * wobble, 2.4, 1.6, Math.atan2(dy, dx), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
 
     ctx.restore();
   }
@@ -14584,10 +15885,6 @@ export default class World {
     this._drawRiverConfluences(ctx, left, top, right, bottom);
     this._drawRiverMouths(ctx, left, top, right, bottom);
     ctx.restore();
-
-    this._drawRocks(ctx, left, top, right, bottom);
-    this._drawClutter(ctx, left, top, right, bottom);
-    this._drawTrees(ctx, left, top, right, bottom);
   }
 
   _isRiverSegmentInOcean(a, b, next = null, oceanCutoff = 0.245) {
@@ -14682,8 +15979,8 @@ export default class World {
 
       const mainW = this._riverVisualWidth(band.joinBand);
       const sideW = this._riverVisualWidth(band);
-      const rx = Math.max(58, (mainW + sideW) * 0.40);
-      const ry = Math.max(42, (mainW + sideW) * 0.32);
+      const rx = Math.max(42, (mainW + sideW) * 0.26);
+      const ry = Math.max(28, (mainW + sideW) * 0.20);
 
       const main = this._riverPath(band.joinBand);
       const t = band.joinT || 0.5;
@@ -14691,21 +15988,58 @@ export default class World {
       const after = this._pointOnRiverPath(main, Math.min(1, t + 0.035));
       const angle = Math.atan2(after.y - before.y, after.x - before.x);
 
-      ctx.fillStyle = "rgba(48,120,137,0.16)";
+      ctx.fillStyle = "rgba(48,120,137,0.12)";
       ctx.beginPath();
-      ctx.ellipse(join.x, join.y, rx + 12, ry + 8, angle, 0, Math.PI * 2);
+      ctx.ellipse(join.x, join.y, rx + 8, ry + 5, angle, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "rgba(38,132,178,0.78)";
+      ctx.fillStyle = "rgba(38,132,178,0.68)";
       ctx.beginPath();
       ctx.ellipse(join.x, join.y, rx, ry, angle, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "rgba(99,190,215,0.18)";
+      ctx.fillStyle = "rgba(99,190,215,0.14)";
       ctx.beginPath();
-      ctx.ellipse(join.x - Math.cos(angle) * rx * 0.16, join.y - Math.sin(angle) * ry * 0.16, rx * 0.72, ry * 0.50, angle, 0, Math.PI * 2);
+      ctx.ellipse(join.x - Math.cos(angle) * rx * 0.12, join.y - Math.sin(angle) * ry * 0.12, rx * 0.58, ry * 0.40, angle, 0, Math.PI * 2);
       ctx.fill();
+
+      this._drawRiverConfluenceBlend(ctx, band, join);
     }
+  }
+
+  _drawRiverConfluenceBlend(ctx, band, join) {
+    const sidePath = this._riverPath(band);
+    const sidePts = sidePath.length;
+    if (sidePts < 4 || !band.joinBand) return;
+
+    const sideStart = sidePath[Math.max(0, sidePts - 4)];
+    const mainPath = this._riverPath(band.joinBand);
+    const mainAfter = this._pointOnRiverPath(mainPath, Math.min(1, (band.joinT || 0.5) + 0.04));
+    const control = {
+      x: join.x + (mainAfter.x - sideStart.x) * 0.14,
+      y: join.y + (mainAfter.y - sideStart.y) * 0.14,
+    };
+    const blendW = Math.max(18, this._riverVisualWidth(band) * 0.72);
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.strokeStyle = "rgba(35,127,178,0.66)";
+    ctx.lineWidth = blendW;
+    ctx.beginPath();
+    ctx.moveTo(sideStart.x, sideStart.y);
+    ctx.quadraticCurveTo(control.x, control.y, mainAfter.x, mainAfter.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(91,190,216,0.16)";
+    ctx.lineWidth = Math.max(10, blendW * 0.44);
+    ctx.beginPath();
+    ctx.moveTo(sideStart.x, sideStart.y);
+    ctx.quadraticCurveTo(control.x, control.y, mainAfter.x, mainAfter.y);
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   _riverVisualWidth(band) {
@@ -15658,12 +16992,18 @@ export default class World {
 
   _makeRiverBands() {
     const bands = [];
-    const sides = ["north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west", "north", "south", "east", "west"];
-    const mainCount = 16;
+    const sideSlots = {
+      north: [0.16, 0.38, 0.62, 0.84],
+      south: [0.22, 0.48, 0.78],
+      east: [0.28, 0.68],
+      west: [0.34, 0.74],
+    };
+    const sidePlan = ["north", "south", "north", "west", "east", "south", "west", "east", "north", "south"];
+    const mainCount = sidePlan.length;
 
     for (let i = 0; i < mainCount; i++) {
-      const side = sides[i % sides.length];
-      const coast = this._makeRiverCoastTarget(side, i);
+      const side = sidePlan[i];
+      const coast = this._makeRiverCoastTarget(side, i, sideSlots[side]);
       const source = this._makeRiverSourceTarget(side, coast, i);
       const coastAnchor =
         this._findOceanShoreAnchor(side, coast, 2400) ||
@@ -15678,17 +17018,20 @@ export default class World {
         by: coastAnchor.y,
         coastSide: side,
         coastTarget: { x: coastAnchor.x, y: coastAnchor.y },
-        width: this._rng.range(0.76, 1.20),
-        bends: 64 + ((i % 4) * 12),
-        amplitude: this._rng.range(680, 1320),
+        width: this._rng.range(0.78, 1.08),
+        bends: 34 + ((i % 3) * 6),
+        amplitude: this._rng.range(260, 520),
         seed: hash2(this.seed, 101 + i * 17),
       });
     }
 
-    const tributaryCount = 32;
+    const tributaryCount = 16;
+    const joinSlots = [0.28, 0.52, 0.76];
     for (let i = 0; i < tributaryCount; i++) {
       const main = bands[i % bands.length];
-      const joinT = this._rng.range(0.28, 0.74);
+      const branchIndex = Math.floor(i / Math.max(1, bands.length));
+      const baseJoin = joinSlots[branchIndex % joinSlots.length] ?? 0.52;
+      const joinT = clamp(baseJoin + this._rng.range(-0.02, 0.02), 0.22, 0.84);
       const join = {
         x: main.ax + (main.bx - main.ax) * joinT,
         y: main.ay + (main.by - main.ay) * joinT,
@@ -15698,10 +17041,11 @@ export default class World {
       const len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len;
       const ny = dx / len;
-      const side = (i % 2 === 0 ? 1 : -1);
+      const baseSide = ((main.seed >>> (8 + branchIndex)) & 1) === 0 ? 1 : -1;
+      const side = branchIndex % 2 === 0 ? baseSide : -baseSide;
       const source = {
-        x: join.x + nx * side * this._rng.range(1200, 5000) + dx / len * this._rng.range(-1600, 1600),
-        y: join.y + ny * side * this._rng.range(1200, 5000) + dy / len * this._rng.range(-1600, 1600),
+        x: join.x + nx * side * this._rng.range(1100, 2200) + dx / len * this._rng.range(-220, 220),
+        y: join.y + ny * side * this._rng.range(1100, 2200) + dy / len * this._rng.range(-220, 220),
       };
       const sourceAnchor = this._findRiverSourceNear(source.x, source.y, 1800) || source;
       bands.push({
@@ -15709,19 +17053,192 @@ export default class World {
         ay: sourceAnchor.y,
         joinBand: main,
         joinT,
-        width: this._rng.range(0.46, 0.82),
-        bends: 44 + ((i % 3) * 10),
-        amplitude: this._rng.range(300, 720),
+        width: this._rng.range(0.40, 0.62),
+        bends: 24 + ((i % 3) * 5),
+        amplitude: this._rng.range(90, 220),
         seed: hash2(this.seed, 401 + i * 29),
       });
     }
 
-    const spawnTributaries = this._makeSpawnRiverTributaries(bands);
-    if (spawnTributaries.length) bands.push(...spawnTributaries);
-    const forcedContinuations = this._makeForcedRiverContinuations();
-    if (forcedContinuations.length) bands.push(...forcedContinuations);
+    this._mergeTouchingRiverBands(bands);
 
     return bands;
+  }
+
+  _mergeTouchingRiverBands(bands) {
+    const mains = (bands || []).filter((band) => !band.joinBand);
+    for (const main of mains) {
+      const tributaries = (bands || []).filter((band) => band.joinBand === main && !band.forcedContinuation);
+      if (tributaries.length < 2) continue;
+
+      const clusters = [];
+      const sorted = tributaries.slice().sort((a, b) => (a.joinT || 0) - (b.joinT || 0));
+      for (const tributary of sorted) {
+        const join = this._riverEndPoint(tributary);
+        let cluster = null;
+        for (const candidate of clusters) {
+          const d = Math.hypot(join.x - candidate.x, join.y - candidate.y);
+          if (d <= 720 || Math.abs((tributary.joinT || 0) - candidate.joinT) <= 0.085) {
+            cluster = candidate;
+            break;
+          }
+        }
+        if (!cluster) {
+          clusters.push({
+            x: join.x,
+            y: join.y,
+            joinT: tributary.joinT || 0.5,
+            members: [tributary],
+          });
+          continue;
+        }
+        cluster.members.push(tributary);
+        const n = cluster.members.length;
+        cluster.x = (cluster.x * (n - 1) + join.x) / n;
+        cluster.y = (cluster.y * (n - 1) + join.y) / n;
+        cluster.joinT = (cluster.joinT * (n - 1) + (tributary.joinT || 0.5)) / n;
+      }
+
+      for (const cluster of clusters) {
+        if (cluster.members.length < 2) continue;
+        const primary = cluster.members.reduce((best, band) =>
+          (band.width || 0) > (best.width || 0) ? band : best,
+        cluster.members[0]);
+        primary.joinT = cluster.joinT;
+        let offset = 0;
+        for (const tributary of cluster.members) {
+          if (tributary === primary) continue;
+          offset += 1;
+          tributary.joinBand = primary;
+          tributary.joinT = clamp(0.60 + offset * 0.1, 0.60, 0.9);
+          tributary.width *= 0.9;
+          tributary.amplitude *= 0.88;
+        }
+      }
+    }
+  }
+
+  _mergeIntersectingMainRivers(bands) {
+    const mains = (bands || []).filter((band) => !band.joinBand && !band.forcedContinuation);
+    if (mains.length < 2) return;
+
+    const sorted = mains.slice().sort((a, b) => (a.width || 0) - (b.width || 0));
+    for (const band of sorted) {
+      let best = null;
+      const path = this._riverPath(band);
+      if (!path || path.length < 8) continue;
+      const startIndex = 2;
+      const endIndex = Math.max(startIndex + 1, path.length - 3);
+      for (const target of mains) {
+        if (target === band) continue;
+        if (target.joinBand) continue;
+        if ((target.width || 0) + 0.04 < (band.width || 0)) continue;
+        if (!this._riverCanJoinBand(band, target)) continue;
+        const targetPath = this._riverPath(target);
+        const targetSegs = this._riverSegments(target);
+        if (!targetPath || targetPath.length < 8) continue;
+
+        for (let i = startIndex; i < endIndex; i += 2) {
+          const sampleFrac = i / Math.max(1, path.length - 1);
+          if (sampleFrac < 0.18 || sampleFrac > 0.88) continue;
+          const p = path[i];
+          const nearest = this._nearestPointOnRiverPath(p.x, p.y, targetPath, targetSegs);
+          if (!nearest) continue;
+          if (nearest.t < 0.14 || nearest.t > 0.92) continue;
+          if (nearest.dist > 138) continue;
+          const score = nearest.dist + Math.abs(sampleFrac - nearest.t) * 380;
+          if (!best || score < best.score) {
+            best = { target, joinT: nearest.t, score };
+          }
+        }
+      }
+
+      if (!best) continue;
+      band.joinBand = best.target;
+      band.joinT = clamp(best.joinT, 0.18, 0.9);
+      band.width *= 0.94;
+      band.amplitude *= 0.9;
+    }
+
+    for (const river of bands || []) {
+      delete river._path;
+      delete river._segments;
+      if (river.pathPoints?._metric) delete river.pathPoints._metric;
+    }
+  }
+
+  _riverCanJoinBand(band, target) {
+    if (!band || !target || band === target) return false;
+    let cur = target;
+    let guard = 0;
+    while (cur && guard++ < 64) {
+      if (cur === band) return false;
+      cur = cur.joinBand || null;
+    }
+    return true;
+  }
+
+  _normalizeRiverProblemClusters(bands) {
+    const fixes = [
+      { x: 6670, y: 4748, radius: 1700 },
+    ];
+    for (const fix of fixes) {
+      this._normalizeRiverClusterNear(bands, fix.x, fix.y, fix.radius);
+    }
+    for (const river of bands || []) {
+      delete river._path;
+      delete river._segments;
+      if (river.pathPoints?._metric) delete river.pathPoints._metric;
+    }
+  }
+
+  _normalizeRiverClusterNear(bands, x, y, radius = 1600) {
+    const radius2 = radius * radius;
+    const candidates = (bands || []).filter((band) => {
+      const path = this._riverPath(band);
+      return this._distancePointToRiverPath(x, y, path, this._riverSegments(band)) <= radius;
+    });
+    if (candidates.length < 2) return;
+
+    const primary = candidates.reduce((best, band) => {
+      const path = this._riverPath(band);
+      const segs = this._riverSegments(band);
+      const nearest = this._nearestPointOnRiverPath(x, y, path, segs);
+      if (!nearest) return best || band;
+      if (!best) return band;
+      const bestNearest = this._nearestPointOnRiverPath(x, y, this._riverPath(best), this._riverSegments(best));
+      const bandBias = (band.forcedContinuation ? -240 : 0) - (band.joinBand ? 40 : 0) - (band.width || 0) * 24;
+      const bestBias = (best.forcedContinuation ? -240 : 0) - (best.joinBand ? 40 : 0) - (best.width || 0) * 24;
+      return nearest.dist + bandBias < bestNearest.dist + bestBias ? band : best;
+    }, null);
+    if (!primary) return;
+
+    const primaryPath = this._riverPath(primary);
+    const primarySegs = this._riverSegments(primary);
+    const attach = [];
+
+    for (const band of candidates) {
+      if (band === primary) continue;
+      const sourceX = band.joinBand ? (band.ax || 0) : x;
+      const sourceY = band.joinBand ? (band.ay || 0) : y;
+      const nearest = this._nearestPointOnRiverPath(sourceX, sourceY, primaryPath, primarySegs)
+        || this._nearestPointOnRiverPath(x, y, primaryPath, primarySegs);
+      if (!nearest) continue;
+      attach.push({ band, t: nearest.t });
+    }
+
+    attach.sort((a, b) => a.t - b.t);
+    let lastT = clamp((attach[0]?.t ?? 0.34) - 0.08, 0.18, 0.74);
+    for (const item of attach) {
+      const band = item.band;
+      const targetT = clamp(Math.max(lastT + 0.09, item.t), 0.22, 0.9);
+      if (!this._riverCanJoinBand(band, primary)) continue;
+      band.joinBand = primary;
+      band.joinT = targetT;
+      band.width *= 0.92;
+      band.amplitude *= 0.84;
+      lastT = targetT;
+    }
   }
 
   _makeForcedRiverContinuations() {
@@ -15749,6 +17266,13 @@ export default class World {
         amplitude: fix.amplitude,
         seed: hash2(this.seed, 1901 + i * 61),
         forcedContinuation: true,
+        pathPoints: [
+          { x: fix.x, y: fix.y },
+          { x: fix.x + 64, y: fix.y + 520 },
+          { x: fix.x + 118, y: fix.y + 1460 },
+          { x: coastAnchor.x + 40, y: coastAnchor.y - 620 },
+          { x: coastAnchor.x, y: coastAnchor.y },
+        ],
       });
     }
 
@@ -15811,22 +17335,25 @@ export default class World {
     return out;
   }
 
-  _makeRiverCoastTarget(side, index = 0) {
+  _makeRiverCoastTarget(side, index = 0, slotList = null) {
     const edge = this.mapHalfSize * 0.95;
-    const offset = this._rng.range(-this.mapHalfSize * 0.72, this.mapHalfSize * 0.72);
-    if (side === "north") return { x: offset, y: -edge + index * 60 };
-    if (side === "south") return { x: offset, y: edge - index * 60 };
-    if (side === "east") return { x: edge - index * 60, y: offset };
-    return { x: -edge + index * 60, y: offset };
+    const slots = slotList?.length ? slotList : [0.2, 0.5, 0.8];
+    const slot = slots[index % slots.length];
+    const span = this.mapHalfSize * 1.42;
+    const offset = -span * 0.5 + span * slot + this._rng.range(-340, 340);
+    if (side === "north") return { x: offset, y: -edge };
+    if (side === "south") return { x: offset, y: edge };
+    if (side === "east") return { x: edge, y: offset };
+    return { x: -edge, y: offset };
   }
 
   _makeRiverSourceTarget(side, coast, index = 0) {
-    const inland = this._rng.range(3200, 7600);
-    const lateral = this._rng.range(-2200, 2200);
-    if (side === "north") return { x: coast.x + lateral, y: coast.y + inland + index * 120 };
-    if (side === "south") return { x: coast.x + lateral, y: coast.y - inland - index * 120 };
-    if (side === "east") return { x: coast.x - inland - index * 120, y: coast.y + lateral };
-    return { x: coast.x + inland + index * 120, y: coast.y + lateral };
+    const inward = this._rng.range(3000, 6200);
+    const lateral = this._rng.range(-900, 900);
+    if (side === "north") return { x: coast.x + lateral, y: coast.y + inward };
+    if (side === "south") return { x: coast.x + lateral, y: coast.y - inward };
+    if (side === "east") return { x: coast.x - inward, y: coast.y + lateral };
+    return { x: coast.x + inward, y: coast.y + lateral };
   }
 
   _findOceanShoreAnchor(side, target, maxDepth = 2400) {
@@ -15915,7 +17442,7 @@ export default class World {
       const ty = dy / len;
       const nx = -ty;
       const ny = tx;
-      const passCount = 3;
+      const passCount = 4;
 
       for (let i = 0; i < passCount; i++) {
         const t = passCount === 1
@@ -15924,10 +17451,12 @@ export default class World {
             ? 0.28 + ((range.seed >>> 3) & 15) / 100
             : i === 1
               ? 0.52 + ((range.seed >>> 7) & 7) / 140
-              : 0.72 + ((range.seed >>> 11) & 11) / 100;
+              : i === 2
+                ? 0.72 + ((range.seed >>> 11) & 11) / 100
+                : 0.86 + ((range.seed >>> 5) & 7) / 130;
         const px = range.ax + dx * t;
         const py = range.ay + dy * t;
-        const drift = (((range.seed >>> (i === 0 ? 15 : i === 1 ? 19 : 23)) & 15) - 7.5) * 24;
+        const drift = (((range.seed >>> (i === 0 ? 15 : i === 1 ? 19 : i === 2 ? 23 : 9)) & 15) - 7.5) * 24;
         passes.push({
           x: px + tx * drift,
           y: py + ty * drift,
@@ -15935,13 +17464,104 @@ export default class World {
           ny,
           tx,
           ty,
-          width: range.width * (0.52 + i * 0.06),
-          length: 560 + ((range.seed >>> (i === 0 ? 27 : i === 1 ? 13 : 17)) & 15) * 26,
+          width: range.width * (0.62 + i * 0.07),
+          length: 760 + ((range.seed >>> (i === 0 ? 27 : i === 1 ? 13 : i === 2 ? 17 : 21)) & 15) * 34,
+          public: true,
           rangeSeed: range.seed,
         });
       }
     }
+    passes.push(...this._makeManualMountainPasses());
     return passes;
+  }
+
+  _makeManualMountainPasses() {
+    return [
+      {
+        x: 4920,
+        y: 4520,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 260,
+        length: 980,
+        public: true,
+        rangeSeed: "manual-east-pass-0",
+      },
+      {
+        x: 5200,
+        y: 4520,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 280,
+        length: 1240,
+        public: true,
+        rangeSeed: "manual-east-pass-1",
+      },
+      {
+        x: 5480,
+        y: 4480,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 260,
+        length: 1040,
+        public: true,
+        rangeSeed: "manual-east-pass-2",
+      },
+      {
+        x: -5200,
+        y: 4200,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 280,
+        length: 1320,
+        public: true,
+        rangeSeed: "manual-west-pass-0",
+      },
+      {
+        x: -5500,
+        y: 3920,
+        tx: 1,
+        ty: 0,
+        nx: 0,
+        ny: 1,
+        width: 260,
+        length: 1120,
+        public: true,
+        rangeSeed: "manual-west-pass-1",
+      },
+      {
+        x: 1800,
+        y: 6620,
+        tx: 0,
+        ty: 1,
+        nx: 1,
+        ny: 0,
+        width: 250,
+        length: 1160,
+        public: true,
+        rangeSeed: "manual-south-pass-0",
+      },
+      {
+        x: -2100,
+        y: -6480,
+        tx: 0,
+        ty: 1,
+        nx: 1,
+        ny: 0,
+        width: 250,
+        length: 1160,
+        public: true,
+        rangeSeed: "manual-north-pass-0",
+      },
+    ];
   }
 
   _buildMountainRenderDataForRange(range) {
@@ -16048,6 +17668,24 @@ export default class World {
   _mountainPassInfluenceAt(x, y) {
     let best = 0;
     for (const pass of this._mountainPasses || []) {
+      const ox = x - pass.x;
+      const oy = y - pass.y;
+      const along = Math.abs(ox * pass.tx + oy * pass.ty);
+      const across = Math.abs(ox * pass.nx + oy * pass.ny);
+      if (along > pass.length || across > pass.width) continue;
+
+      const alongFade = clamp(1 - along / pass.length, 0, 1);
+      const acrossFade = clamp(1 - across / pass.width, 0, 1);
+      const notch = alongFade * acrossFade;
+      if (notch > best) best = notch;
+    }
+    return best;
+  }
+
+  _mountainPublicPassInfluenceAt(x, y) {
+    let best = 0;
+    for (const pass of this._mountainPasses || []) {
+      if (!pass.public) continue;
       const ox = x - pass.x;
       const oy = y - pass.y;
       const along = Math.abs(ox * pass.tx + oy * pass.ty);
@@ -16235,6 +17873,7 @@ export default class World {
       for (const item of candidates) {
         const band = item.band;
         if (!band || seen.has(band)) continue;
+        if (band._buildingPath) continue;
         seen.add(band);
         const dist = this._distancePointToRiverPath(x, y, this._riverPath(band), this._riverSegments(band));
         const widthPx = this._riverCollisionWidth(band, x, y);
@@ -16245,6 +17884,7 @@ export default class World {
     }
 
     for (const band of bands) {
+      if (band?._buildingPath) continue;
       const dist = this._distancePointToRiverPath(x, y, this._riverPath(band), this._riverSegments(band));
       const widthPx = this._riverCollisionWidth(band, x, y);
       const v = dist / Math.max(12, widthPx);
@@ -16256,56 +17896,123 @@ export default class World {
 
   _riverPath(band) {
     if (band._path?.length) return band._path;
+    if (band._buildingPath) {
+      return band._pathFallback || band.pathPoints || [
+        { x: band.ax || 0, y: band.ay || 0 },
+        { x: band.bx ?? band.ax ?? 0, y: band.by ?? band.ay ?? 0 },
+      ];
+    }
 
-    const start = this._riverStartPoint(band);
-    const end = this._riverEndPoint(band);
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len;
-    const ny = dx / len;
-    const count = Math.max(40, band.bends || 64);
-    const pts = [];
+    if (band.pathPoints?.length > 1) {
+      const pts = [];
+      for (let i = 1; i < band.pathPoints.length; i++) {
+        const a = band.pathPoints[i - 1];
+        const b = band.pathPoints[i];
+        const steps = Math.max(8, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 160));
+        if (i === 1) pts.push({ x: a.x, y: a.y });
+        for (let step = 1; step <= steps; step++) {
+          const t = step / steps;
+          pts.push({
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t,
+          });
+        }
+      }
+      this._clipRiverPathToCoast(pts, 0.245);
+      band._path = pts;
+      return pts;
+    }
 
-    for (let i = 0; i <= count; i++) {
-      const t = i / count;
-      const ease = Math.sin(t * Math.PI);
-      const baseX = start.x + dx * t;
-      const baseY = start.y + dy * t;
-      const phaseA = (band.seed % 628) * 0.01;
-      const phaseB = (band.seed % 991) * 0.008;
-      const waveA = Math.sin(t * Math.PI * 3.15 + phaseA);
-      const waveB = Math.sin(t * Math.PI * 6.2 + phaseB) * 0.28;
-      const waveC = Math.sin(t * Math.PI * 9.4 + phaseA * 0.7) * 0.10;
-      const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
-      const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
-      const bankWobble = Math.sin(t * Math.PI * 11 + phaseB) * 44 * ease;
-      const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
-      const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
+    band._buildingPath = true;
+    band._pathFallback = [
+      { x: band.ax || 0, y: band.ay || 0 },
+      { x: band.bx ?? band.ax ?? 0, y: band.by ?? band.ay ?? 0 },
+    ];
+    try {
+      const start = this._riverStartPoint(band);
+      const end = this._riverEndPoint(band);
+      band._pathFallback = [start, end];
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      const count = Math.max(40, band.bends || 64);
+      const pts = [];
 
-      let px = baseX + nx * (bend + bankWobble) + wanderX;
-      let py = baseY + ny * (bend + bankWobble) + wanderY;
-      const fromSpawnX = px - this.spawn.x;
-      const fromSpawnY = py - this.spawn.y;
-      const fromSpawn = Math.hypot(fromSpawnX, fromSpawnY);
-      const avoid = this._riverAvoidSpawnRadius || 0;
-      if (fromSpawn < avoid && fromSpawn > 0.001) {
-        const push = (avoid - fromSpawn) / avoid;
-        const pushDist = push * push * avoid * 0.92;
-        px += (fromSpawnX / fromSpawn) * pushDist;
-        py += (fromSpawnY / fromSpawn) * pushDist;
+      for (let i = 0; i <= count; i++) {
+        const t = i / count;
+        const ease = Math.sin(t * Math.PI);
+        const baseX = start.x + dx * t;
+        const baseY = start.y + dy * t;
+        const phaseA = (band.seed % 628) * 0.01;
+        const phaseB = (band.seed % 991) * 0.008;
+        const waveA = Math.sin(t * Math.PI * 3.15 + phaseA);
+        const waveB = Math.sin(t * Math.PI * 6.2 + phaseB) * 0.28;
+        const waveC = Math.sin(t * Math.PI * 9.4 + phaseA * 0.7) * 0.10;
+        const noise = (fbm(baseX * 0.0008, baseY * 0.0008, band.seed, 4) - 0.5) * 0.65;
+        const bend = (waveA + waveB + waveC + noise) * (band.amplitude || 1000) * ease;
+        const bankWobble = Math.sin(t * Math.PI * 11 + phaseB) * 44 * ease;
+        const wanderX = (fbm(baseX * 0.0012 + 13, baseY * 0.0012 - 7, band.seed + 41, 3) - 0.5) * 92 * ease;
+        const wanderY = (fbm(baseX * 0.0012 - 19, baseY * 0.0012 + 23, band.seed + 61, 3) - 0.5) * 92 * ease;
+
+        let px = baseX + nx * (bend + bankWobble) + wanderX;
+        let py = baseY + ny * (bend + bankWobble) + wanderY;
+        const fromSpawnX = px - this.spawn.x;
+        const fromSpawnY = py - this.spawn.y;
+        const fromSpawn = Math.hypot(fromSpawnX, fromSpawnY);
+        const avoid = this._riverAvoidSpawnRadius || 0;
+        if (fromSpawn < avoid && fromSpawn > 0.001) {
+          const push = (avoid - fromSpawn) / avoid;
+          const pushDist = push * push * avoid * 0.92;
+          px += (fromSpawnX / fromSpawn) * pushDist;
+          py += (fromSpawnY / fromSpawn) * pushDist;
+        }
+
+        pts.push({ x: px, y: py });
       }
 
-      pts.push({ x: px, y: py });
-    }
+      if (band.joinBand) {
+        this._blendRiverJoin(pts, band);
+      }
 
-    if (!band.joinBand) {
-      this._extendRiverHeadwaterPath(pts, band);
-      this._clipRiverPathToCoast(pts, 0.245);
-    }
+      if (!band.joinBand) {
+        this._extendRiverHeadwaterPath(pts, band);
+        this._clipRiverPathToCoast(pts, 0.245);
+      }
 
-    band._path = pts;
-    return pts;
+      band._path = pts;
+      return pts;
+    } finally {
+      band._buildingPath = false;
+      delete band._pathFallback;
+    }
+  }
+
+  _blendRiverJoin(pts, band) {
+    if (!pts?.length || pts.length < 6 || !band?.joinBand) return;
+    const main = this._riverPath(band.joinBand);
+    const joinT = band.joinT || 0.5;
+    const join = this._pointOnRiverPath(main, joinT);
+    const before = this._pointOnRiverPath(main, Math.max(0, joinT - 0.03));
+    const after = this._pointOnRiverPath(main, Math.min(1, joinT + 0.03));
+    const tx = after.x - before.x;
+    const ty = after.y - before.y;
+    const len = Math.hypot(tx, ty) || 1;
+    const ux = tx / len;
+    const uy = ty / len;
+    const blendCount = Math.min(7, pts.length - 1);
+
+    for (let i = 0; i < blendCount; i++) {
+      const idx = pts.length - 1 - i;
+      const frac = 1 - i / Math.max(1, blendCount - 1);
+      const back = 42 + i * 30;
+      const targetX = join.x - ux * back;
+      const targetY = join.y - uy * back;
+      pts[idx].x = pts[idx].x * (1 - frac) + targetX * frac;
+      pts[idx].y = pts[idx].y * (1 - frac) + targetY * frac;
+    }
+    pts[pts.length - 1] = { x: join.x, y: join.y };
   }
 
   _extendRiverHeadwaterPath(pts, band) {
@@ -16320,7 +18027,7 @@ export default class World {
     const nx = -uy;
     const ny = ux;
     const extra = [];
-    const maxSteps = 10;
+    const maxSteps = 18;
 
     for (let i = 1; i <= maxSteps; i++) {
       const dist = 110 * i;
@@ -16334,7 +18041,7 @@ export default class World {
       const sample = this._sampleCellRaw(px, py);
       if (sample.isWater) break;
       extra.push({ x: px, y: py });
-      if (sample.isMountain || sample.zone === "mountain" || sample.zone === "highlands" || this._groundAt(px, py) >= 0.42) {
+      if (sample.isMountain || sample.zone === "mountain" || this._riverSourceHeadwaterScore(px, py, sample) >= 2.25 || this._groundAt(px, py) >= 0.46) {
         break;
       }
     }
@@ -16529,6 +18236,7 @@ export default class World {
 
   _findRiverSourceNear(x, y, radius = 2200) {
     let fallback = null;
+    let bestScore = -Infinity;
     for (let r = 0; r <= radius; r += 90) {
       for (let a = 0; a < Math.PI * 2; a += Math.PI / 18) {
         const px = x + Math.cos(a) * r;
@@ -16537,7 +18245,11 @@ export default class World {
         if (raw.isWater || raw.isMountain) continue;
         if (this._isCoastalLandPoint(px, py)) continue;
         if (this._groundAt(px, py) < 0.275) continue;
-        if (!fallback) fallback = { x: px, y: py };
+        const score = this._riverSourceHeadwaterScore(px, py, raw);
+        if (score > bestScore) {
+          bestScore = score;
+          fallback = { x: px, y: py };
+        }
         if (this._isRiverSourceHeadwaterPoint(px, py)) return { x: px, y: py };
       }
     }
@@ -16546,18 +18258,24 @@ export default class World {
 
   _isRiverSourceHeadwaterPoint(x, y) {
     const raw = this._sampleCellRaw(x, y);
-    if (raw.isWater || raw.isMountain) return false;
+    return this._riverSourceHeadwaterScore(x, y, raw) >= 2.1;
+  }
 
+  _riverSourceHeadwaterScore(x, y, raw = this._sampleCellRaw(x, y)) {
+    if (raw.isWater || raw.isMountain) return -999;
     const ground = this._groundAt(x, y);
     const moisture = this._moistureAt(x, y);
     const mountainNear = this._isNearMountainWall(x, y, 320);
     const highlandish = ground >= 0.42 || raw.zone === "highlands" || raw.zone === "stone flats";
     const forested = raw.zone === "forest" || raw.zone === "deep wilds" || raw.zone === "greenwood";
-
-    if (mountainNear && ground >= 0.34) return true;
-    if (highlandish && moisture >= 0.30) return true;
-    if (ground >= 0.38 && forested) return true;
-    return false;
+    let score = 0;
+    if (mountainNear) score += 1.5;
+    if (highlandish) score += 0.7;
+    if (forested) score += 0.45;
+    if (moisture >= 0.30) score += 0.45;
+    if (ground >= 0.40) score += 0.35;
+    if (raw.zone === "stone flats") score -= 0.25;
+    return score;
   }
 
   _isCoastalLandPoint(x, y) {
@@ -16649,6 +18367,38 @@ export default class World {
       if (d2 < best2) best2 = d2;
     }
     return Math.sqrt(best2);
+  }
+
+  _nearestPointOnRiverPath(px, py, pts, segments = null) {
+    if (!pts?.length || pts.length < 2) return null;
+    const segs = segments || this._segmentsFromPoints(pts);
+    const metric = this._riverPathMetric(pts);
+    const lengths = metric.lengths || [];
+    const total = metric.total || 1;
+    let traversed = 0;
+    let best = null;
+
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const t = clamp(((px - seg.ax) * seg.dx + (py - seg.ay) * seg.dy) / seg.len2, 0, 1);
+      const qx = seg.ax + seg.dx * t;
+      const qy = seg.ay + seg.dy * t;
+      const ox = px - qx;
+      const oy = py - qy;
+      const d2 = ox * ox + oy * oy;
+      if (!best || d2 < best.d2) {
+        best = {
+          d2,
+          dist: Math.sqrt(d2),
+          x: qx,
+          y: qy,
+          t: clamp((traversed + (lengths[i] || 0) * t) / total, 0, 1),
+        };
+      }
+      traversed += lengths[i] || 0;
+    }
+
+    return best;
   }
 
   _segmentsFromPoints(pts) {
@@ -16864,6 +18614,9 @@ export default class World {
       }
     }
 
+    this._ensureRegionalAccessDocks(id);
+    id = ((this.docks || []).reduce((m, d) => Math.max(m, d.id || 0), id - 1)) + 1;
+
     for (const [x, y] of shrineSeeds) {
       const p = findLand(x, y, 460);
       if (p) this.shrines.push({ id: id++, x: p.x, y: p.y });
@@ -16889,6 +18642,24 @@ export default class World {
     }
 
     this._sanitizePoiPlacements();
+  }
+
+  _ensureRegionalAccessDocks(nextId = 1) {
+    const edge = this.mapHalfSize * 0.9;
+    const seeds = [
+      [0, edge], [0, -edge], [edge, 0], [-edge, 0],
+      [edge * 0.72, edge * 0.72], [-edge * 0.72, edge * 0.72],
+      [edge * 0.72, -edge * 0.72], [-edge * 0.72, -edge * 0.72],
+      [edge * 0.48, edge], [-edge * 0.48, edge], [edge * 0.48, -edge], [-edge * 0.48, -edge],
+    ];
+    let id = nextId;
+    for (const [x, y] of seeds) {
+      const shore = this._findShorePatchNear(x, y, 1200);
+      if (!shore) continue;
+      const tooClose = (this.docks || []).some((dock) => Math.hypot(dock.x - shore.x, dock.y - shore.y) < 720);
+      if (tooClose) continue;
+      this.docks.push({ id: id++, x: shore.x, y: shore.y, generatedRegional: true });
+    }
   }
 
   _sanitizePoiPlacements() {
@@ -16924,6 +18695,7 @@ export default class World {
     for (const p of this.camps) add(p, "camp");
     for (const p of this.docks) add(p, "dock");
     for (const p of this.dungeons) add(p, "dungeon");
+    for (const p of this._getPublicPassRoadNodes()) add(p, "pass");
 
     const starterDistances = [760];
     const starterAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
@@ -16972,8 +18744,39 @@ export default class World {
       connected.push(next);
     }
 
+    const loopNodes = mainNodes.filter((n) => n.type !== "starter" && n.type !== "spawn");
+    for (const node of loopNodes) {
+      const neighbors = loopNodes
+        .filter((other) => other !== node)
+        .map((other) => ({
+          other,
+          dist: Math.hypot(other.x - node.x, other.y - node.y),
+        }))
+        .filter((entry) => entry.dist >= 520 && entry.dist <= 3600)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, node.type === "pass" || node.type === "dock" ? 3 : 2);
+      for (const entry of neighbors) {
+        const width = node.type === "dock" || entry.other.type === "dock" ? 24 : 22;
+        this._addRoadSegment(node, entry.other, width, true);
+      }
+    }
+
     this._mapDirty = true;
     this._rebuildRoadPath();
+  }
+
+  _getPublicPassRoadNodes() {
+    const out = [];
+    const seen = new Set();
+    for (const pass of this._mountainPasses || []) {
+      if (!pass?.public) continue;
+      const key = `${Math.round(pass.x / 80)}|${Math.round(pass.y / 80)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const safe = this._findSafeLandPatchNear(pass.x, pass.y, 260) || { x: pass.x, y: pass.y };
+      out.push({ x: safe.x, y: safe.y });
+    }
+    return out;
   }
 
   _rebuildRoadPath() {
@@ -17214,8 +19017,8 @@ export default class World {
 
   _repairMissingBridges(candidates) {
     const out = [...(candidates || [])];
-    const bridgeGapLimit = 492;
-    const hardBridgeGapLimit = 620;
+    const bridgeGapLimit = 760;
+    const hardBridgeGapLimit = 920;
     const nearBridge = (x, y, radius = 88) =>
       out.some((b) => Math.hypot((b.cx || 0) - x, (b.cy || 0) - y) < radius);
     const sampleWaterCrossing = (ax, ay, bx, by) => {
@@ -17297,7 +19100,7 @@ export default class World {
         if (nearBridge(midX, midY, 96)) continue;
 
         const span = Math.hypot(landAfter.x - landBefore.x, landAfter.y - landBefore.y);
-        if (span < 24 || span > 388) continue;
+        if (span < 24 || span > 520) continue;
 
         const angle = Math.atan2(dy, dx);
         const shoreInset = Math.min(6, Math.max(2, (road.width || 24) * 0.08));
@@ -17336,8 +19139,8 @@ export default class World {
   }
 
   _ensureEndpointDockAccess() {
-    const endpointBridgeGap = 492;
-    const endpointPassageGap = 720;
+    const endpointBridgeGap = 760;
+    const endpointPassageGap = 1200;
     for (const road of this.roads || []) {
       const pts = road?.points;
       if (!pts || pts.length < 2) continue;
@@ -17356,7 +19159,7 @@ export default class World {
           const dx = water.shoreB.x - water.shoreA.x;
           const dy = water.shoreB.y - water.shoreA.y;
           const span = Math.hypot(dx, dy);
-          if (span >= 24 && span <= 492) {
+          if (span >= 24 && span <= 620) {
             const angle = Math.atan2(dy, dx);
             const dirX = span > 0 ? dx / span : 1;
             const dirY = span > 0 ? dy / span : 0;
@@ -17367,7 +19170,7 @@ export default class World {
               y: water.shoreB.y - dirY * shoreInset,
             };
             const bridgeSpan = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
-            if (bridgeSpan >= 20 && bridgeSpan <= 334) {
+            if (bridgeSpan >= 20 && bridgeSpan <= 520) {
               this.bridges.push({
                 cx: (start.x + endPoint.x) * 0.5,
                 cy: (start.y + endPoint.y) * 0.5,
@@ -17992,10 +19795,16 @@ export default class World {
 
   _queueWarmupTasks() {
     this._warmupTasks = [
+      () => this._buildMapPreviewWarmupChunk(),
       () => this._generateTreesChunk(),
       () => this._generateRocksChunk(),
       () => this._generateClutterChunk(),
     ];
+  }
+
+  _buildMapPreviewWarmupChunk() {
+    this._buildMapPreview();
+    return !this._mapBuildState;
   }
 
   _runWarmupTasks() {
@@ -18014,6 +19823,42 @@ export default class World {
       if (this._warmupTasks[0]()) this._warmupTasks.shift();
       else break;
     }
+  }
+
+  getBootProgress() {
+    const steps = [
+      this._mapPreviewBuildProgress(),
+      this._generatorProgress(this._treeBuildState),
+      this._generatorProgress(this._rockBuildState),
+      this._generatorProgress(this._clutterBuildState),
+    ];
+    const done = steps.reduce((sum, value) => sum + clamp(value, 0, 1), 0);
+    return clamp(done / Math.max(1, steps.length), 0, 1);
+  }
+
+  getBootStatusText() {
+    const progress = Math.round(this.getBootProgress() * 100);
+    if (this._mapBuildState) return `Charting maps... ${progress}%`;
+    if (this._treeBuildState) return `Planting forests... ${progress}%`;
+    if (this._rockBuildState) return `Setting stone... ${progress}%`;
+    if (this._clutterBuildState) return `Placing details... ${progress}%`;
+    return "Ready";
+  }
+
+  isBootWarm() {
+    return !this._mapBuildState && !this._treeBuildState && !this._rockBuildState && !this._clutterBuildState && !this._warmupTasks?.length;
+  }
+
+  _mapPreviewBuildProgress() {
+    if (this._mapInfo?.size >= (this._mapPreviewSize || 0) && !this._mapBuildState) return 1;
+    const state = this._mapBuildState;
+    if (!state?.size) return 0;
+    return clamp((state.row || 0) / Math.max(1, state.size), 0, 1);
+  }
+
+  _generatorProgress(state) {
+    if (!state) return 1;
+    return clamp((state.index || 0) / Math.max(1, state.count || 1), 0, 1);
   }
 
   _buildMountainRenderDataChunk() {
@@ -18195,7 +20040,7 @@ export default class World {
     if (!this._treeBuildState) {
       this._treeBuildState = {
         index: 0,
-        count: 2800,
+        count: 3320,
         spawnBias: 1.45,
       };
     }
@@ -18300,7 +20145,7 @@ export default class World {
     if (!this._rockBuildState) {
       this._rockBuildState = {
         index: 0,
-        count: 620,
+        count: 760,
       };
     }
 
@@ -18312,12 +20157,12 @@ export default class World {
       const tx = this._rng.range(-this.mapHalfSize + 420, this.mapHalfSize - 420);
       const ty = this._rng.range(-this.mapHalfSize + 420, this.mapHalfSize - 420);
       const s = this._sampleCell(tx, ty);
-      if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain") && !s.isWater && !s.bridge && !s.road) {
+      if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain" || s.zone === "old fields") && !s.isWater && !s.bridge && !s.road) {
         this._addRock({
           x: tx,
           y: ty,
           seed: (this.seed + state.index * 311 + 41) >>> 0,
-          scale: s.zone === "mountain" ? 1.1 + this._rng.next() * 0.55 : 0.7 + this._rng.next() * 0.45,
+          scale: s.zone === "mountain" ? 1.1 + this._rng.next() * 0.55 : s.zone === "old fields" ? 0.46 + this._rng.next() * 0.24 : 0.7 + this._rng.next() * 0.45,
           zone: s.zone,
         });
         if (this._rng.next() < 0.34) {
@@ -18358,7 +20203,7 @@ export default class World {
     if (!this._clutterBuildState) {
       this._clutterBuildState = {
         index: 0,
-        count: 1100,
+        count: 1360,
       };
     }
 
@@ -18468,6 +20313,7 @@ export default class World {
     const centerX = (left + right) * 0.5;
     const centerY = (top + bottom) * 0.5;
     const farTreeDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.42;
+    const mountainHeavyView = this._isNearMountainWall(centerX, centerY, 240);
 
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
@@ -18488,6 +20334,10 @@ export default class World {
             if (t.scale < 0.4 && (t.seed & 1) === 0) continue;
             if (t.scale < 0.3 && (t.seed & 3) !== 0) continue;
           }
+          if (mountainHeavyView && this._isNearMountainWall(t.x, t.y, 96)) {
+            if ((t.seed & 3) !== 0) continue;
+            if (dist2 > farTreeDist2 * 0.44) continue;
+          }
           if (this._isNearBridgeDeck(t.x, t.y, 26)) continue;
           if (this._isNearRiverChannel(t.x, t.y, 16)) continue;
           this._drawTree(ctx, t.x, t.y, t.seed, t.scale);
@@ -18504,6 +20354,7 @@ export default class World {
     const centerX = (left + right) * 0.5;
     const centerY = (top + bottom) * 0.5;
     const farClutterDist2 = Math.max(this.viewW, this.viewH) * Math.max(this.viewW, this.viewH) * 0.30;
+    const mountainHeavyView = this._isNearMountainWall(centerX, centerY, 240);
     const bucketSize = 320;
     const bx0 = Math.floor(cullLeft / bucketSize);
     const bx1 = Math.floor(cullRight / bucketSize);
@@ -18522,6 +20373,10 @@ export default class World {
           if (dist2 > farClutterDist2) {
             if ((item.seed & 1) === 0) continue;
             if (item.scale < 0.5 && (item.seed & 3) !== 0) continue;
+          }
+          if (mountainHeavyView && this._isNearMountainWall(item.x, item.y, 88)) {
+            if ((item.seed & 7) !== 0) continue;
+            if (dist2 > farClutterDist2 * 0.34) continue;
           }
           if (this._isNearBridgeDeck(item.x, item.y, 22)) continue;
           this._drawClutterItem(ctx, item);
@@ -18703,6 +20558,8 @@ $required = @(
   "src/game.js",
   "src/input.js",
   "src/main.js",
+  "src/main3d.js",
+  "src/render3d/world3d.js",
   "src/save.js",
   "src/ui.js",
   "src/util.js",
@@ -18776,6 +20633,8 @@ $files = @(
   "src/game.js",
   "src/input.js",
   "src/main.js",
+  "src/main3d.js",
+  "src/render3d/world3d.js",
   "src/save.js",
   "src/ui.js",
   "src/util.js",

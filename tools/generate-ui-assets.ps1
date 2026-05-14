@@ -375,20 +375,20 @@ function Save-MountainTexture {
   $path = Join-Path $outDir "mountain-texture.png"
   $bmp = New-Object System.Drawing.Bitmap 128, 128
   $g = New-Graphics $bmp
-  $g.Clear([System.Drawing.Color]::FromArgb(255, 98, 106, 116))
+  $g.Clear([System.Drawing.Color]::FromArgb(255, 88, 96, 106))
 
   $baseRect = [System.Drawing.Rectangle]::new(0, 0, 128, 128)
   $base = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
     $baseRect,
-    [System.Drawing.Color]::FromArgb(255, 120, 130, 142),
-    [System.Drawing.Color]::FromArgb(255, 74, 80, 90),
+    [System.Drawing.Color]::FromArgb(255, 126, 135, 146),
+    [System.Drawing.Color]::FromArgb(255, 70, 76, 84),
     90
   )
   $g.FillRectangle($base, $baseRect)
 
   $rand = [System.Random]::new(71)
-  for ($i = 0; $i -lt 110; $i++) {
-    $alpha = $rand.Next(24, 72)
+  for ($i = 0; $i -lt 140; $i++) {
+    $alpha = $rand.Next(18, 64)
     $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($alpha, 58 + $rand.Next(0, 42), 64 + $rand.Next(0, 42), 74 + $rand.Next(0, 42)))
     $x = $rand.Next(-8, 128)
     $y = $rand.Next(-8, 128)
@@ -408,9 +408,16 @@ function Save-MountainTexture {
     $x = 20 + $i * 16
     $g.DrawLine($shadowPen, $x, 0, $x + 10, 128)
   }
+  $screePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(44, 210, 216, 224), 1.4)
+  for ($i = 0; $i -lt 18; $i++) {
+    $x = $rand.Next(6, 122)
+    $y = $rand.Next(14, 118)
+    $g.DrawLine($screePen, $x, $y, $x - $rand.Next(3, 8), $y + $rand.Next(8, 18))
+  }
 
   $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
 
+  $screePen.Dispose()
   $shadowPen.Dispose()
   $ridgePen.Dispose()
   $base.Dispose()
@@ -606,40 +613,43 @@ function Save-MountainPeakSprite {
   $g = New-Graphics $bmp
   $g.Clear([System.Drawing.Color]::Transparent)
 
-  $shadowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 33, 38, 44))
-  $midBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(238, 87, 95, 106))
-  $lightBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(228, 140, 151, 163))
+  $shadowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(228, 29, 34, 40))
+  $midBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(240, 82, 92, 104))
+  $lightBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(232, 146, 156, 168))
   $snowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(214, 245, 249, 252))
   $ridgePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(170, 244, 248, 252), 2)
+  $facePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(72, 20, 24, 30), 2)
 
   $shadow = @(
     [System.Drawing.PointF]::new(10, 114),
-    [System.Drawing.PointF]::new(38, 78),
-    [System.Drawing.PointF]::new(60, 92),
-    [System.Drawing.PointF]::new(83, 26),
-    [System.Drawing.PointF]::new(108, 74),
-    [System.Drawing.PointF]::new(126, 58),
+    [System.Drawing.PointF]::new(30, 86),
+    [System.Drawing.PointF]::new(48, 70),
+    [System.Drawing.PointF]::new(62, 84),
+    [System.Drawing.PointF]::new(84, 18),
+    [System.Drawing.PointF]::new(108, 70),
+    [System.Drawing.PointF]::new(126, 56),
     [System.Drawing.PointF]::new(150, 114)
   )
   $g.FillPolygon($shadowBrush, $shadow)
 
   $mid = @(
     [System.Drawing.PointF]::new(16, 114),
-    [System.Drawing.PointF]::new(46, 82),
-    [System.Drawing.PointF]::new(66, 90),
-    [System.Drawing.PointF]::new(84, 36),
-    [System.Drawing.PointF]::new(100, 68),
-    [System.Drawing.PointF]::new(118, 60),
+    [System.Drawing.PointF]::new(40, 84),
+    [System.Drawing.PointF]::new(56, 74),
+    [System.Drawing.PointF]::new(70, 86),
+    [System.Drawing.PointF]::new(84, 30),
+    [System.Drawing.PointF]::new(98, 62),
+    [System.Drawing.PointF]::new(118, 58),
     [System.Drawing.PointF]::new(142, 114)
   )
   $g.FillPolygon($midBrush, $mid)
 
   $light = @(
     [System.Drawing.PointF]::new(22, 114),
-    [System.Drawing.PointF]::new(52, 88),
-    [System.Drawing.PointF]::new(70, 92),
-    [System.Drawing.PointF]::new(84, 44),
-    [System.Drawing.PointF]::new(94, 66),
+    [System.Drawing.PointF]::new(50, 92),
+    [System.Drawing.PointF]::new(68, 88),
+    [System.Drawing.PointF]::new(84, 40),
+    [System.Drawing.PointF]::new(94, 62),
     [System.Drawing.PointF]::new(110, 72),
     [System.Drawing.PointF]::new(128, 114)
   )
@@ -657,6 +667,10 @@ function Save-MountainPeakSprite {
   $g.DrawLine($ridgePen, 84, 36, 70, 92)
   $g.DrawLine($ridgePen, 84, 36, 102, 72)
   $g.DrawLine($ridgePen, 84, 36, 58, 78)
+  $g.DrawLine($facePen, 56, 74, 44, 112)
+  $g.DrawLine($facePen, 74, 84, 68, 112)
+  $g.DrawLine($facePen, 98, 62, 106, 112)
+  $g.DrawLine($facePen, 116, 58, 128, 112)
 
   $mistBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
     [System.Drawing.Point]::new(0, 90),
@@ -669,6 +683,7 @@ function Save-MountainPeakSprite {
   $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
 
   $mistBrush.Dispose()
+  $facePen.Dispose()
   $ridgePen.Dispose()
   $snowBrush.Dispose()
   $lightBrush.Dispose()

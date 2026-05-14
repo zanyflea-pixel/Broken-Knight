@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Broke Knight</title>
+  <title>Broke Knight 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="./favicon.ico" sizes="any" />
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -32,9 +32,6 @@
       overflow: hidden;
       background: #05070b;
       font-family: "Segoe UI", Arial, Helvetica, sans-serif;
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
     }
 
     body {
@@ -53,8 +50,6 @@
       width: 100%;
       height: 100%;
       outline: none;
-      cursor: crosshair;
-      touch-action: none;
     }
 
     .hud {
@@ -62,9 +57,9 @@
       left: 16px;
       top: 16px;
       z-index: 5;
-      max-width: min(390px, calc(100vw - 32px));
+      max-width: min(380px, calc(100vw - 32px));
       padding: 14px 16px;
-      border-radius: 12px;
+      border-radius: 14px;
       background: rgba(8, 13, 20, 0.78);
       border: 1px solid rgba(150, 190, 220, 0.18);
       box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
@@ -145,9 +140,8 @@
       left: 16px;
       bottom: 16px;
       z-index: 5;
-      max-width: min(520px, calc(100vw - 32px));
       padding: 10px 12px;
-      border-radius: 10px;
+      border-radius: 12px;
       background: rgba(8, 13, 20, 0.72);
       border: 1px solid rgba(150, 190, 220, 0.16);
       color: rgba(204, 217, 229, 0.88);
@@ -155,30 +149,11 @@
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
       backdrop-filter: blur(10px);
     }
-
-    #fatal-error {
-      position: fixed;
-      inset: 16px;
-      z-index: 20;
-      margin: 0;
-      padding: 16px;
-      overflow: auto;
-      white-space: pre-wrap;
-      border: 1px solid rgba(255, 120, 120, 0.45);
-      border-radius: 8px;
-      background: rgba(12, 5, 7, 0.94);
-      color: #ffd7d7;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      font: 13px/1.45 Consolas, "SFMono-Regular", monospace;
-      user-select: text;
-      -webkit-user-select: text;
-      touch-action: auto;
-    }
   </style>
 </head>
 <body>
   <div id="three-root">
-    <canvas id="three-canvas" tabindex="0" aria-label="Broke Knight 3D world"></canvas>
+    <canvas id="three-canvas" aria-label="Broke Knight 3D preview"></canvas>
   </div>
 
   <aside class="hud" aria-live="polite">
