@@ -25,6 +25,31 @@ export default class Save {
     }
   }
 
+  loadWithFallback(keys = []) {
+    const ordered = [];
+    const seen = new Set();
+    for (const key of [this.key, ...(Array.isArray(keys) ? keys : [])]) {
+      const normalized = String(key || "").trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(normalized);
+    }
+
+    for (const key of ordered) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") continue;
+        const data = this._sanitize(parsed);
+        if (!data) continue;
+        data._loadedFromKey = key;
+        return data;
+      } catch (_) {}
+    }
+    return null;
+  }
+
   save(data) {
     try {
       const clean = this._sanitize(data);

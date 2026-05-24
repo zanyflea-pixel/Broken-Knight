@@ -31,17 +31,87 @@ function quadPoint(ax, ay, bx, by, cx, cy, t) {
   };
 }
 
+function smoothstep(edge0, edge1, x) {
+  const t = clamp((x - edge0) / Math.max(0.0001, edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function sectionFootprintFrac2D(x, y, cx, cy, angle, length, width) {
+  const halfL = Math.max(1, length * 0.64);
+  const halfW = Math.max(1, width * 0.58);
+  const dx = x - cx;
+  const dy = y - cy;
+  const cosA = Math.cos(-(angle || 0));
+  const sinA = Math.sin(-(angle || 0));
+  const lx = dx * cosA - dy * sinA;
+  const ly = dx * sinA + dy * cosA;
+  const capRadius = Math.min(halfW, halfL);
+  const spineHalf = Math.max(0, halfL - capRadius);
+  const clampedX = clamp(lx, -spineHalf, spineHalf);
+  const dist = Math.hypot(lx - clampedX, ly);
+  return clamp(1 - dist / Math.max(1, capRadius), 0, 1);
+}
+
+function sectionUnionFrac2D(x, y, rivers) {
+  if (!Array.isArray(rivers) || !rivers.length) return null;
+  let topA = 0;
+  let topB = 0;
+  let topC = 0;
+  let floorSum = 0;
+  let weightSum = 0;
+  let widthMax = 0;
+  for (const river of rivers) {
+    const pts = river?.points || [];
+    if (pts.length < 2) continue;
+    const width = clamp(+river.width || 120, 48, 280);
+    const sectionLength = river.sectionLength || (river.sectionKind === "wide" ? 328 : 264);
+    const frac = sectionFootprintFrac2D(
+      x,
+      y,
+      river.sectionCenterX ?? pts[0].x,
+      river.sectionCenterY ?? pts[0].y,
+      river.sectionAngle || 0,
+      sectionLength + width * 1.2,
+      width * 2.85
+    );
+    if (frac <= 0.001) continue;
+    const weight = frac * frac;
+    const floor = Number.isFinite(river.floor) ? river.floor : 0;
+    floorSum += floor * weight;
+    weightSum += weight;
+    if (width > widthMax) widthMax = width;
+    if (frac >= topA) {
+      topC = topB;
+      topB = topA;
+      topA = frac;
+    } else if (frac >= topB) {
+      topC = topB;
+      topB = frac;
+    } else if (frac > topC) {
+      topC = frac;
+    }
+  }
+  if (weightSum <= 0) return null;
+  const union = 1 - (1 - topA) * (1 - topB * 0.96) * (1 - topC * 0.88);
+  return {
+    frac: clamp(union, 0, 1),
+    floor: floorSum / weightSum,
+    width: widthMax,
+  };
+}
+
 export default class World {
   constructor(seed = 12345, opts = {}) {
-    this.buildId = "rpg-v162";
+    this.variant = opts.variant || "default";
+    this.buildId = this.variant === "river-build" ? "river-build-v1" : "rpg-v162";
     this.seed = (seed | 0) || 12345;
 
     this.tileSize = opts.tileSize || 24;
     this.viewW = opts.viewW || 960;
     this.viewH = opts.viewH || 540;
 
-    this.mapHalfSize = 12000;
-    this.boundsHalfSize = 14500;
+    this.mapHalfSize = this.variant === "river-build" ? 1800 : 12000;
+    this.boundsHalfSize = this.variant === "river-build" ? 2200 : 14500;
 
     this.spawn = { x: 0, y: 0 };
     this.startTown = null;
@@ -81,8 +151,8 @@ export default class World {
     this._mapCanvas = null;
     this._mapInfo = null;
     this._mapDirty = true;
-    this._mapSize = 104;
-    this._mapPreviewSize = 96;
+    this._mapSize = 72;
+    this._mapPreviewSize = 56;
     this._terrainTileSize = 56;
     this._terrainChunkTiles = 10;
     this._terrainChunkSize = this._terrainTileSize * this._terrainChunkTiles;
@@ -116,10 +186,17 @@ export default class World {
     this._moistureCache = new Map();
     this._runtimeRawSampleCache = new Map();
     this._runtimeCellCache = new Map();
+    this.suppressEditorRiverCarve = false;
     this._groundCacheLimit = 24000;
     this._moistureCacheLimit = 18000;
     this._runtimeRawSampleCacheLimit = 12000;
     this._runtimeCellCacheLimit = 12000;
+    this.editorStorageKey = `broke-knight-world-editor-v1:${this.variant}:${this.seed}`;
+    this.editorState = this._makeEmptyEditorState();
+    this._editorBase = null;
+    this._editorSessionBaseState = null;
+    this.editorRevision = 0;
+    this._editorIdCounter = 100000;
 
     this._spawnSafeRadius = 620;
     this._spawnRoadRadius = 900;
@@ -128,21 +205,61 @@ export default class World {
     this._focusX = 0;
     this._focusY = 0;
 
-    this._riverBands = this._makeRiverBands();
-    this._buildRiverCaches();
-    this._mountainRanges = this._makeMountainRanges();
-    this._mountainPasses = this._makeMountainPasses();
+    this._riverBands = [];
+    this._mountainRanges = [];
+    this._mountainPasses = [];
     this._mountainRenderData = [];
     this._mountainRenderBuildIndex = 0;
     this._bootRawSampleCache = new Map();
 
+    if (this.variant === "river-build") {
+      this._buildRiverCaches();
+      this._roadPath = null;
+      this._captureEditorBase();
+      this._loadEditorData();
+      this._bootRawSampleCache = null;
+      return;
+    }
+
+    this._riverBands = this._makeRiverBands();
+    this._buildRiverCaches();
+    this._mountainRanges = this._makeMountainRanges();
+    this._mountainPasses = this._makeMountainPasses();
+
     this._buildPOIs();
     this._buildRoadNetwork();
     this._finalizeBridges();
+    this._stripBaseTravelNetwork();
     this._buildRoadCaches();
     this._ensureSpawnSafety();
+    this._captureEditorBase();
+    this._loadEditorData();
     this._bootRawSampleCache = null;
     this._queueWarmupTasks();
+  }
+
+  _makeEmptyEditorState() {
+    return {
+      roads: [],
+      rivers: [],
+      bridges: [],
+      docks: [],
+      props: [],
+      pois: [],
+      terrainStamps: [],
+      actions: [],
+      updatedAt: 0,
+    };
+  }
+
+  _stripBaseTravelNetwork() {
+    this.roads = [];
+    this.roadNodes = [];
+    this.bridges = [];
+    this._riverBands = [];
+    this._roadPath = null;
+    this._roadSeen = new Set();
+    this._buildRiverCaches();
   }
 
   _clearPropChunkCache() {
@@ -160,6 +277,891 @@ export default class World {
   _clearSceneChunkCache() {
     this._sceneChunkCache.clear();
     this._sceneChunkOrder.length = 0;
+  }
+
+  _getEditorStorage() {
+    try {
+      return globalThis?.localStorage || null;
+    } catch {
+      return null;
+    }
+  }
+
+  _sanitizeRoadData(road) {
+    return {
+      width: road?.width || 24,
+      visible: road?.visible !== false,
+      points: (road?.points || []).map((p) => ({ x: +p.x || 0, y: +p.y || 0 })),
+    };
+  }
+
+  _cloneRoadsForEditor(roads) {
+    return (roads || []).map((road) => this._sanitizeRoadData(road));
+  }
+
+  _cloneRiverBandsForEditor(bands) {
+    const indexMap = new Map();
+    const cloned = (bands || []).map((band, index) => {
+      indexMap.set(band, index);
+      return {
+        ax: +band.ax || 0,
+        ay: +band.ay || 0,
+        bx: Number.isFinite(+band.bx) ? +band.bx : null,
+        by: Number.isFinite(+band.by) ? +band.by : null,
+        coastSide: band.coastSide || "",
+        coastTarget: band.coastTarget ? { x: +band.coastTarget.x || 0, y: +band.coastTarget.y || 0 } : null,
+        width: +band.width || 0.8,
+        bends: +band.bends || 0,
+        amplitude: +band.amplitude || 0,
+        seed: +band.seed || 0,
+        joinT: Number.isFinite(+band.joinT) ? +band.joinT : null,
+        forcedContinuation: !!band.forcedContinuation,
+        pathPoints: Array.isArray(band.pathPoints) ? band.pathPoints.map((p) => ({ x: +p.x || 0, y: +p.y || 0 })) : null,
+        joinBandIndex: band.joinBand ? indexMap.get(band.joinBand) ?? null : null,
+      };
+    });
+    for (const band of cloned) {
+      if (Number.isInteger(band.joinBandIndex)) band.joinBand = cloned[band.joinBandIndex] || null;
+      delete band.joinBandIndex;
+    }
+    return cloned;
+  }
+
+  _cloneBridgesForEditor(bridges) {
+    return (bridges || []).map((bridge) => ({
+      cx: +bridge.cx || 0,
+      cy: +bridge.cy || 0,
+      length: +bridge.length || +bridge.w || 80,
+      width: +bridge.width || +bridge.h || 34,
+      angle: +bridge.angle || 0,
+      vertical: !!bridge.vertical,
+      authored: !!bridge.authored,
+      repaired: !!bridge.repaired,
+      start: bridge.start ? { x: +bridge.start.x || 0, y: +bridge.start.y || 0 } : null,
+      end: bridge.end ? { x: +bridge.end.x || 0, y: +bridge.end.y || 0 } : null,
+      path: (bridge.path || []).map((p) => ({ x: +p.x || 0, y: +p.y || 0 })),
+    }));
+  }
+
+  _cloneDocksForEditor(docks) {
+    return (docks || []).map((dock) => ({
+      x: +dock.x || 0,
+      y: +dock.y || 0,
+      id: dock.id || `dock-${Math.round(+dock.x || 0)}-${Math.round(+dock.y || 0)}`,
+    }));
+  }
+
+  _captureEditorBase() {
+    const maxPoiId = [
+      ...(this.camps || []),
+      ...(this.towns || []),
+      ...(this.waystones || []),
+      ...(this.dungeons || []),
+      ...(this.docks || []),
+      ...(this.shrines || []),
+      ...(this.caches || []),
+      ...(this.herbs || []),
+      ...(this.dragonLairs || []),
+      ...(this.secrets || []),
+      ...(this.bridges || []),
+    ].reduce((m, item) => Math.max(m, +item?.id || 0), 0);
+    this._editorIdCounter = Math.max(this._editorIdCounter, maxPoiId + 1);
+    this._editorBase = {
+      roads: this._cloneRoadsForEditor(this.roads),
+      riverBands: this._cloneRiverBandsForEditor(this._riverBands),
+      bridges: this._cloneBridgesForEditor(this.bridges),
+      docks: this._cloneDocksForEditor(this.docks),
+      trees: (this._trees || []).map((item) => ({ x: +item.x || 0, y: +item.y || 0, scale: +item.scale || 1, seed: +item.seed || 0 })),
+      rocks: (this._rocks || []).map((item) => ({ x: +item.x || 0, y: +item.y || 0, scale: +item.scale || 1, seed: +item.seed || 0 })),
+      clutter: (this._clutter || []).map((item) => ({ x: +item.x || 0, y: +item.y || 0, scale: +item.scale || 1, seed: +item.seed || 0 })),
+      camps: (this.camps || []).map((item) => ({ ...item })),
+      towns: (this.towns || []).map((item) => ({ ...item })),
+      waystones: (this.waystones || []).map((item) => ({ ...item })),
+      dungeons: (this.dungeons || []).map((item) => ({ ...item })),
+      shrines: (this.shrines || []).map((item) => ({ ...item })),
+      caches: (this.caches || []).map((item) => ({ ...item })),
+      secrets: (this.secrets || []).map((item) => ({ ...item })),
+      herbs: (this.herbs || []).map((item) => ({ ...item })),
+      dragonLairs: (this.dragonLairs || []).map((item) => ({ ...item })),
+    };
+  }
+
+  _serializeEditorState() {
+    return JSON.stringify({
+      version: 1,
+      seed: this.seed,
+      buildId: this.buildId,
+      data: this.editorState,
+    }, null, 2);
+  }
+
+  exportEditorData() {
+    return this._serializeEditorState();
+  }
+
+  _cloneEditorStateData(state = this.editorState) {
+    return JSON.parse(JSON.stringify(state || this._makeEmptyEditorState()));
+  }
+
+  saveEditorData() {
+    const storage = this._getEditorStorage();
+    this.editorState.updatedAt = Date.now();
+    if (!storage) return false;
+    try {
+      storage.setItem(this.editorStorageKey, this._serializeEditorState());
+      return true;
+    } catch (err) {
+      console.warn("Editor save failed", err);
+      return false;
+    }
+  }
+
+  _loadEditorData() {
+    const storage = this._getEditorStorage();
+    if (!storage) return false;
+    try {
+      const raw = storage.getItem(this.editorStorageKey);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.data) return false;
+      return this.importEditorData(parsed.data, { skipSave: true });
+    } catch (err) {
+      console.warn("Editor load failed", err);
+      return false;
+    }
+  }
+
+  clearEditorData() {
+    this.editorState = this._makeEmptyEditorState();
+    this.applyEditorState();
+    const storage = this._getEditorStorage();
+    if (storage) {
+      try {
+        storage.removeItem(this.editorStorageKey);
+      } catch {}
+    }
+  }
+
+  captureEditorSessionBase() {
+    this._editorSessionBaseState = this._cloneEditorStateData(this.editorState);
+    return true;
+  }
+
+  revertEditorToSessionBase() {
+    if (!this._editorSessionBaseState) return false;
+    this.editorState = this._cloneEditorStateData(this._editorSessionBaseState);
+    this.applyEditorState();
+    this.saveEditorData();
+    return true;
+  }
+
+  importEditorData(data, opts = {}) {
+    const source = typeof data === "string" ? JSON.parse(data) : data;
+    const normalized = source?.data ? source.data : source;
+    if (!normalized || typeof normalized !== "object") return false;
+    this.editorState = {
+      roads: [],
+      rivers: [],
+      bridges: [],
+      docks: Array.isArray(normalized.docks) ? normalized.docks.map((dock) => ({
+        x: +dock.x || 0,
+        y: +dock.y || 0,
+      })) : [],
+      props: Array.isArray(normalized.props) ? normalized.props.map((item) => ({
+        kind: item.kind || "tree",
+        x: +item.x || 0,
+        y: +item.y || 0,
+        scale: clamp(+item.scale || 1, 0.4, 3.2),
+      })) : [],
+      pois: Array.isArray(normalized.pois) ? normalized.pois.map((item) => ({
+        kind: item.kind || "camp",
+        x: +item.x || 0,
+        y: +item.y || 0,
+      })) : [],
+      terrainStamps: Array.isArray(normalized.terrainStamps) ? normalized.terrainStamps.map((stamp) => ({
+        mode: stamp.mode || "raise",
+        x: +stamp.x || 0,
+        y: +stamp.y || 0,
+        radius: clamp(+stamp.radius || 180, 24, 1200),
+        power: clamp(+stamp.power || 14, 1, 160),
+        target: Number.isFinite(+stamp.target) ? +stamp.target : null,
+      })) : [],
+      actions: Array.isArray(normalized.actions) ? normalized.actions : [],
+      updatedAt: Date.now(),
+    };
+    this.applyEditorState();
+    if (!opts.skipSave) this.saveEditorData();
+    return true;
+  }
+
+  _invalidateWorldCaches() {
+    this._groundCache.clear();
+    this._moistureCache.clear();
+    this._runtimeRawSampleCache.clear();
+    this._runtimeCellCache.clear();
+    this._terrainChunkCache.clear();
+    this._terrainChunkOrder.length = 0;
+    this._clearPropChunkCache();
+    this._clearBridgeChunkCache();
+    this._mapDirty = true;
+    this._mapBuildQueued = false;
+    this._mapBuildState = null;
+    this._discoveryExportCache = null;
+  }
+
+  applyEditorState() {
+    if (!this._editorBase) return false;
+    this.roads = this._cloneRoadsForEditor(this._editorBase.roads);
+    this._riverBands = this._cloneRiverBandsForEditor(this._editorBase.riverBands);
+    this.bridges = this._cloneBridgesForEditor(this._editorBase.bridges);
+    this.docks = this._cloneDocksForEditor(this._editorBase.docks);
+    this._trees = (this._editorBase.trees || []).map((item) => ({ ...item }));
+    this._rocks = (this._editorBase.rocks || []).map((item) => ({ ...item }));
+    this._clutter = (this._editorBase.clutter || []).map((item) => ({ ...item }));
+    this.camps = (this._editorBase.camps || []).map((item) => ({ ...item }));
+    this.towns = (this._editorBase.towns || []).map((item) => ({ ...item }));
+    this.waystones = (this._editorBase.waystones || []).map((item) => ({ ...item }));
+    this.dungeons = (this._editorBase.dungeons || []).map((item) => ({ ...item }));
+    this.shrines = (this._editorBase.shrines || []).map((item) => ({ ...item }));
+    this.caches = (this._editorBase.caches || []).map((item) => ({ ...item }));
+    this.secrets = (this._editorBase.secrets || []).map((item) => ({ ...item }));
+    this.herbs = (this._editorBase.herbs || []).map((item) => ({ ...item }));
+    this.dragonLairs = (this._editorBase.dragonLairs || []).map((item) => ({ ...item }));
+
+    for (const road of this.editorState.roads || []) {
+      const piece = this._makeRoadPiece(road.points, road.width, road.visible !== false);
+      if (piece) this.roads.push(piece);
+    }
+
+    for (const river of this.editorState.rivers || []) {
+      this._riverBands.push({
+        ax: river.points[0].x,
+        ay: river.points[0].y,
+        bx: river.points[river.points.length - 1].x,
+        by: river.points[river.points.length - 1].y,
+        width: clamp((river.width || 110) / 110, 0.42, 2.4),
+        bends: Math.max(18, river.points.length * 2),
+        amplitude: 0,
+        seed: hash2((river.points[0].x / 10) | 0, (river.points[0].y / 10) | 0, this.seed + 9001),
+        pathPoints: river.points.map((p) => ({ x: p.x, y: p.y })),
+        authored: true,
+        sectionKind: river.sectionKind || "",
+        sectionAngle: Number.isFinite(river.sectionAngle) ? river.sectionAngle : 0,
+        sectionCenterX: Number.isFinite(river.sectionCenterX) ? river.sectionCenterX : river.points[0].x,
+        sectionCenterY: Number.isFinite(river.sectionCenterY) ? river.sectionCenterY : river.points[0].y,
+        sectionLength: Number.isFinite(river.sectionLength) ? river.sectionLength : Math.hypot(
+          river.points[river.points.length - 1].x - river.points[0].x,
+          river.points[river.points.length - 1].y - river.points[0].y
+        ),
+      });
+    }
+
+    for (const bridge of this.editorState.bridges || []) {
+      const angle = bridge.angle || 0;
+      const dx = Math.cos(angle) * (bridge.length * 0.5);
+      const dy = Math.sin(angle) * (bridge.length * 0.5);
+      const start = { x: bridge.x - dx, y: bridge.y - dy };
+      const end = { x: bridge.x + dx, y: bridge.y + dy };
+      this.bridges.push({
+        cx: bridge.x,
+        cy: bridge.y,
+        length: bridge.length,
+        width: bridge.width,
+        angle,
+        vertical: Math.abs(dy) > Math.abs(dx),
+        path: [start, end],
+        start,
+        end,
+        authored: true,
+      });
+    }
+
+    for (const dock of this.editorState.docks || []) {
+      this.docks.push({
+        x: dock.x,
+        y: dock.y,
+        id: `editor-dock-${Math.round(dock.x)}-${Math.round(dock.y)}`,
+        authored: true,
+      });
+    }
+
+    for (const prop of this.editorState.props || []) {
+      const item = {
+        x: prop.x,
+        y: prop.y,
+        scale: clamp(prop.scale || 1, 0.4, 3.2),
+        seed: hash2((prop.x / 4) | 0, (prop.y / 4) | 0, this.seed + 811),
+        authored: true,
+      };
+      if (prop.kind === "tree") this._trees.push(item);
+      else if (prop.kind === "rock") this._rocks.push(item);
+      else this._clutter.push(item);
+    }
+
+    for (const poi of this.editorState.pois || []) {
+      const id = this._editorNextId();
+      if (poi.kind === "camp") {
+        this.camps.push({ id, type: "editor", name: "Builder Camp", x: poi.x, y: poi.y, authored: true });
+      } else if (poi.kind === "town") {
+        this.towns.push({
+          id,
+          name: "Builder Town",
+          x: poi.x,
+          y: poi.y,
+          coastal: false,
+          npcs: ["Builder", "Smith", "Vendor", "Archivist"],
+          authored: true,
+        });
+      } else if (poi.kind === "dungeon") this.dungeons.push({ id, x: poi.x, y: poi.y, authored: true });
+      else if (poi.kind === "shrine") this.shrines.push({ id, x: poi.x, y: poi.y, authored: true });
+      else if (poi.kind === "cache") this.caches.push({ id, x: poi.x, y: poi.y, authored: true });
+      else if (poi.kind === "secret") this.secrets.push({ id, name: "Builder Secret", x: poi.x, y: poi.y, authored: true });
+      else if (poi.kind === "dragon") this.dragonLairs.push({ id, x: poi.x, y: poi.y, authored: true });
+      else if (poi.kind === "waystone") this.waystones.push({ id, x: poi.x, y: poi.y, authored: true });
+      else if (poi.kind === "herb") this.herbs.push({ id, x: poi.x, y: poi.y, zone: this._sampleCell(poi.x, poi.y).zone, picked: false, authored: true });
+    }
+
+    this._roadSeen = new Set();
+    this._buildRiverCaches();
+    this._buildRoadCaches();
+    this._rebuildRoadPath();
+    this._rebuildTreeBuckets?.();
+    this._rebuildRockBuckets?.();
+    this._rebuildClutterBuckets?.();
+    this._invalidateWorldCaches();
+    this.editorRevision++;
+    return true;
+  }
+
+  getEditorRevision() {
+    return this.editorRevision || 0;
+  }
+
+  _pushEditorAction(entry) {
+    this.editorState.actions.push({
+      type: entry.type || "edit",
+      index: entry.index ?? -1,
+      time: Date.now(),
+    });
+    if (this.editorState.actions.length > 240) this.editorState.actions.splice(0, this.editorState.actions.length - 240);
+  }
+
+  _sampleEditorStrokePoints(points, step = 120, minimum = 2) {
+    if (!Array.isArray(points) || points.length < 2) return [];
+    const out = [];
+    let last = null;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (!p || !Number.isFinite(+p.x) || !Number.isFinite(+p.y)) continue;
+      const next = { x: +p.x || 0, y: +p.y || 0 };
+      if (!last || Math.hypot(next.x - last.x, next.y - last.y) >= step) {
+        out.push(next);
+        last = next;
+      }
+    }
+    const end = points[points.length - 1];
+    if (end && Number.isFinite(+end.x) && Number.isFinite(+end.y)) {
+      const finalPoint = { x: +end.x || 0, y: +end.y || 0 };
+      const tail = out[out.length - 1];
+      if (!tail || Math.hypot(finalPoint.x - tail.x, finalPoint.y - tail.y) > 6) out.push(finalPoint);
+    }
+    while (out.length > 2 && out.length < minimum) out.push({ ...out[out.length - 1] });
+    return out.length >= minimum ? out : [];
+  }
+
+  _sampleRiverBedTarget(points, width = 120) {
+    if (!Array.isArray(points) || points.length < 2) return null;
+    let minGround = Infinity;
+    let sumGround = 0;
+    let count = 0;
+    for (const p of points) {
+      if (!p) continue;
+      const g = this._groundAt(+p.x || 0, +p.y || 0);
+      if (!Number.isFinite(g)) continue;
+      minGround = Math.min(minGround, g);
+      sumGround += g;
+      count++;
+    }
+    if (!count || !Number.isFinite(minGround)) return null;
+    const avgGround = sumGround / count;
+    const depth = clamp((+width || 120) * 0.0012, 0.09, 0.19);
+    return Math.min(minGround, avgGround - depth * 0.35) - depth;
+  }
+
+  _smoothEditorRiverPoints(points, iterations = 2) {
+    let current = Array.isArray(points) ? points.map((p) => ({ x: +p.x || 0, y: +p.y || 0 })) : [];
+    if (current.length > 96) current = this._sampleEditorStrokePoints(current, 18, 12);
+    if (current.length < 3) return current;
+    for (let pass = 0; pass < iterations; pass++) {
+      const next = [current[0]];
+      for (let i = 0; i < current.length - 1; i++) {
+        const a = current[i];
+        const b = current[i + 1];
+        next.push(
+          { x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 },
+          { x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 }
+        );
+      }
+      next.push(current[current.length - 1]);
+      current = next;
+    }
+    return this._sampleEditorStrokePoints(current, 10, 8);
+  }
+
+  _simplifyEditorRiverPoints(points, angleToleranceDeg = 7, minSeg = 4) {
+    const src = Array.isArray(points) ? points.map((p) => ({ x: +p.x || 0, y: +p.y || 0 })) : [];
+    if (src.length < 3) return src;
+    const keep = [src[0]];
+    const angleTolerance = (angleToleranceDeg * Math.PI) / 180;
+    for (let i = 1; i < src.length - 1; i++) {
+      const a = keep[keep.length - 1];
+      const b = src[i];
+      const c = src[i + 1];
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const bcx = c.x - b.x;
+      const bcy = c.y - b.y;
+      const abLen = Math.hypot(abx, aby);
+      const bcLen = Math.hypot(bcx, bcy);
+      if (abLen < 0.001 || bcLen < 0.001) continue;
+      const dot = clamp((abx * bcx + aby * bcy) / (abLen * bcLen), -1, 1);
+      const turn = Math.acos(dot);
+      if (turn <= angleTolerance && abLen >= minSeg && bcLen >= minSeg) {
+        continue;
+      }
+      keep.push(b);
+    }
+    keep.push(src[src.length - 1]);
+    return keep;
+  }
+
+  bakeEditorRiversToTerrain() {
+    const rivers = this.editorState?.rivers || [];
+    if (!rivers.length) return false;
+    const keep = [];
+    for (const stamp of this.editorState.terrainStamps || []) {
+      if (stamp?.mode !== "river-bake") keep.push(stamp);
+    }
+    this.editorState.terrainStamps = keep;
+
+    let added = 0;
+    for (const river of rivers) {
+      const pts = Array.isArray(river?.points) ? river.points : [];
+      if (pts.length < 2) continue;
+      const width = clamp(+river.width || 120, 48, 280);
+      const sampled = this._sampleEditorStrokePoints(pts, Math.max(18, width * 0.16), 6);
+      for (const p of sampled) {
+        this.editorState.terrainStamps.push({
+          mode: "river-bake",
+          x: +p.x || 0,
+          y: +p.y || 0,
+          radius: clamp(width * 0.82, 44, 340),
+          power: clamp(width * 0.52, 18, 118),
+          target: Number.isFinite(river.floor) ? river.floor : this._sampleRiverBedTarget(pts, width),
+        });
+        added++;
+      }
+    }
+    if (!added) return false;
+    this.editorState.updatedAt = Date.now();
+    this._pushEditorAction({ type: "terrain", index: this.editorState.terrainStamps.length - 1 });
+    this.applyEditorState();
+    this.saveEditorData();
+    return true;
+  }
+
+  rebuildEditorTravelFromBase() {
+    if (!this._editorBase) return false;
+    const roads = [];
+    const rivers = [];
+    const bridges = [];
+    const docks = [];
+    for (const road of this._editorBase.roads || []) {
+      if (!road?.visible || !Array.isArray(road.points) || road.points.length < 2) continue;
+      const sampled = this._sampleEditorStrokePoints(road.points, Math.max(96, (road.width || 36) * 1.75));
+      if (sampled.length < 2) continue;
+      roads.push({
+        width: clamp((road.width || 36) * 1.16, 32, 180),
+        visible: true,
+        points: sampled,
+      });
+    }
+
+    for (const band of this._editorBase.riverBands || []) {
+      const path = this._clipRiverPathToCoast(this._riverPath(band) || [], 0.245) || this._riverPath(band) || [];
+      const sampled = this._smoothEditorRiverPoints(
+        this._sampleEditorStrokePoints(path, Math.max(72, this._riverVisualWidth(band) * 1.2)),
+        2
+      );
+      if (sampled.length < 2) continue;
+      rivers.push({
+        width: clamp(this._riverVisualWidth(band) * 1.08, 56, 240),
+        points: sampled,
+      });
+    }
+
+    for (const bridge of this._editorBase.bridges || []) {
+      bridges.push({
+        x: +bridge.cx || 0,
+        y: +bridge.cy || 0,
+        length: clamp((bridge.length || 120) * 1.06, 60, 520),
+        width: clamp((bridge.width || 42) * 1.12, 26, 160),
+        angle: +bridge.angle || 0,
+      });
+    }
+
+    for (const dock of this._editorBase.docks || []) {
+      docks.push({ x: +dock.x || 0, y: +dock.y || 0 });
+    }
+
+    this.editorState.roads = roads;
+    this.editorState.rivers = rivers;
+    this.editorState.bridges = bridges;
+    this.editorState.docks = docks;
+    this.editorState.actions = [];
+    this.editorState.updatedAt = Date.now();
+    this.applyEditorState();
+    this.saveEditorData();
+    return true;
+  }
+
+  addEditorRoadStroke(points, width = 72) {
+    if (!Array.isArray(points) || points.length < 2) return false;
+    this.editorState.roads.push({
+      width: clamp(+width || 72, 24, 220),
+      visible: true,
+      points: points.map((p) => ({ x: +p.x || 0, y: +p.y || 0 })),
+    });
+    this._pushEditorAction({ type: "road", index: this.editorState.roads.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorRiverStroke(points, width = 120) {
+    if (!Array.isArray(points) || points.length < 2) return false;
+    const shaped = this._smoothEditorRiverPoints(points, 2);
+    if (shaped.length < 2) return false;
+    const floor = this._sampleRiverBedTarget(shaped, width);
+    this.editorState.rivers.push({
+      width: clamp(+width || 120, 48, 280),
+      points: shaped,
+      floor,
+    });
+    this._pushEditorAction({ type: "river", index: this.editorState.rivers.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  _makeEditorRiverPieceRaw(x, y, piece = "straight", angle = 0, width = 120) {
+    const w = clamp(+width || 120, 48, 280);
+    const a = Number.isFinite(+angle) ? +angle : 0;
+    const base = [
+      { x: -132, y: 0 },
+      { x: 132, y: 0 },
+    ];
+    const cosA = Math.cos(a);
+    const sinA = Math.sin(a);
+    const points = base.map((p) => ({
+      x: (+x || 0) + p.x * cosA - p.y * sinA,
+      y: (+y || 0) + p.x * sinA + p.y * cosA,
+    }));
+    const shaped = points;
+    if (shaped.length < 2) return null;
+    const actualWidth = w;
+    const floor = this._sampleRiverBedTarget(shaped, actualWidth);
+    const minX = Math.min(...shaped.map((p) => p.x));
+    const maxX = Math.max(...shaped.map((p) => p.x));
+    const minY = Math.min(...shaped.map((p) => p.y));
+    const maxY = Math.max(...shaped.map((p) => p.y));
+    return {
+      width: actualWidth,
+      points: shaped,
+      floor,
+      bandWidth: clamp(actualWidth / 110, 0.42, 2.4),
+      visualWidth: 82 * clamp(actualWidth / 110, 0.42, 2.4),
+      sectionKind: "straight",
+      sectionAngle: a,
+      sectionCenterX: +x || 0,
+      sectionCenterY: +y || 0,
+      sectionLength: 264,
+      minX,
+      maxX,
+      minY,
+      maxY,
+    };
+  }
+
+  createEditorRiverPieceData(x, y, piece = "straight", angle = 0, width = 120) {
+    return this._makeEditorRiverPieceRaw(x, y, "straight", angle, width);
+  }
+
+  addEditorRiverPieceAt(x, y, piece = "straight", angle = 0, width = 120) {
+    const river = this.createEditorRiverPieceData(x, y, "straight", angle, width);
+    if (!river) return false;
+    const sectionId = this._editorNextId();
+    this.editorState.rivers.push({
+      width: river.width,
+      points: river.points,
+      floor: river.floor,
+      sectionId,
+      sectionKind: "straight",
+      sectionAngle: river.sectionAngle,
+      sectionCenterX: river.sectionCenterX,
+      sectionCenterY: river.sectionCenterY,
+      sectionLength: 264,
+    });
+    const sampled = this._sampleEditorStrokePoints(river.points, Math.max(16, river.width * 0.14), 6);
+    const sectionAngle = river.sectionAngle || 0;
+    const nx = -Math.sin(sectionAngle);
+    const ny = Math.cos(sectionAngle);
+    const lateralSteps = this.variant === "river-build" ? [-0.8, -0.4, 0, 0.4, 0.8] : [0];
+    const cutTarget = (Number.isFinite(river.floor) ? river.floor : this._sampleRiverBedTarget(river.points, river.width)) - (this.variant === "river-build" ? 0.18 : 0.08);
+    for (const p of sampled) {
+      for (const side of lateralSteps) {
+        this.editorState.terrainStamps.push({
+          mode: "river-cut",
+          x: (+p.x || 0) + nx * river.width * side * 0.58,
+          y: (+p.y || 0) + ny * river.width * side * 0.58,
+          radius: clamp(this.variant === "river-build" ? river.width * 0.56 : river.width * 0.84, 46, 260),
+          power: clamp(this.variant === "river-build" ? river.width * 1.55 : river.width * 0.92, 36, 240),
+          target: cutTarget,
+          sectionId,
+        });
+      }
+    }
+    this._pushEditorAction({ type: "river", index: this.editorState.rivers.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorRiverCutSectionAt(x, y, angle = 0, width = 120) {
+    const river = this.createEditorRiverPieceData(x, y, "straight", angle, width);
+    if (!river) return false;
+    const sectionId = this._editorNextId();
+    const sampled = this._sampleEditorStrokePoints(river.points, Math.max(14, river.width * 0.12), 8);
+    const sectionAngle = river.sectionAngle || 0;
+    const nx = -Math.sin(sectionAngle);
+    const ny = Math.cos(sectionAngle);
+    const lateralSteps = [-0.95, -0.72, -0.48, -0.24, 0, 0.24, 0.48, 0.72, 0.95];
+    const floorBase = Number.isFinite(river.floor) ? river.floor : this._sampleRiverBedTarget(river.points, river.width);
+    for (const p of sampled) {
+      for (const side of lateralSteps) {
+        const edgeFrac = Math.abs(side);
+        const radiusScale = 0.44 + (1 - edgeFrac) * 0.28;
+        const powerScale = 0.9 + (1 - edgeFrac) * 1.55;
+        const targetOffset = 0.18 + (1 - edgeFrac) * 0.28;
+        this.editorState.terrainStamps.push({
+          mode: "river-cut",
+          x: (+p.x || 0) + nx * river.width * side * 0.62,
+          y: (+p.y || 0) + ny * river.width * side * 0.62,
+          radius: clamp(river.width * radiusScale, 52, 280),
+          power: clamp(river.width * powerScale, 80, 360),
+          target: floorBase - targetOffset,
+          sectionId,
+        });
+      }
+    }
+    this._pushEditorAction({ type: "terrain-section", sectionId });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorBridgeAt(x, y, opts = {}) {
+    const angle = Number.isFinite(+opts.angle) ? +opts.angle : 0;
+    this.editorState.bridges.push({
+      x: +x || 0,
+      y: +y || 0,
+      length: clamp(+opts.length || 140, 40, 420),
+      width: clamp(+opts.width || 42, 22, 140),
+      angle,
+    });
+    this._pushEditorAction({ type: "bridge", index: this.editorState.bridges.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorDockAt(x, y) {
+    this.editorState.docks.push({ x: +x || 0, y: +y || 0 });
+    this._pushEditorAction({ type: "dock", index: this.editorState.docks.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorPropAt(x, y, kind = "tree", scale = 1) {
+    this.editorState.props.push({
+      kind,
+      x: +x || 0,
+      y: +y || 0,
+      scale: clamp(+scale || 1, 0.4, 3.2),
+    });
+    this._pushEditorAction({ type: "prop", index: this.editorState.props.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorPoiAt(x, y, kind = "camp") {
+    this.editorState.pois.push({
+      kind,
+      x: +x || 0,
+      y: +y || 0,
+    });
+    this._pushEditorAction({ type: "poi", index: this.editorState.pois.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorTerrainStamp(stamp) {
+    if (!stamp) return false;
+    let target = null;
+    const sx = +stamp.x || 0;
+    const sy = +stamp.y || 0;
+    const radius = clamp(+stamp.radius || 180, 24, 1200);
+    if (stamp.mode === "flatten") {
+      target = this._groundAt(sx, sy);
+    } else if (stamp.mode === "smooth") {
+      const samplePts = [
+        [0, 0],
+        [radius * 0.35, 0],
+        [-radius * 0.35, 0],
+        [0, radius * 0.35],
+        [0, -radius * 0.35],
+      ];
+      let sum = 0;
+      let count = 0;
+      for (const [ox, oy] of samplePts) {
+        sum += this._groundAt(sx + ox, sy + oy);
+        count++;
+      }
+      target = count ? sum / count : this._groundAt(sx, sy);
+    }
+    this.editorState.terrainStamps.push({
+      mode: stamp.mode || "raise",
+      x: sx,
+      y: sy,
+      radius,
+      power: clamp(+stamp.power || 14, 1, 160),
+      target,
+    });
+    this._pushEditorAction({ type: "terrain", index: this.editorState.terrainStamps.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorTerrainStampBatch(stamps) {
+    if (!Array.isArray(stamps) || !stamps.length) return false;
+    let added = 0;
+    for (const stamp of stamps) {
+      if (!stamp) continue;
+      let target = null;
+      const sx = +stamp.x || 0;
+      const sy = +stamp.y || 0;
+      const radius = clamp(+stamp.radius || 180, 24, 1200);
+      if (stamp.mode === "flatten") {
+        target = this._groundAt(sx, sy);
+      } else if (stamp.mode === "smooth") {
+        const samplePts = [
+          [0, 0],
+          [radius * 0.35, 0],
+          [-radius * 0.35, 0],
+          [0, radius * 0.35],
+          [0, -radius * 0.35],
+        ];
+        let sum = 0;
+        let count = 0;
+        for (const [ox, oy] of samplePts) {
+          sum += this._groundAt(sx + ox, sy + oy);
+          count++;
+        }
+        target = count ? sum / count : this._groundAt(sx, sy);
+      }
+      this.editorState.terrainStamps.push({
+        mode: stamp.mode || "raise",
+        x: sx,
+        y: sy,
+        radius,
+        power: clamp(+stamp.power || 14, 1, 160),
+        target,
+      });
+      added++;
+    }
+    if (!added) return false;
+    this._pushEditorAction({ type: "terrain", index: this.editorState.terrainStamps.length - 1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  eraseEditorAt(x, y, radius = 160) {
+    const r = Math.max(24, +radius || 160);
+    const removeNearPoints = (items, key = "points") => items.filter((item) => {
+      const pts = item[key] || [];
+      return !pts.some((p) => Math.hypot((p.x || 0) - x, (p.y || 0) - y) <= r);
+    });
+    const before = JSON.stringify(this.editorState);
+    this.editorState.roads = removeNearPoints(this.editorState.roads);
+    this.editorState.rivers = removeNearPoints(this.editorState.rivers);
+    this.editorState.bridges = (this.editorState.bridges || []).filter((bridge) => Math.hypot((bridge.x || 0) - x, (bridge.y || 0) - y) > r);
+    this.editorState.docks = (this.editorState.docks || []).filter((dock) => Math.hypot((dock.x || 0) - x, (dock.y || 0) - y) > r);
+    this.editorState.props = (this.editorState.props || []).filter((item) => Math.hypot((item.x || 0) - x, (item.y || 0) - y) > r);
+    this.editorState.pois = (this.editorState.pois || []).filter((item) => Math.hypot((item.x || 0) - x, (item.y || 0) - y) > r);
+    this.editorState.terrainStamps = (this.editorState.terrainStamps || []).filter((stamp) => Math.hypot((stamp.x || 0) - x, (stamp.y || 0) - y) > r);
+    if (before === JSON.stringify(this.editorState)) return false;
+    this._pushEditorAction({ type: "erase", index: -1 });
+    this.applyEditorState();
+    return true;
+  }
+
+  undoEditorAction() {
+    const action = this.editorState.actions.pop();
+    if (!action) return false;
+    if (action.type === "terrain-section") {
+      const before = this.editorState.terrainStamps.length;
+      this.editorState.terrainStamps = (this.editorState.terrainStamps || []).filter((stamp) => stamp?.sectionId !== action.sectionId);
+      if (this.editorState.terrainStamps.length === before) return false;
+      this.applyEditorState();
+      return true;
+    }
+    const listMap = {
+      road: "roads",
+      river: "rivers",
+      bridge: "bridges",
+      dock: "docks",
+      prop: "props",
+      poi: "pois",
+      terrain: "terrainStamps",
+    };
+    const key = listMap[action.type];
+    if (!key) return false;
+    const list = this.editorState[key];
+    if (!Array.isArray(list) || !list.length) return false;
+    const idx = action.index >= 0 && action.index < list.length ? action.index : list.length - 1;
+    if (action.type === "river") {
+      const river = list[idx];
+      const sectionId = river?.sectionId;
+      if (sectionId != null) {
+        this.editorState.terrainStamps = (this.editorState.terrainStamps || []).filter((stamp) => stamp?.sectionId !== sectionId);
+      }
+    }
+    list.splice(idx, 1);
+    this.applyEditorState();
+    return true;
+  }
+
+  getEditorSnapshot() {
+    return {
+      roads: this.editorState.roads.length,
+      rivers: this.editorState.rivers.length,
+      bridges: this.editorState.bridges.length,
+      docks: this.editorState.docks.length,
+      props: this.editorState.props.length,
+      pois: this.editorState.pois.length,
+      terrainStamps: this.editorState.terrainStamps.length,
+      updatedAt: this.editorState.updatedAt || 0,
+    };
+  }
+
+  _editorNextId() {
+    this._editorIdCounter = Math.max(100001, (this._editorIdCounter || 100000) + 1);
+    return this._editorIdCounter;
   }
 
   setViewSize(w, h) {
@@ -3019,6 +4021,32 @@ export default class World {
   }
 
   _sampleCell(x, y) {
+    if (this.variant === "river-build") {
+      const qx = Math.round(x / 12);
+      const qy = Math.round(y / 12);
+      const cacheKey = `${qx}|${qy}`;
+      const cached = this._runtimeCellCache.get(cacheKey);
+      if (cached) return cached;
+      x = qx * 12;
+      y = qy * 12;
+      const ground = this._groundAt(x, y);
+      return this._rememberLimited(this._runtimeCellCache, cacheKey, {
+        ground,
+        river: 99,
+        moisture: 0.5,
+        isWater: false,
+        isLake: false,
+        isRiver: false,
+        isMountainWall: false,
+        mountainBase: false,
+        mountainBody: false,
+        road: false,
+        bridge: false,
+        zone: "meadow",
+        color: "#6f9e5a",
+        landColor: "#6f9e5a",
+      }, this._runtimeCellCacheLimit);
+    }
     const qx = Math.round(x / 12);
     const qy = Math.round(y / 12);
     const cacheKey = `${qx}|${qy}`;
@@ -3034,6 +4062,7 @@ export default class World {
     const sx = x - this.spawn.x;
     const sy = y - this.spawn.y;
     const spawnDist = Math.hypot(sx, sy);
+    const edgeBandFrac = this._edgeMountainFrac(x, y);
 
     let isLake = false;
     let isRiver = false;
@@ -3048,9 +4077,17 @@ export default class World {
       isWater = isRiver;
     }
 
-    const mountainBase = this._mountainBaseAt(x, y, ground, isWater);
-    const mountainVisual = this._mountainVisualAt(x, y, ground, isWater);
-    const mountainBody = this._mountainBodyAt(x, y, ground, isWater);
+    let mountainBase = this._mountainBaseAt(x, y, ground, isWater);
+    let mountainVisual = this._mountainVisualAt(x, y, ground, isWater);
+    let mountainBody = this._mountainBodyAt(x, y, ground, isWater);
+    if (edgeBandFrac > 0.06 && !road && !bridge) {
+      mountainBase = true;
+      mountainVisual = true;
+      mountainBody = true;
+      isLake = false;
+      isRiver = false;
+      isWater = false;
+    }
 
     const moisture = this._moistureAt(x, y);
 
@@ -3140,6 +4177,7 @@ export default class World {
     const sx = x - this.spawn.x;
     const sy = y - this.spawn.y;
     const spawnDist = Math.hypot(sx, sy);
+    const edgeBandFrac = this._edgeMountainFrac(x, y);
     const moisture = this._moistureAt(x, y);
     const danger = this.getDangerLevel(x, y);
 
@@ -3150,8 +4188,15 @@ export default class World {
       isLake = false;
       isWater = isRiver;
     }
-    const mountainBase = this._mountainBaseAt(x, y, ground, isWater);
-    const mountainVisual = this._mountainVisualAt(x, y, ground, isWater);
+    let mountainBase = this._mountainBaseAt(x, y, ground, isWater);
+    let mountainVisual = this._mountainVisualAt(x, y, ground, isWater);
+    if (edgeBandFrac > 0.06) {
+      mountainBase = true;
+      mountainVisual = true;
+      isLake = false;
+      isRiver = false;
+      isWater = false;
+    }
 
     let zone = "meadow";
     let color = "#7f9f61";
@@ -3243,6 +4288,8 @@ export default class World {
   }
 
   _groundAt(x, y) {
+    const rawX = x;
+    const rawY = y;
     const qx = Math.round(x / 12);
     const qy = Math.round(y / 12);
     const key = `${qx}|${qy}`;
@@ -3250,16 +4297,104 @@ export default class World {
     if (cached != null) return cached;
     x = qx * 12;
     y = qy * 12;
-    const base = fbm(x * 0.00042, y * 0.00042, this.seed, 5);
-    const detail = fbm(x * 0.0012, y * 0.0012, this.seed + 77, 3);
-    const d = Math.hypot(x, y);
-    const mainland = clamp(1 - d / 4200, 0, 1) * 0.14;
-    const farRidges = fbm(x * 0.00018 + 40, y * 0.00018 - 17, this.seed + 404, 3) * 0.10;
-    const wildCoast = clamp((d - 9000) / 2600, 0, 1) * 0.035;
+    let value = 0.46;
+    if (this.variant !== "river-build") {
+      const base = fbm(x * 0.00042, y * 0.00042, this.seed, 5);
+      const detail = fbm(x * 0.0012, y * 0.0012, this.seed + 77, 3);
+      const d = Math.hypot(x, y);
+      const mainland = clamp(1 - d / 4200, 0, 1) * 0.14;
+      const farRidges = fbm(x * 0.00018 + 40, y * 0.00018 - 17, this.seed + 404, 3) * 0.10;
+      const wildCoast = clamp((d - 9000) / 2600, 0, 1) * 0.035;
+      value = base * 0.76 + detail * 0.17 + mainland + farRidges - wildCoast;
+    }
+    for (const stamp of this.editorState?.terrainStamps || []) {
+      const dx = rawX - stamp.x;
+      const dy = rawY - stamp.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > stamp.radius) continue;
+      const falloff = 1 - dist / Math.max(1, stamp.radius);
+      const power = (stamp.power || 0) * falloff * falloff;
+      if (stamp.mode === "raise") value += power * 0.0022;
+      else if (stamp.mode === "lower") value -= power * 0.0022;
+      else if (stamp.mode === "water") value -= power * 0.0038;
+      else if (stamp.mode === "river-cut" && Number.isFinite(stamp.target)) {
+        if (this.variant === "river-build") {
+          const cut = clamp(power * 0.02, 0.72, 1);
+          value = Math.min(value * (1 - cut) + stamp.target * cut, stamp.target + 0.008);
+          value -= power * 0.0062;
+        } else {
+          const cut = clamp(power * 0.0068, 0.16, 0.96);
+          value = value * (1 - cut) + stamp.target * cut;
+          value -= power * 0.0022;
+        }
+      }
+      else if (stamp.mode === "flatten" && Number.isFinite(stamp.target)) {
+        const mix = clamp(power * 0.009, 0, 1);
+        value = value * (1 - mix) + stamp.target * mix;
+      } else if (stamp.mode === "smooth" && Number.isFinite(stamp.target)) {
+        const mix = clamp(power * 0.0048, 0, 0.72);
+        value = value * (1 - mix) + stamp.target * mix;
+      }
+    }
+    const sectionRivers = !this.suppressEditorRiverCarve
+      ? (this.editorState?.rivers || []).filter((river) => river?.sectionKind === "straight" || river?.sectionKind === "wide")
+      : [];
+    if (!this.suppressEditorRiverCarve) {
+      for (const river of this.editorState?.rivers || []) {
+        const pts = river?.points || [];
+        if (pts.length < 2) continue;
+        if (river.sectionKind === "straight" || river.sectionKind === "wide") continue;
+        const width = clamp(+river.width || 120, 48, 280);
+        const floor = Number.isFinite(river.floor) ? river.floor : this._sampleRiverBedTarget(pts, width);
+        if (!Number.isFinite(floor)) continue;
+        const influence = width * 0.92;
+        let nearest = Infinity;
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1];
+          const b = pts[i];
+          const dist = distToSeg(rawX, rawY, a.x, a.y, b.x, b.y);
+          if (dist < nearest) nearest = dist;
+          if (nearest <= 4) break;
+        }
+        let channel = 0;
+        if (river.sectionKind === "straight" || river.sectionKind === "wide") {
+          const sectionLength = river.sectionLength || (river.sectionKind === "wide" ? 328 : 264);
+          const frac = sectionFootprintFrac2D(
+            rawX,
+            rawY,
+            river.sectionCenterX ?? pts[0].x,
+            river.sectionCenterY ?? pts[0].y,
+            river.sectionAngle || 0,
+            sectionLength,
+            width * 2.45
+          );
+          channel = frac > 0 ? clamp((frac * frac) * (3 - 2 * frac), 0, 1) : 0;
+        } else {
+          if (nearest > influence) continue;
+          const t = 1 - nearest / Math.max(1, influence);
+          channel = clamp((t * t) * (3 - 2 * t), 0, 1);
+        }
+        if (channel <= 0) continue;
+        const softMix = clamp(channel * 0.8, 0, 0.8);
+        const carve = clamp((width / 280) * 0.04, 0.018, 0.04) * channel;
+        value = Math.min(value - carve, value * (1 - softMix) + floor * softMix);
+      }
+      const sectionField = sectionUnionFrac2D(rawX, rawY, sectionRivers);
+      if (sectionField?.frac > 0.001) {
+        const rim = smoothstep(0.01, 0.82, sectionField.frac);
+        const bowl = smoothstep(0.18, 0.998, sectionField.frac);
+        const floor = Number.isFinite(sectionField.floor) ? sectionField.floor : value - 0.05;
+        const vShape = Math.pow(clamp(sectionField.frac, 0, 1), 1.9);
+        const softMix = clamp(0.34 + bowl * 0.62, 0, 0.985);
+        const carve = clamp((sectionField.width / 280) * 0.092, 0.052, 0.098);
+        const vCut = rim * carve * 0.42 + vShape * carve * 1.95;
+        value = Math.min(value - vCut, value * (1 - softMix) + floor * softMix);
+      }
+    }
     return this._rememberLimited(
       this._groundCache,
       key,
-      base * 0.76 + detail * 0.17 + mainland + farRidges - wildCoast,
+      value,
       this._groundCacheLimit
     );
   }
@@ -3285,7 +4420,7 @@ export default class World {
       east: [0.28, 0.68],
       west: [0.34, 0.74],
     };
-    const sidePlan = ["north", "south", "north", "west", "east", "south", "west", "east", "north", "south"];
+    const sidePlan = ["north", "south", "west", "east", "north", "south", "west", "east"];
     const mainCount = sidePlan.length;
 
     for (let i = 0; i < mainCount; i++) {
@@ -3312,7 +4447,7 @@ export default class World {
       });
     }
 
-    const tributaryCount = 16;
+    const tributaryCount = 10;
     const joinSlots = [0.28, 0.52, 0.76];
     for (let i = 0; i < tributaryCount; i++) {
       const main = bands[i % bands.length];
@@ -4000,6 +5135,12 @@ export default class World {
     return effectiveRidge > 0.65 || (effectiveRidge > 0.35 && highland > 0.78);
   }
 
+  _edgeMountainFrac(x, y) {
+    const edgeAbs = Math.max(Math.abs(x), Math.abs(y));
+    const bandStart = this.mapHalfSize - 720;
+    return clamp((edgeAbs - bandStart) / 720, 0, 1);
+  }
+
   _mountainVisualAt(x, y, ground, isWater) {
     if (isWater) return false;
     const spawnDist = Math.hypot(x - this.spawn.x, y - this.spawn.y);
@@ -4191,11 +5332,12 @@ export default class World {
     }
 
     if (band.pathPoints?.length > 1) {
+      const source = this._simplifyEditorRiverPoints(band.pathPoints, 7, 4);
       const pts = [];
-      for (let i = 1; i < band.pathPoints.length; i++) {
-        const a = band.pathPoints[i - 1];
-        const b = band.pathPoints[i];
-        const steps = Math.max(8, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 160));
+      for (let i = 1; i < source.length; i++) {
+        const a = source[i - 1];
+        const b = source[i];
+        const steps = Math.max(10, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 48));
         if (i === 1) pts.push({ x: a.x, y: a.y });
         for (let step = 1; step <= steps; step++) {
           const t = step / steps;
@@ -4985,7 +6127,7 @@ export default class World {
     for (const p of this._getPublicPassRoadNodes()) add(p, "pass");
 
     const starterDistances = [760];
-    const starterAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+    const starterAngles = [Math.PI * 0.12, Math.PI * 1.12];
     for (let dist of starterDistances) {
       for (let ang of starterAngles) {
         const sx = this.spawn.x + Math.cos(ang) * dist;
@@ -5039,9 +6181,9 @@ export default class World {
           other,
           dist: Math.hypot(other.x - node.x, other.y - node.y),
         }))
-        .filter((entry) => entry.dist >= 520 && entry.dist <= 3600)
+        .filter((entry) => entry.dist >= 700 && entry.dist <= 3000)
         .sort((a, b) => a.dist - b.dist)
-        .slice(0, node.type === "pass" || node.type === "dock" ? 3 : 2);
+        .slice(0, node.type === "pass" || node.type === "dock" ? 2 : 1);
       for (const entry of neighbors) {
         const width = node.type === "dock" || entry.other.type === "dock" ? 24 : 22;
         this._addRoadSegment(node, entry.other, width, true);
@@ -5129,6 +6271,18 @@ export default class World {
       points.push(quadPoint(ax, ay, cx, cy, bx, by, t));
     }
 
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      if (!p) continue;
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+
     this.roads.push({
       ax,
       ay,
@@ -5138,6 +6292,10 @@ export default class World {
       cy,
       width,
       visible,
+      minX,
+      minY,
+      maxX,
+      maxY,
       points,
     });
   }
@@ -5304,8 +6462,8 @@ export default class World {
 
   _repairMissingBridges(candidates) {
     const out = [...(candidates || [])];
-    const bridgeGapLimit = 760;
-    const hardBridgeGapLimit = 920;
+    const bridgeGapLimit = 920;
+    const hardBridgeGapLimit = 1080;
     const nearBridge = (x, y, radius = 88) =>
       out.some((b) => Math.hypot((b.cx || 0) - x, (b.cy || 0) - y) < radius);
     const sampleWaterCrossing = (ax, ay, bx, by) => {
@@ -5387,7 +6545,7 @@ export default class World {
         if (nearBridge(midX, midY, 96)) continue;
 
         const span = Math.hypot(landAfter.x - landBefore.x, landAfter.y - landBefore.y);
-        if (span < 24 || span > 520) continue;
+        if (span < 24 || span > 620) continue;
 
         const angle = Math.atan2(dy, dx);
         const shoreInset = Math.min(6, Math.max(2, (road.width || 24) * 0.08));
@@ -5426,8 +6584,8 @@ export default class World {
   }
 
   _ensureEndpointDockAccess() {
-    const endpointBridgeGap = 760;
-    const endpointPassageGap = 1200;
+    const endpointBridgeGap = 920;
+    const endpointPassageGap = 1400;
     for (const road of this.roads || []) {
       const pts = road?.points;
       if (!pts || pts.length < 2) continue;
@@ -5457,7 +6615,7 @@ export default class World {
               y: water.shoreB.y - dirY * shoreInset,
             };
             const bridgeSpan = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
-            if (bridgeSpan >= 20 && bridgeSpan <= 520) {
+            if (bridgeSpan >= 20 && bridgeSpan <= 620) {
               this.bridges.push({
                 cx: (start.x + endPoint.x) * 0.5,
                 cy: (start.y + endPoint.y) * 0.5,
@@ -5627,6 +6785,7 @@ export default class World {
 
   _makeManualBridge(x, y, width = 34, forcedLength = 124, strictCenter = false, preferredAngle = null, exactRoadAligned = false, measureSpan = false, explicitHalfSpan = null) {
     const river = this._nearestRiverInfo(x, y);
+    if (!river?.band) return null;
     const baseAngle = preferredAngle ?? (river?.band ? (river.tangent || 0) + Math.PI * 0.5 : Math.PI * 0.5);
     const riverWidth = river?.band ? this._riverVisualWidth(river.band) : forcedLength;
     const chosen = explicitHalfSpan != null
@@ -5974,10 +7133,15 @@ export default class World {
     const sx = x - this.spawn.x;
     const sy = y - this.spawn.y;
     const spawnDist = Math.hypot(sx, sy);
+    const edgeBandFrac = this._edgeMountainFrac(x, y);
 
     let isWater = ground < 0.245 || river < this._riverWaterLimit;
     if (spawnDist < this._spawnSafeRadius && river >= this._riverWaterLimit) isWater = false;
     let isMountain = this._mountainBaseAt(x, y, ground, isWater);
+    if (edgeBandFrac > 0.06) {
+      isMountain = true;
+      isWater = false;
+    }
 
     if (!isMountain && ground > 0.70 && !isWater) isMountain = true;
 
@@ -6105,7 +7269,7 @@ export default class World {
       return;
     }
 
-    const end = performance.now() + 0.45;
+    const end = performance.now() + 1.4;
     while (this._warmupTasks.length && performance.now() < end) {
       if (this._warmupTasks[0]()) this._warmupTasks.shift();
       else break;
@@ -6146,6 +7310,22 @@ export default class World {
   _generatorProgress(state) {
     if (!state) return 1;
     return clamp((state.index || 0) / Math.max(1, state.count || 1), 0, 1);
+  }
+
+  _warmupPoint(margin, state = null, localRatio = 0.5, localRadius = 2400) {
+    const useLocal = state && state.count && state.index < Math.floor(state.count * localRatio);
+    if (useLocal) {
+      const angle = this._rng.range(0, Math.PI * 2);
+      const dist = Math.sqrt(this._rng.next()) * localRadius;
+      return {
+        x: clamp((this._focusX || this.spawn.x || 0) + Math.cos(angle) * dist, -this.mapHalfSize + margin, this.mapHalfSize - margin),
+        y: clamp((this._focusY || this.spawn.y || 0) + Math.sin(angle) * dist, -this.mapHalfSize + margin, this.mapHalfSize - margin),
+      };
+    }
+    return {
+      x: this._rng.range(-this.mapHalfSize + margin, this.mapHalfSize - margin),
+      y: this._rng.range(-this.mapHalfSize + margin, this.mapHalfSize - margin),
+    };
   }
 
   _buildMountainRenderDataChunk() {
@@ -6194,7 +7374,7 @@ export default class World {
 
     const state = this._mapBuildState;
     const buildSize = state.size;
-    const budgetEnd = performance.now() + 4;
+    const budgetEnd = performance.now() + 5.5;
 
     while (state.row < buildSize && performance.now() < budgetEnd) {
       const r = state.row++;
@@ -6323,6 +7503,13 @@ export default class World {
     bucket.push(tree);
   }
 
+  _rebuildTreeBuckets() {
+    this._treeBuckets = new Map();
+    const trees = [...(this._trees || [])];
+    this._trees = [];
+    for (const tree of trees) this._addTree({ ...tree });
+  }
+
   _generateTreesChunk() {
     if (!this._treeBuildState) {
       this._treeBuildState = {
@@ -6333,12 +7520,13 @@ export default class World {
     }
 
     const state = this._treeBuildState;
-    const chunkSize = 42;
+    const chunkSize = 96;
     const stop = Math.min(state.count, state.index + chunkSize);
 
     for (; state.index < stop; state.index++) {
-      let tx = this._rng.range(-this.mapHalfSize + 500, this.mapHalfSize - 500);
-      let ty = this._rng.range(-this.mapHalfSize + 500, this.mapHalfSize - 500);
+      const point = this._warmupPoint(500, state, 0.62, 2700);
+      let tx = point.x;
+      let ty = point.y;
 
       if (this._rng.next() < 0.65) {
         tx = this.spawn.x + (tx - this.spawn.x) * (1 / state.spawnBias);
@@ -6428,6 +7616,13 @@ export default class World {
     bucket.push(rock);
   }
 
+  _rebuildRockBuckets() {
+    this._rockBuckets = new Map();
+    const rocks = [...(this._rocks || [])];
+    this._rocks = [];
+    for (const rock of rocks) this._addRock({ ...rock });
+  }
+
   _generateRocksChunk() {
     if (!this._rockBuildState) {
       this._rockBuildState = {
@@ -6441,8 +7636,9 @@ export default class World {
     const stop = Math.min(state.count, state.index + chunkSize);
 
     for (; state.index < stop; state.index++) {
-      const tx = this._rng.range(-this.mapHalfSize + 420, this.mapHalfSize - 420);
-      const ty = this._rng.range(-this.mapHalfSize + 420, this.mapHalfSize - 420);
+      const point = this._warmupPoint(420, state, 0.52, 2400);
+      const tx = point.x;
+      const ty = point.y;
       const s = this._sampleCell(tx, ty);
       if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain" || s.zone === "old fields") && !s.isWater && !s.bridge && !s.road) {
         this._addRock({
@@ -6486,6 +7682,13 @@ export default class World {
     bucket.push(item);
   }
 
+  _rebuildClutterBuckets() {
+    this._clutterBuckets = new Map();
+    const clutter = [...(this._clutter || [])];
+    this._clutter = [];
+    for (const item of clutter) this._addClutter({ ...item });
+  }
+
   _generateClutterChunk() {
     if (!this._clutterBuildState) {
       this._clutterBuildState = {
@@ -6499,8 +7702,9 @@ export default class World {
     const stop = Math.min(state.count, state.index + chunkSize);
 
     for (; state.index < stop; state.index++) {
-      const tx = this._rng.range(-this.mapHalfSize + 380, this.mapHalfSize - 380);
-      const ty = this._rng.range(-this.mapHalfSize + 380, this.mapHalfSize - 380);
+      const point = this._warmupPoint(380, state, 0.48, 2500);
+      const tx = point.x;
+      const ty = point.y;
       const s = this._sampleCell(tx, ty);
       if (s.isWater || s.isMountainWall || s.bridge || s.road || this._isNearBridgeDeck(tx, ty, 24)) continue;
 

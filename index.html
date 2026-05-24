@@ -4,204 +4,46 @@
   <meta charset="utf-8" />
   <title>Broke Knight</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="./favicon.ico" sizes="any" />
-  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-  <link rel="shortcut icon" href="./favicon.ico" />
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/"
-      }
-    }
-  </script>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <meta http-equiv="refresh" content="0; url=./index-3d.html?cb=20260524s" />
   <style>
-    :root {
-      color-scheme: dark;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
-    body {
+    html, body {
       margin: 0;
       width: 100%;
       height: 100%;
-      overflow: hidden;
       background: #05070b;
-      font-family: "Segoe UI", Arial, Helvetica, sans-serif;
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    body {
-      background:
-        radial-gradient(circle at 50% 12%, rgba(82, 116, 150, 0.18), rgba(0, 0, 0, 0) 34%),
-        linear-gradient(180deg, #060a10 0%, #080c12 58%, #05070b 100%);
-    }
-
-    #three-root {
-      position: fixed;
-      inset: 0;
-    }
-
-    #three-canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-      outline: none;
-      cursor: crosshair;
-      touch-action: none;
-    }
-
-    .hud {
-      position: fixed;
-      left: 16px;
-      top: 16px;
-      z-index: 5;
-      max-width: min(390px, calc(100vw - 32px));
-      padding: 14px 16px;
-      border-radius: 12px;
-      background: rgba(8, 13, 20, 0.78);
-      border: 1px solid rgba(150, 190, 220, 0.18);
-      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
-      backdrop-filter: blur(10px);
-      color: rgba(236, 242, 248, 0.95);
-    }
-
-    .hud h1 {
-      margin: 0 0 8px;
-      font-size: 18px;
-      font-weight: 700;
-    }
-
-    .hud p {
-      margin: 0;
-      font-size: 13px;
-      line-height: 1.45;
-      color: rgba(204, 217, 229, 0.88);
-    }
-
-    .hud-grid {
+      color: #e8eef5;
+      font: 16px/1.4 "Segoe UI", Arial, sans-serif;
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px 12px;
-      margin-top: 12px;
-      font-size: 12px;
+      place-items: center;
     }
-
-    .hud-grid div {
-      padding-top: 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    .hud-label {
-      display: block;
-      margin-bottom: 3px;
-      color: rgba(164, 190, 210, 0.9);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .hud-actions {
-      position: fixed;
-      right: 16px;
-      top: 16px;
-      z-index: 5;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .hud-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 108px;
-      height: 38px;
-      padding: 0 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(150, 190, 220, 0.2);
-      background: rgba(8, 13, 20, 0.78);
-      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
-      color: rgba(236, 242, 248, 0.95);
-      text-decoration: none;
-      font-size: 13px;
-      cursor: pointer;
-      backdrop-filter: blur(10px);
-    }
-
-    .hud-button:hover {
-      border-color: rgba(168, 214, 246, 0.34);
-      background: rgba(11, 17, 25, 0.9);
-    }
-
-    .footer-note {
-      position: fixed;
-      left: 16px;
-      bottom: 16px;
-      z-index: 5;
-      max-width: min(520px, calc(100vw - 32px));
-      padding: 10px 12px;
-      border-radius: 10px;
-      background: rgba(8, 13, 20, 0.72);
-      border: 1px solid rgba(150, 190, 220, 0.16);
-      color: rgba(204, 217, 229, 0.88);
-      font-size: 12px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
-      backdrop-filter: blur(10px);
-    }
-
-    #fatal-error {
-      position: fixed;
-      inset: 16px;
-      z-index: 20;
-      margin: 0;
-      padding: 16px;
-      overflow: auto;
-      white-space: pre-wrap;
-      border: 1px solid rgba(255, 120, 120, 0.45);
-      border-radius: 8px;
-      background: rgba(12, 5, 7, 0.94);
-      color: #ffd7d7;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      font: 13px/1.45 Consolas, "SFMono-Regular", monospace;
-      user-select: text;
-      -webkit-user-select: text;
-      touch-action: auto;
-    }
+    a { color: #9fd8ff; }
   </style>
 </head>
 <body>
-  <div id="three-root">
-    <canvas id="three-canvas" tabindex="0" aria-label="Broke Knight 3D world"></canvas>
-  </div>
-
-  <aside class="hud" aria-live="polite">
-    <h1>Broke Knight 3D</h1>
-    <p id="three-summary">Building the full world in 3D.</p>
-    <div class="hud-grid">
-      <div><span class="hud-label">Seed</span><span id="hud-seed">-</span></div>
-      <div><span class="hud-label">Hero</span><span id="hud-hero">-</span></div>
-      <div><span class="hud-label">Roads</span><span id="hud-roads">-</span></div>
-      <div><span class="hud-label">Rivers</span><span id="hud-rivers">-</span></div>
-      <div><span class="hud-label">Bridges</span><span id="hud-bridges">-</span></div>
-      <div><span class="hud-label">Towns</span><span id="hud-towns">-</span></div>
-    </div>
-  </aside>
-
-  <div class="hud-actions">
-    <button class="hud-button" id="recenter-camera" type="button">Recenter</button>
-  </div>
-
-  <div class="footer-note">
-    WASD or arrows to move. Hold Shift to run. F, Space, or click to attack. F3 toggles debug.
-  </div>
-
-  <script type="module" src="./src/main3d.js"></script>
+      <p>Opening the 3D build... <a href="./index-3d.html?cb=20260524s">Continue</a></p>
+  <script>
+      window.location.replace("./index-3d.html?cb=20260524s");
+  </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

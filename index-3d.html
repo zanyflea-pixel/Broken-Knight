@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <title>Broke Knight 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <link rel="icon" href="./favicon.ico" sizes="any" />
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="shortcut icon" href="./favicon.ico" />
@@ -52,6 +55,138 @@
       outline: none;
     }
 
+    #ui-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    #boot-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 18;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 50% 18%, rgba(112, 160, 204, 0.16), rgba(0, 0, 0, 0) 36%),
+        linear-gradient(180deg, rgba(4, 8, 14, 0.92) 0%, rgba(3, 6, 10, 0.96) 100%);
+      backdrop-filter: blur(10px);
+    }
+
+    #boot-loading.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease;
+    }
+
+    .boot-card {
+      --boot-progress: 0%;
+      width: min(480px, calc(100vw - 48px));
+      padding: 24px 24px 20px;
+      border-radius: 24px;
+      border: 1px solid rgba(150, 190, 220, 0.22);
+      background:
+        linear-gradient(180deg, rgba(13, 20, 28, 0.94) 0%, rgba(8, 13, 20, 0.96) 100%);
+      box-shadow:
+        0 30px 70px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      color: rgba(236, 242, 248, 0.96);
+    }
+
+    .boot-title {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 3.6vw, 40px);
+      line-height: 0.95;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .boot-subtitle {
+      margin: 0 0 16px;
+      max-width: 34ch;
+      color: rgba(191, 208, 222, 0.86);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .boot-bar {
+      position: relative;
+      height: 16px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .boot-bar::before {
+      content: "";
+      position: absolute;
+      inset: 2px;
+      width: max(0px, calc(var(--boot-progress) - 4px));
+      min-width: 0;
+      border-radius: 999px;
+      background:
+        linear-gradient(90deg, #6cbcff 0%, #a8f0ff 45%, #ffe0a1 100%);
+      box-shadow: 0 0 22px rgba(108, 188, 255, 0.28);
+      transition: width 180ms ease;
+    }
+
+    .boot-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .boot-status {
+      font-size: 14px;
+      color: rgba(226, 235, 244, 0.95);
+    }
+
+    .boot-percent {
+      font-size: 13px;
+      color: rgba(163, 193, 214, 0.92);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .boot-note {
+      margin-top: 14px;
+      color: rgba(163, 193, 214, 0.88);
+      font-size: 12px;
+    }
+
+    .boot-mode-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .boot-mode-btn {
+      flex: 1 1 0;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid rgba(150, 190, 220, 0.18);
+      background: rgba(11, 17, 25, 0.86);
+      color: rgba(236, 242, 248, 0.96);
+      font: 600 13px "Segoe UI", Arial, sans-serif;
+      cursor: pointer;
+    }
+
+    .boot-mode-btn.is-active {
+      border-color: rgba(160, 238, 190, 0.44);
+      background: rgba(58, 92, 70, 0.84);
+    }
+
     .hud {
       position: fixed;
       left: 16px;
@@ -65,6 +200,15 @@
       box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
       backdrop-filter: blur(10px);
       color: rgba(236, 242, 248, 0.95);
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+
+    .hud.is-muted,
+    .hud-actions.is-muted,
+    .footer-note.is-muted {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-8px);
     }
 
     .hud h1 {
@@ -110,6 +254,7 @@
       display: flex;
       gap: 10px;
       align-items: center;
+      transition: opacity 180ms ease, transform 180ms ease;
     }
 
     .hud-button {
@@ -148,35 +293,70 @@
       font-size: 12px;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
       backdrop-filter: blur(10px);
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+
+    #fatal-error {
+      position: fixed;
+      inset: 16px;
+      z-index: 24;
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid rgba(255, 120, 120, 0.45);
+      border-radius: 8px;
+      background: rgba(12, 5, 7, 0.94);
+      color: #ffd7d7;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      font: 13px/1.45 Consolas, "SFMono-Regular", monospace;
     }
   </style>
 </head>
 <body>
+  <div id="boot-loading" role="status" aria-live="polite">
+    <div class="boot-card">
+      <h1 class="boot-title">Broke Knight 3D</h1>
+      <p class="boot-subtitle">
+        Loading the map, forests, save, combat, and UI before play starts.
+      </p>
+      <div class="boot-bar"></div>
+      <div class="boot-meta">
+        <div class="boot-status" id="boot-loading-status">Preparing startup...</div>
+        <div class="boot-percent" id="boot-loading-percent">0%</div>
+      </div>
+      <div class="boot-note">The bar now waits for the world map and tree pass before the game opens.</div>
+      <div class="boot-mode-row">
+        <button class="boot-mode-btn" id="boot-mode-play" type="button">Play</button>
+        <button class="boot-mode-btn" id="boot-mode-build" type="button">Build</button>
+        <button class="boot-mode-btn" id="boot-mode-river-build" type="button">River Build</button>
+      </div>
+    </div>
+  </div>
+
   <div id="three-root">
     <canvas id="three-canvas" tabindex="0" aria-label="Broke Knight 3D world"></canvas>
+    <canvas id="ui-canvas" tabindex="0" aria-label="Broke Knight 3D game interface"></canvas>
   </div>
 
-  <aside class="hud" aria-live="polite">
-    <h1>Broke Knight 3D</h1>
-    <p id="three-summary">Building the full world in 3D.</p>
-    <div class="hud-grid">
-      <div><span class="hud-label">Seed</span><span id="hud-seed">-</span></div>
-      <div><span class="hud-label">Hero</span><span id="hud-hero">-</span></div>
-      <div><span class="hud-label">Roads</span><span id="hud-roads">-</span></div>
-      <div><span class="hud-label">Rivers</span><span id="hud-rivers">-</span></div>
-      <div><span class="hud-label">Bridges</span><span id="hud-bridges">-</span></div>
-      <div><span class="hud-label">Towns</span><span id="hud-towns">-</span></div>
-    </div>
-  </aside>
-
-  <div class="hud-actions">
-    <button class="hud-button" id="recenter-camera" type="button">Recenter</button>
-  </div>
-
-  <div class="footer-note">
-    WASD or arrows to move. Hold Shift to run. F, Space, or click to attack. F3 toggles debug.
-  </div>
-
-  <script type="module" src="./src/main3d.js"></script>
+  <script type="module" src="./src/main3d.js?v=20260524s"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

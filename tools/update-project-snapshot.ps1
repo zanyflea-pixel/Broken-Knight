@@ -7,6 +7,7 @@ $files = @(
   "Broke Knight Notes.txt",
   "README.md",
   "index.html",
+  "index-3d.html",
   "serve-broke-knight.ps1",
   "src/entities.js",
   "src/game.js",
@@ -18,6 +19,7 @@ $files = @(
   "src/ui.js",
   "src/util.js",
   "src/world.js",
+  "tools/check-3d-entry.ps1",
   "tools/check-broke-knight.ps1",
   "tools/update-project-snapshot.ps1"
 )

@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $required = @(
   "index.html",
+  "index-3d.html",
   "serve-broke-knight.ps1",
   "src/entities.js",
   "src/game.js",
@@ -17,7 +18,8 @@ $required = @(
   "src/save.js",
   "src/ui.js",
   "src/util.js",
-  "src/world.js"
+  "src/world.js",
+  "tools/check-3d-entry.ps1"
 )
 
 $failed = $false
@@ -63,6 +65,18 @@ if (![string]::IsNullOrWhiteSpace($BaseUrl)) {
   }
 } else {
   Write-Host "HTTP checks skipped (no BaseUrl provided)" -ForegroundColor DarkYellow
+}
+
+$entryCheck = Join-Path $root "tools\check-3d-entry.ps1"
+if (Test-Path -LiteralPath $entryCheck -PathType Leaf) {
+  $entryArgs = @()
+  if (![string]::IsNullOrWhiteSpace($BaseUrl)) {
+    $entryArgs += @("-BaseUrl", $BaseUrl)
+  }
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $entryCheck @entryArgs
+  if ($LASTEXITCODE -ne 0) {
+    $failed = $true
+  }
 }
 
 if ($failed) {

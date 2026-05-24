@@ -39,6 +39,9 @@ export default class UI {
     this._controlsToggleRect = null;
     this._profilerCopyRect = null;
     this._spikeCopyRect = null;
+    this._editorHudToggleRect = null;
+    this._modePlayRect = null;
+    this._modeBuildRect = null;
     this._assets = this._loadUiAssets();
   }
 
@@ -112,28 +115,58 @@ export default class UI {
         this._copyHitchText(game);
       }
     }
+
+    if (game?.mouse?.clicked && this._editorHudToggleRect) {
+      const { x, y, w, h } = this._editorHudToggleRect;
+      const mx = game.mouse.x;
+      const my = game.mouse.y;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+        game.editor.showGameHud = !game.editor.showGameHud;
+      }
+    }
+
+    if (game?.mouse?.clicked && this._modePlayRect) {
+      const { x, y, w, h } = this._modePlayRect;
+      const mx = game.mouse.x;
+      const my = game.mouse.y;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) game.enterPlayMode?.();
+    }
+    if (game?.mouse?.clicked && this._modeBuildRect) {
+      const { x, y, w, h } = this._modeBuildRect;
+      const mx = game.mouse.x;
+      const my = game.mouse.y;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) game.enterBuildMode?.();
+    }
   }
 
   draw(ctx, game) {
     if (!ctx || !game) return;
 
     this._syncViewFromCanvas();
+    const open = game?.menu?.open || this._open || null;
+    const editorMode = open === "editor";
+    const editorShowsHud = editorMode && !!game?.editor?.showGameHud;
 
-    this._drawHUD(ctx, game);
-    this._drawSpellBar(ctx, game);
-    this._drawMinimap(ctx, game);
-    this._drawObjective(ctx, game);
-    this._drawBossBanner(ctx, game);
-    this._drawHelp(ctx, game);
-    this._drawTouchControls(ctx, game);
+    if (!editorMode || editorShowsHud) {
+      this._drawHUD(ctx, game);
+      this._drawSpellBar(ctx, game);
+      this._drawMinimap(ctx, game);
+      this._drawObjective(ctx, game);
+      this._drawBossBanner(ctx, game);
+      this._drawHelp(ctx, game);
+      this._drawTouchControls(ctx, game);
+    }
     this._drawPrompt(ctx, game);
     this._drawToast(ctx, game);
     this._drawZoneText(ctx, game);
-    this._drawPerfReadout(ctx, game);
-    this._drawProfilerPanel(ctx, game);
-    this._drawSpikePanel(ctx, game);
+    if (!editorMode || editorShowsHud) {
+      this._drawPerfReadout(ctx, game);
+      this._drawProfilerPanel(ctx, game);
+      this._drawSpikePanel(ctx, game);
+    }
+    this._drawModeSwitch(ctx, game);
+    if (editorMode) this._drawEditorWorldOverlay(ctx, game);
 
-    const open = game?.menu?.open || this._open || null;
     if (!open) return;
 
     if (open === "map") this._drawMap(ctx, game);
@@ -144,6 +177,7 @@ export default class UI {
     else if (open === "quests") this._drawQuestPanel(ctx, game);
     else if (open === "town") this._drawTownPanel(ctx, game);
     else if (open === "dev") this._drawDevPanel(ctx, game);
+    else if (open === "editor") this._drawEditorPanel(ctx, game);
     else if (open === "options" || open === "god" || open === "menu" || open === "gear") this._drawStatusPanel(ctx, game);
   }
 
@@ -2943,7 +2977,7 @@ export default class UI {
       ctx.font = "11px Arial";
       let py = card.y + 78;
       for (const perk of cls.perks || []) {
-        this._drawFitText(ctx, `â€¢ ${perk}`, card.x + 14, py, card.w - 28, 8);
+        this._drawFitText(ctx, `- ${perk}`, card.x + 14, py, card.w - 28, 8);
         py += 16;
       }
     }
@@ -3448,6 +3482,7 @@ export default class UI {
       `Explored cells: ${game?.world?.exportDiscovery?.()?.length || 0}`,
       `World span: ${((game?.world?.mapHalfSize || 0) * 2).toLocaleString()}`,
     ];
+    const actionCount = game?.getDevActionCount?.() || 10;
 
     ctx.save();
     this._drawPanel(ctx, x, y, w, h, { alpha: 0.93, accent: UI_PURPLE });
@@ -3458,16 +3493,250 @@ export default class UI {
 
     ctx.fillStyle = "#9fb1c7";
     ctx.font = "12px 'Segoe UI', Arial";
-    ctx.fillText("G or Esc close - click action", x + 18, y + 52);
+    ctx.fillText("G or Esc close - click action or hotkey", x + 18, y + 52);
 
-      ctx.font = "14px Arial";
-      for (let i = 0; i < lines.length; i++) {
-        ctx.fillStyle = i < 9 ? "#dfe8f5" : "#8ea1b8";
-        this._drawFitText(ctx, lines[i], x + 28, y + rowStart + 16 + i * rowStep, w - 56);
-      }
-
-      ctx.restore();
+    ctx.font = "14px Arial";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i < actionCount ? "#dfe8f5" : "#8ea1b8";
+      this._drawFitText(ctx, lines[i], x + 28, y + rowStart + 16 + i * rowStep, w - 56);
     }
+
+    ctx.restore();
+  }
+
+  _drawEditorPanel(ctx, game) {
+    const { w, h, x, y, rowStart, rowStep } = game?.getEditorPanelLayout?.() || {
+      w: 560,
+      h: 320,
+      x: 24,
+      y: 24,
+      rowStart: 74,
+      rowStep: 22,
+    };
+    const lines = game?.getEditorToolLines?.() || [];
+
+    ctx.save();
+    this._drawPanel(ctx, x, y, w, h, { alpha: 0.94, accent: "rgba(120,220,255,0.42)" });
+
+    ctx.fillStyle = "#eef8ff";
+    ctx.font = "bold 19px 'Segoe UI', Arial";
+    ctx.fillText("World Forge", x + 18, y + 32);
+
+    ctx.fillStyle = "#9fc8d9";
+    ctx.font = "12px 'Segoe UI', Arial";
+    const forgeIntro = game?.worldVariant === "river-build"
+      ? "River Build sandbox. Click to stamp straight V-trench cuts, rotate them, and shape the channel before we add water back."
+      : "Build in the world. Drag roads, click river pieces, place props and places, save when it feels right.";
+    this._drawWrappedText(ctx, forgeIntro, x + 18, y + 40, w - 190, 13);
+
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(x + 18, y + 48, w - 192, 490);
+    ctx.fillRect(x + w - 156, y + 48, 138, 482);
+    ctx.strokeStyle = "rgba(180,220,255,0.14)";
+    ctx.strokeRect(x + 18.5, y + 48.5, w - 193, 489);
+    ctx.strokeRect(x + w - 155.5, y + 48.5, 137, 481);
+
+    const buttons = game?.getEditorButtonRects?.() || [];
+    ctx.font = "bold 12px 'Segoe UI', Arial";
+    for (const button of buttons) {
+      if (button.kind === "label") {
+        ctx.fillStyle = "#93bdd4";
+        ctx.font = "bold 11px 'Segoe UI', Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(button.label, button.x, button.y + 11);
+        continue;
+      }
+      let fill = "rgba(112,160,220,0.18)";
+      let stroke = "rgba(170,210,255,0.28)";
+      let textColor = "#eef8ff";
+      if (button.kind === "tool") {
+        fill = button.active ? "rgba(121,211,168,0.24)" : "rgba(86,114,144,0.20)";
+        stroke = button.active ? "rgba(171,243,204,0.54)" : "rgba(170,210,255,0.26)";
+      } else if (button.kind === "river-piece") {
+        fill = button.active ? "rgba(88,160,255,0.28)" : "rgba(44,78,118,0.24)";
+        stroke = button.active ? "rgba(156,210,255,0.62)" : "rgba(150,196,230,0.26)";
+      } else if (button.kind === "control") {
+        fill = "rgba(90,118,146,0.22)";
+      } else if (button.kind === "value") {
+        fill = "rgba(18,27,38,0.84)";
+        stroke = "rgba(140,184,214,0.22)";
+        textColor = "#d8ecf7";
+      } else if (button.kind === "mode") {
+        fill = button.active ? "rgba(121,211,168,0.24)" : "rgba(90,110,130,0.22)";
+        stroke = button.active ? "rgba(171,243,204,0.54)" : "rgba(180,210,230,0.28)";
+      } else if (button.kind === "action-primary") {
+        fill = "rgba(120,200,140,0.28)";
+        stroke = "rgba(150,240,170,0.52)";
+      } else if (button.kind === "action-danger") {
+        fill = "rgba(166,92,96,0.24)";
+        stroke = "rgba(234,152,156,0.42)";
+      }
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1.2;
+      ctx.fillRect(button.x, button.y, button.w, button.h);
+      ctx.strokeRect(button.x + 0.5, button.y + 0.5, button.w - 1, button.h - 1);
+      ctx.fillStyle = textColor;
+      ctx.textAlign = "center";
+      if (button.kind === "river-piece") {
+        const cx = button.x + button.w * 0.5;
+        const cy = button.y + 13;
+        ctx.strokeStyle = button.active ? "#bfe6ff" : "#87b8dc";
+        ctx.lineWidth = 4;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(button.x + 16, cy);
+        ctx.lineTo(button.x + button.w - 16, cy);
+        ctx.stroke();
+        ctx.font = "bold 9px 'Segoe UI', Arial";
+        ctx.fillStyle = textColor;
+        this._drawFitText(ctx, button.label, button.x + button.w * 0.5, button.y + button.h - 6, button.w - 10, 6);
+      } else if (button.kind === "tool" && button.hotkey) {
+        ctx.font = "10px 'Segoe UI', Arial";
+        ctx.fillStyle = button.active ? "#dffef0" : "#9ec8df";
+        ctx.fillText(button.hotkey, button.x + button.w - 10, button.y + 10);
+        ctx.font = "bold 10px 'Segoe UI', Arial";
+        ctx.fillStyle = textColor;
+        this._drawFitText(ctx, button.label, button.x + button.w * 0.5, button.y + 15.5, button.w - 14, 6.5);
+      } else {
+        ctx.font = "bold 10px 'Segoe UI', Arial";
+        this._drawFitText(ctx, button.label, button.x + button.w * 0.5, button.y + 15, button.w - 6, 6.5);
+      }
+    }
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(x + 18, y + rowStart - 8, w - 36, h - (rowStart - y) - 40);
+    ctx.strokeStyle = "rgba(180,220,255,0.10)";
+    ctx.strokeRect(x + 18.5, y + rowStart - 7.5, w - 37, h - (rowStart - y) - 41);
+
+    ctx.font = "10px 'Segoe UI', Arial";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i < 2 ? "#eff8ff" : i < 5 ? "#d5ebf6" : "#bfd4de";
+      this._drawFitText(ctx, lines[i], x + 24, y + rowStart + 10 + i * rowStep, w - 48, 6.8);
+    }
+
+    ctx.restore();
+  }
+
+  _drawEditorWorldOverlay(ctx, game) {
+    const mouse = game?.mouse;
+    const editor = game?.editor;
+    if (!mouse || !editor) return;
+    const mx = mouse.x || 0;
+    const my = mouse.y || 0;
+    const brush = editor.tool === "road" || editor.tool === "river"
+      ? editor.strokeWidth
+      : editor.brushSize;
+
+    ctx.save();
+    const color =
+      editor.tool === "road" ? "rgba(228,195,138,0.9)" :
+      editor.tool === "river" ? "rgba(116,190,255,0.9)" :
+      editor.tool === "erase" ? "rgba(255,140,140,0.9)" :
+      "rgba(148,244,197,0.9)";
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(mx, my, Math.max(14, brush * 0.22), 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(4,9,14,0.78)";
+    ctx.fillRect(mx + 16, my - 28, 156, 24);
+    ctx.strokeStyle = "rgba(180,220,255,0.22)";
+    ctx.strokeRect(mx + 16.5, my - 27.5, 155, 23);
+    ctx.fillStyle = "#eef8ff";
+    ctx.font = "bold 12px 'Segoe UI', Arial";
+    ctx.textAlign = "left";
+    ctx.fillText(`${game._editorToolName?.() || "Tool"}  ${Math.round(mouse.worldX || 0)}, ${Math.round(mouse.worldY || 0)}`, mx + 24, my - 12);
+
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.95;
+    if (editor.tool === "river") {
+      // River section preview now lives in the 3D world preview only.
+    } else if (editor.tool === "bridge") {
+      const widthPx = Math.max(18, editor.strokeWidth * 0.18);
+      ctx.fillStyle = "rgba(210,186,145,0.42)";
+      ctx.strokeStyle = "rgba(240,220,186,0.92)";
+      ctx.fillRect(-64, -widthPx * 0.5, 128, widthPx);
+      ctx.strokeRect(-64, -widthPx * 0.5, 128, widthPx);
+    } else if (editor.tool === "dock") {
+      ctx.fillStyle = "rgba(176,138,92,0.42)";
+      ctx.strokeStyle = "rgba(238,216,188,0.92)";
+      ctx.fillRect(-30, -16, 60, 32);
+      ctx.strokeRect(-30, -16, 60, 32);
+    } else if (editor.tool === "tree" || editor.tool === "rock" || editor.tool === "clutter") {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-12, 0);
+      ctx.lineTo(12, 0);
+      ctx.moveTo(0, -12);
+      ctx.lineTo(0, 12);
+      ctx.stroke();
+    } else if (["camp", "town", "dungeon", "shrine", "cache", "secret", "dragon", "waystone", "herb"].includes(editor.tool)) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(0, -16);
+      ctx.lineTo(12, 8);
+      ctx.lineTo(-12, 8);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (["raise", "lower", "water", "erase", "flatten", "smooth"].includes(editor.tool)) {
+      ctx.globalAlpha = 0.14;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(14, brush * 0.22), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    if (editor.dragging && editor.stroke?.length) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      const pts = editor.stroke;
+      ctx.moveTo(pts[0].sx ?? mx, pts[0].sy ?? my);
+      for (let i = 1; i < pts.length; i++) {
+        const p = pts[i];
+        ctx.lineTo(p.sx ?? mx, p.sy ?? my);
+      }
+      ctx.lineTo(mx, my);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  _drawModeSwitch(ctx, game) {
+    const y = 14;
+    const play = { x: this.w - 182, y, w: 74, h: 26 };
+    const build = { x: this.w - 100, y, w: 84, h: 26 };
+    this._modePlayRect = play;
+    this._modeBuildRect = build;
+
+    ctx.save();
+    ctx.font = "bold 12px Arial";
+    ctx.textAlign = "center";
+    for (const button of [
+      { ...play, label: "Play", active: game?.mode !== "build" },
+      { ...build, label: "Build", active: game?.mode === "build" },
+    ]) {
+      ctx.fillStyle = button.active ? "rgba(120,200,140,0.26)" : "rgba(90,110,130,0.22)";
+      ctx.strokeStyle = button.active ? "rgba(150,240,170,0.52)" : "rgba(180,210,230,0.28)";
+      ctx.lineWidth = 1.1;
+      ctx.fillRect(button.x, button.y, button.w, button.h);
+      ctx.strokeRect(button.x + 0.5, button.y + 0.5, button.w - 1, button.h - 1);
+      ctx.fillStyle = "#eef8ff";
+      ctx.fillText(button.label, button.x + button.w * 0.5, button.y + 17);
+    }
+    ctx.textAlign = "left";
+    ctx.restore();
+  }
 
   _drawSimplePanel(ctx, title, body = "") {
     const panelW = Math.min(Math.max(this.w - 140, 320), 520);
@@ -3508,13 +3777,17 @@ export default class UI {
     const inventory = hero.inventory?.length || 0;
     const equipped = Object.values(hero.equip || {}).filter(Boolean).length;
     const objective = game?.getObjective?.();
+    const materials = hero.materials || {};
+    const service = game?.getTownServiceName?.() || "";
 
     const lines = [
       `Level ${hero.level || 1} ${game?._className?.() || "Knight"}  XP ${hero.xp || 0}/${hero.nextXp || 0}`,
       `HP ${Math.round(hero.hp || 0)}/${Math.round(hero.maxHp || stats.maxHp || 0)}  Mana ${Math.round(hero.mana || 0)}/${Math.round(hero.maxMana || stats.maxMana || 0)}  Gold ${hero.gold || 0}`,
       `Damage ${Math.round(stats.dmg || 0)}  Armor ${Math.round(stats.armor || 0)}  Crit ${Math.round((stats.crit || 0) * 100)}%`,
       `Inventory ${inventory} items  Equipped ${equipped}/6  Potions H${hero.potions?.hp || 0} M${hero.potions?.mana || 0}`,
+      `Materials Herbs ${materials.herbs || 0}  Ore ${materials.ore || 0}  Scrap ${materials.scrap || 0}  Hide ${materials.hide || 0}  Essence ${materials.essence || 0}`,
       `Tracking ${this._titleCase(game?.trackedObjective || "story")}  Map zoom ${game?.menu?.mapZoom || 1}x`,
+      service ? `Town focus ${service}` : "Town focus Roam between buildings for services",
       `Relics ${progress.relicShards || 0}  Bounties ${progress.bountyCompletions || 0}  Elites ${progress.eliteKills || 0}`,
       `Towns ${progress.visitedTowns?.size || 0}/${world.towns?.length || 0}  Secrets ${progress.discoveredSecrets?.size || 0}/${world.secrets?.length || 0}`,
       `Dungeons best floor ${progress.dungeonBest || 0}  Dragons ${progress.defeatedDragons?.size || 0}/${world.dragonLairs?.length || 0}`,

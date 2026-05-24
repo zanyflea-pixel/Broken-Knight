@@ -1,6 +1,7 @@
 param(
   [int]$Port = $(if ($env:BROKE_KNIGHT_PORT) { [int]$env:BROKE_KNIGHT_PORT } else { 8000 }),
-  [int]$PortScanCount = 20
+  [int]$PortScanCount = 20,
+  [switch]$AllowPortScan
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,7 +11,9 @@ $ip = [System.Net.IPAddress]::Parse("127.0.0.1")
 $listener = $null
 $port = $Port
 
-for ($i = 0; $i -le [Math]::Max(0, $PortScanCount); $i++) {
+$maxScan = if ($AllowPortScan) { [Math]::Max(0, $PortScanCount) } else { 0 }
+
+for ($i = 0; $i -le $maxScan; $i++) {
   $candidate = $Port + $i
   try {
     $listener = New-Object System.Net.Sockets.TcpListener($ip, $candidate)
@@ -22,7 +25,13 @@ for ($i = 0; $i -le [Math]::Max(0, $PortScanCount); $i++) {
       try { $listener.Stop() } catch {}
       $listener = $null
     }
-    if ($i -ge [Math]::Max(0, $PortScanCount)) { throw }
+    if ($i -ge $maxScan) {
+      if ($AllowPortScan) {
+        throw
+      } else {
+        throw "Port $Port is unavailable. Stop the existing server or choose another port explicitly."
+      }
+    }
   }
 }
 
@@ -43,7 +52,7 @@ function Get-ContentType([string]$path) {
 }
 
 function Send-Response($stream, [int]$status, [string]$statusText, [byte[]]$body, [string]$contentType) {
-  $header = "HTTP/1.1 $status $statusText`r`nContent-Length: $($body.Length)`r`nContent-Type: $contentType`r`nConnection: close`r`n`r`n"
+  $header = "HTTP/1.1 $status $statusText`r`nContent-Length: $($body.Length)`r`nContent-Type: $contentType`r`nCache-Control: no-cache, no-store, must-revalidate`r`nPragma: no-cache`r`nExpires: 0`r`nConnection: close`r`n`r`n"
   $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
   $stream.Write($headerBytes, 0, $headerBytes.Length)
   if ($body.Length -gt 0) {

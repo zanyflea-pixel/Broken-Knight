@@ -17,7 +17,7 @@ import UI from "./ui.js";
 import Save from "./save.js";
 
 const DEV_RESET_CONFIRM_MS = 2500;
-const DEV_TOOL_ACTION_COUNT = 10;
+const DEV_TOOL_ACTION_COUNT = 11;
 const SHOP_ACTION_COUNT = 4;
 const TOWN_ACTION_COUNT = 9;
 const EQUIPMENT_SLOTS = ["weapon", "armor", "helm", "boots", "ring", "trinket"];
@@ -36,13 +36,54 @@ const QUEST_TRACK_ROWS = [
   ["story", "bounty", "town", "dungeon"],
   ["dragon", "treasure", "secret"],
 ];
+const EDITOR_TOOL_IDS = [
+  "road", "river", "bridge", "dock",
+  "raise", "lower", "water", "erase", "flatten", "smooth",
+  "tree", "rock", "clutter",
+  "camp", "town", "dungeon", "shrine",
+  "cache", "secret", "dragon", "waystone", "herb",
+];
+const EDITOR_TOOL_GROUPS = [
+  {
+    label: "Paths",
+    tools: ["road", "river", "bridge", "dock"],
+  },
+  {
+    label: "Terrain",
+    tools: ["raise", "lower", "water", "erase", "flatten", "smooth"],
+  },
+  {
+    label: "Props",
+    tools: ["tree", "rock", "clutter"],
+  },
+  {
+    label: "Places",
+    tools: ["camp", "town", "dungeon", "shrine", "cache", "secret", "dragon", "waystone", "herb"],
+  },
+];
 
 export default class Game {
   constructor(canvas, opts = {}) {
     if (!canvas) throw new Error("Game: canvas is required");
 
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    this.renderMode = opts.renderMode || "full";
+    this.startMode =
+      opts.startMode === "river-build"
+        ? "river-build"
+        : opts.startMode === "build"
+          ? "build"
+          : "play";
+    this.worldVariant = opts.worldVariant || (this.startMode === "river-build" ? "river-build" : "default");
+    this.getMoveIntent = typeof opts.getMoveIntent === "function" ? opts.getMoveIntent : null;
+    this.getAimWorldPoint = typeof opts.getAimWorldPoint === "function" ? opts.getAimWorldPoint : null;
+    this.onEditorWorldChanged = typeof opts.onEditorWorldChanged === "function" ? opts.onEditorWorldChanged : null;
+    const contextAttributes = {
+      alpha: false,
+      desynchronized: true,
+      ...(opts.contextAttributes || {}),
+    };
+    this.ctx = canvas.getContext("2d", contextAttributes);
 
     this.w = canvas.width | 0;
     this.h = canvas.height | 0;
@@ -67,7 +108,7 @@ export default class Game {
 
     setBootStage("Reading your save...", 0.08);
     setBootStage("Laying out the world...", 0.18);
-    this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
+    this.world = new World(this.seed, { viewW: this.w, viewH: this.h, variant: this.worldVariant });
     setBootStage("Waking the hero...", 0.38);
     this.hero = new Hero(this.world.spawn?.x ?? 0, this.world.spawn?.y ?? 0);
 
@@ -138,6 +179,7 @@ export default class Game {
     };
 
     this.menu = { open: null, mapZoom: 1 };
+    this.mode = "play";
     this.invIndex = 0;
 
     this.msg = "";
@@ -178,6 +220,8 @@ export default class Game {
       worldY: this.hero.y,
       down: false,
       clicked: false,
+      aimRecentT: 0,
+      moved: false,
     };
     this.touch = {
       enabled: false,
@@ -239,8 +283,10 @@ export default class Game {
 
     this.dungeon = {
       active: false,
+      kind: "depths",
       floor: 0,
       origin: null,
+      lairId: null,
       room: null,
       roomIndex: 0,
       totalRooms: 0,
@@ -250,6 +296,7 @@ export default class Game {
       keys: 0,
       roomClearT: 0,
       spawnQueue: [],
+      hoardOpened: false,
     };
 
     this.dev = {
@@ -257,6 +304,30 @@ export default class Game {
       showProfiler: false,
       showSpikeMonitor: false,
     };
+    this.editor = {
+      tool: "road",
+      brushSize: 180,
+      strokeWidth: 86,
+      terrainPower: 18,
+      propScale: 1,
+      riverPiece: "straight",
+      riverAngle: (53 * Math.PI) / 180,
+      showGameHud: false,
+      detail: 1,
+      dragging: false,
+      stroke: [],
+      pendingTerrainStamps: [],
+      terrainFlushT: 0,
+      lastPaintX: NaN,
+      lastPaintY: NaN,
+      lastPaintT: 0,
+      exportText: "",
+      lastStatus: "",
+      importedAt: 0,
+      playMode: false,
+    };
+    this._editorAutosaveTimer = null;
+    this._editorBaseCaptured = false;
 
     this._recentFrameSamples = [];
     this._spikeStats = {
@@ -300,7 +371,14 @@ export default class Game {
     this.hero.state.slowT = 0;
     this.hero.state.poisonT = 0;
     this.hero.state.mountainPassAccess = !!this.progress?.storyMilestones?.mountainPassAccess;
-    if (!this._hadBootSave) this.menu.open = "class-select";
+    if (this.startMode === "build" || this.startMode === "river-build") {
+      this.mode = "build";
+      this.menu.open = "editor";
+      if (this.startMode === "river-build") {
+        this.editor.tool = "river";
+        this.editor.showGameHud = false;
+      }
+    } else if (!this._hadBootSave) this.menu.open = "class-select";
 
     this._ensureHeroSafe(true);
     this.world?.revealAround?.(this.hero.x, this.hero.y, 780);
@@ -337,7 +415,24 @@ export default class Game {
     this._tickMessages(dt);
     this._tickCooldowns(dt);
     this._tickVisualEffects(dt);
+    this.mouse.aimRecentT = Math.max(0, (this.mouse.aimRecentT || 0) - dt);
     this._moveIntentTimer = Math.max(0, (this._moveIntentTimer || 0) - dt);
+    if (this.mode === "build") {
+      this.editor.terrainFlushT = Math.max(0, (this.editor.terrainFlushT || 0) - dt);
+      this.world?.setFocusPoint?.(this.hero.x, this.hero.y);
+      this._buildWorldTickT = Math.max(0, (this._buildWorldTickT || 0) - dt);
+      if (!this.world?.isBootWarm?.() || this._buildWorldTickT <= 0) {
+        this.world?.update?.(Math.min(dt, 0.014));
+        this._buildWorldTickT = this.world?.isBootWarm?.() ? 0.24 : 0.06;
+      }
+      this._updateMouseWorld();
+      this._handleMenus();
+      this._updateCamera(dt);
+      this.ui.update?.(dt, this);
+      this.input.endFrame();
+      this.mouse.clicked = false;
+      return;
+    }
     this.world?.setFocusPoint?.(this.hero.x, this.hero.y);
     this.world?.update?.(dt);
     this._updateMouseWorld();
@@ -361,6 +456,8 @@ export default class Game {
       this._handleTownInput();
     } else if (this.menu.open === "dev") {
       // Dev keys are handled in _handleMenus.
+    } else if (this.menu.open === "editor") {
+      // Editor tools are handled in _handleMenus.
     } else if (!this.menu.open) {
       this._handleMovement(dt);
       this._handleSkills();
@@ -408,40 +505,43 @@ export default class Game {
   draw() {
     const ctx = this.ctx;
     if (!ctx) return;
+    const renderWorld = this.renderMode !== "ui-only";
 
     ctx.clearRect(0, 0, this.w, this.h);
 
-    ctx.save();
-    ctx.translate(
-      this.w * 0.5 - this.camera.x + this.camera.sx,
-      this.h * 0.5 - this.camera.y + this.camera.sy
-    );
+    if (renderWorld) {
+      ctx.save();
+      ctx.translate(
+        this.w * 0.5 - this.camera.x + this.camera.sx,
+        this.h * 0.5 - this.camera.y + this.camera.sy
+      );
 
-    if (this.dungeon.active) this._drawDungeonRoom(ctx);
-    else this.world.draw(ctx, this.camera, this.hero);
+      if (this.dungeon.active) this._drawDungeonRoom(ctx);
+      else this.world.draw(ctx, this.camera, this.hero);
 
-    for (const l of this.loot) {
-      if (!this._isVisibleWorldPoint(l?.x, l?.y, 80)) continue;
-      if (l?.alive) l.draw(ctx);
+      for (const l of this.loot) {
+        if (!this._isVisibleWorldPoint(l?.x, l?.y, 80)) continue;
+        if (l?.alive) l.draw(ctx);
+      }
+
+      for (const p of this.projectiles) {
+        if (!this._isVisibleWorldPoint(p?.x, p?.y, 120)) continue;
+        if (p?.alive) p.draw(ctx);
+      }
+
+      for (const e of this.enemies) {
+        if (!this._isVisibleWorldPoint(e?.x, e?.y, 150)) continue;
+        if (!e?.alive) continue;
+        const d2 = dist2(e.x, e.y, this.hero.x, this.hero.y);
+        if (!this.dungeon.active && d2 > 340 * 340) this._drawEnemyProxy(ctx, e);
+        else e.draw(ctx);
+      }
+
+      this.hero.draw(ctx);
+      this._drawFloatingTexts(ctx);
+
+      ctx.restore();
     }
-
-    for (const p of this.projectiles) {
-      if (!this._isVisibleWorldPoint(p?.x, p?.y, 120)) continue;
-      if (p?.alive) p.draw(ctx);
-    }
-
-    for (const e of this.enemies) {
-      if (!this._isVisibleWorldPoint(e?.x, e?.y, 150)) continue;
-      if (!e?.alive) continue;
-      const d2 = dist2(e.x, e.y, this.hero.x, this.hero.y);
-      if (!this.dungeon.active && d2 > 340 * 340) this._drawEnemyProxy(ctx, e);
-      else e.draw(ctx);
-    }
-
-    this.hero.draw(ctx);
-    this._drawFloatingTexts(ctx);
-
-    ctx.restore();
 
     this._drawScreenEffects(ctx);
     this.ui.draw(ctx, this);
@@ -559,8 +659,13 @@ export default class Game {
       const rect = this.canvas.getBoundingClientRect();
       const sx = (ev.clientX - rect.left) * (this.w / rect.width);
       const sy = (ev.clientY - rect.top) * (this.h / rect.height);
+      const moved = Math.abs(this.mouse.x - sx) + Math.abs(this.mouse.y - sy) > 1.25;
       this.mouse.x = sx;
       this.mouse.y = sy;
+      if (moved) {
+        this.mouse.aimRecentT = 0.75;
+        this.mouse.moved = true;
+      }
     };
 
     this.canvas.addEventListener("mousemove", onMove);
@@ -633,6 +738,8 @@ export default class Game {
       this.mouse.y = p.y;
       this.mouse.down = true;
       this.mouse.clicked = true;
+      this.mouse.aimRecentT = 0.9;
+      this.mouse.moved = true;
     }, { passive: false });
 
     this.canvas.addEventListener("pointermove", (ev) => {
@@ -653,8 +760,13 @@ export default class Game {
         this.touch.x = this.touch.baseX + (dx / d) * Math.min(max, d);
         this.touch.y = this.touch.baseY + (dy / d) * Math.min(max, d);
       } else if (ev.pointerId === this.touch.aimId) {
+        const moved = Math.abs(this.mouse.x - p.x) + Math.abs(this.mouse.y - p.y) > 1.25;
         this.mouse.x = p.x;
         this.mouse.y = p.y;
+        if (moved) {
+          this.mouse.aimRecentT = 0.9;
+          this.mouse.moved = true;
+        }
       }
     }, { passive: false });
 
@@ -726,14 +838,25 @@ export default class Game {
   }
 
   _updateMouseWorld() {
-    this.mouse.worldX = this.mouse.x - this.w * 0.5 + this.camera.x;
-    this.mouse.worldY = this.mouse.y - this.h * 0.5 + this.camera.y;
+    const aimPoint = this.getAimWorldPoint?.(this.mouse, this);
+    if (Number.isFinite(aimPoint?.x) && Number.isFinite(aimPoint?.y)) {
+      this.mouse.worldX = aimPoint.x;
+      this.mouse.worldY = aimPoint.y;
+    } else {
+      this.mouse.worldX = this.mouse.x - this.w * 0.5 + this.camera.x;
+      this.mouse.worldY = this.mouse.y - this.h * 0.5 + this.camera.y;
+    }
 
     const dx = this.mouse.worldX - this.hero.x;
     const dy = this.mouse.worldY - this.hero.y;
     const a = norm(dx, dy);
     this.hero.aimDir.x = a.x;
     this.hero.aimDir.y = a.y;
+    if (!this.hero.faceDir) this.hero.faceDir = { x: a.x, y: a.y };
+    if ((this.mouse.aimRecentT || 0) > 0.02) {
+      this.hero.faceDir.x = a.x;
+      this.hero.faceDir.y = a.y;
+    }
   }
 
   _tickMessages(dt) {
@@ -799,6 +922,8 @@ export default class Game {
       this.menu.open = this.menu.open === "dev" ? null : "dev";
     }
 
+    if (this.input.wasPressed("F4")) this.toggleMode();
+
     if (this.input.wasPressed("F1")) {
       this._toggleSpikeMonitor();
     }
@@ -816,8 +941,529 @@ export default class Game {
       }
     }
 
-    if (this.menu.open) this._clearTouchState();
+    if (this.menu.open && this.menu.open !== "editor") this._clearTouchState();
     if (this.menu.open === "dev") this._handleDevToolsInput();
+    if (this.menu.open === "editor") this._handleEditorInput();
+  }
+
+  enterBuildMode() {
+    if (!this._editorBaseCaptured) {
+      this.world?.captureEditorSessionBase?.();
+      this._editorBaseCaptured = true;
+    }
+    if (this.world) this.world.suppressEditorRiverCarve = true;
+    this.mode = "build";
+    this.menu.open = "editor";
+    this._townServiceFocus = "";
+    this.editor.playMode = false;
+    this.onEditorWorldChanged?.("terrain");
+    this._msg("Build mode: world forge open", 1.0);
+  }
+
+  enterPlayMode() {
+    if (this.world) this.world.suppressEditorRiverCarve = false;
+    this.mode = "play";
+    if (this.menu.open === "editor") this.menu.open = null;
+    this.editor.dragging = false;
+    this.editor.stroke = [];
+    this._flushEditorTerrainBatch();
+    this.onEditorWorldChanged?.("terrain");
+    this._msg("Play mode", 0.9);
+  }
+
+  toggleMode() {
+    if (this.mode === "build") this.enterPlayMode();
+    else this.enterBuildMode();
+  }
+
+  _notifyEditorWorldChanged() {
+    this.onEditorWorldChanged?.("terrain");
+    this._requestEditorAutosave();
+  }
+
+  _notifyEditorDetailChanged() {
+    this.onEditorWorldChanged?.("detail");
+    this._requestEditorAutosave();
+  }
+
+  _requestEditorAutosave(delay = 420) {
+    if (this._editorAutosaveTimer) clearTimeout(this._editorAutosaveTimer);
+    this.editor.lastStatus = "Unsaved changes";
+    this._editorAutosaveTimer = setTimeout(() => {
+      this._editorAutosaveTimer = null;
+      const ok = this.world?.saveEditorData?.();
+      if (ok) this.editor.lastStatus = "Autosaved";
+    }, delay);
+  }
+
+  _queueEditorTerrainStamp(stamp) {
+    if (!stamp) return;
+    this.editor.pendingTerrainStamps.push(stamp);
+  }
+
+  _flushEditorTerrainBatch(force = false) {
+    const batch = this.editor.pendingTerrainStamps || [];
+    if (!batch.length) return false;
+    if (!force && (this.editor.terrainFlushT || 0) > 0) return false;
+    const ok = this.world?.addEditorTerrainStampBatch?.(batch);
+    this.editor.pendingTerrainStamps = [];
+    this.editor.terrainFlushT = 0.06;
+    if (ok) this._notifyEditorWorldChanged();
+    return !!ok;
+  }
+
+  _editorToolName(tool = this.editor?.tool) {
+    const names = {
+      road: "Road",
+      river: "River Section",
+      bridge: "Bridge",
+      dock: "Dock",
+      raise: "Raise Land",
+      lower: "Lower Land",
+      water: "Water Carve",
+      erase: "Erase",
+      flatten: "Flatten",
+      smooth: "Smooth",
+      tree: "Tree",
+      rock: "Rock",
+      clutter: "Clutter",
+      camp: "Camp",
+      town: "Town",
+      dungeon: "Dungeon",
+      shrine: "Shrine",
+      cache: "Cache",
+      secret: "Secret",
+      dragon: "Dragon Lair",
+      waystone: "Waystone",
+      herb: "Herb",
+    };
+    return names[tool] || "Editor";
+  }
+
+  _editorToolHotkey(tool) {
+    const map = {
+      road: "1",
+      river: "2",
+      bridge: "3",
+      dock: "4",
+      raise: "5",
+      lower: "6",
+      water: "7",
+      erase: "8",
+      flatten: "T",
+      smooth: "Y",
+      tree: "Q",
+      rock: "W",
+      clutter: "E",
+      camp: "A",
+      town: "S",
+      dungeon: "D",
+      shrine: "Z",
+      cache: "X",
+      secret: "C",
+      dragon: "V",
+      waystone: "B",
+      herb: "H",
+    };
+    return map[tool] || "";
+  }
+
+  _editorToolShortLabel(tool = this.editor?.tool) {
+    const map = {
+      road: "Road",
+      river: "River Seg",
+      bridge: "Bridge",
+      dock: "Dock",
+      raise: "Raise",
+      lower: "Lower",
+      water: "Water",
+      erase: "Erase",
+      flatten: "Flatten",
+      smooth: "Smooth",
+      tree: "Tree",
+      rock: "Rock",
+      clutter: "Clutter",
+      camp: "Camp",
+      town: "Town",
+      dungeon: "Crypt",
+      shrine: "Shrn",
+      cache: "Cache",
+      secret: "Hidden",
+      dragon: "Lair",
+      waystone: "Stone",
+      herb: "Herb",
+    };
+    return map[tool] || this._editorToolName(tool);
+  }
+
+  _simplifyEditorStroke(points, minStep = 48) {
+    if (!Array.isArray(points) || points.length < 3) return points || [];
+    const simplified = [points[0]];
+    let last = points[0];
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i];
+      if (!p) continue;
+      if (Math.hypot(p.x - last.x, p.y - last.y) < minStep) continue;
+      simplified.push(p);
+      last = p;
+    }
+    const end = points[points.length - 1];
+    if (simplified[simplified.length - 1] !== end) simplified.push(end);
+    return simplified;
+  }
+
+  _setEditorTool(tool) {
+    if (!EDITOR_TOOL_IDS.includes(tool)) return;
+    if (this.worldVariant === "river-build" && !["river", "erase", "flatten", "smooth", "lower", "water"].includes(tool)) return;
+    this.editor.tool = tool;
+    this.editor.dragging = false;
+    this.editor.stroke = [];
+    this._msg(`Editor: ${this._editorToolName(tool)}`, 0.8);
+  }
+
+  _isMouseOverEditorHud() {
+    const mx = this.mouse.x;
+    const my = this.mouse.y;
+    if (!Number.isFinite(mx) || !Number.isFinite(my)) return false;
+    const { x, y, w, h } = this.getEditorPanelLayout();
+    return mx >= x && mx <= x + w && my >= y && my <= y + h;
+  }
+
+  _handleEditorInput() {
+    const toolKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "t", "y", "q", "w", "e", "a", "s", "d", "z", "x", "c", "v", "b", "h"];
+    for (let i = 0; i < toolKeys.length; i++) {
+      if (this.input.wasPressed(toolKeys[i])) this._setEditorTool(EDITOR_TOOL_IDS[i]);
+      if (this.input.wasPressed(toolKeys[i].toUpperCase?.() || toolKeys[i])) this._setEditorTool(EDITOR_TOOL_IDS[i]);
+    }
+    const usedPanelButton = this._handleEditorPanelButtons();
+    const overHud = this._isMouseOverEditorHud();
+    if (this.input.wasPressed("[")) {
+      this.editor.brushSize = Math.max(36, this.editor.brushSize - 20);
+      this.editor.strokeWidth = Math.max(24, this.editor.strokeWidth - 10);
+      this.editor.propScale = Math.max(0.4, this.editor.propScale - 0.1);
+    }
+    if (this.input.wasPressed("]")) {
+      this.editor.brushSize = Math.min(520, this.editor.brushSize + 20);
+      this.editor.strokeWidth = Math.min(220, this.editor.strokeWidth + 10);
+      this.editor.propScale = Math.min(3.2, this.editor.propScale + 0.1);
+    }
+    if (this.input.wasPressed("-") || this.input.wasPressed("_")) {
+      this.editor.terrainPower = Math.max(4, this.editor.terrainPower - 2);
+    }
+    if (this.input.wasPressed("=") || this.input.wasPressed("+")) {
+      this.editor.terrainPower = Math.min(80, this.editor.terrainPower + 2);
+    }
+    if (this.input.wasPressed("u") || this.input.wasPressed("U")) {
+      const undone = this.world?.undoEditorAction?.();
+      if (undone) this._notifyEditorWorldChanged();
+      this._msg(undone ? "Editor: undid last change" : "Editor: nothing to undo", 0.9);
+    }
+    if (this.input.wasPressed("p") || this.input.wasPressed("P")) {
+      this.editor.showGameHud = !this.editor.showGameHud;
+      this._msg(this.editor.showGameHud ? "Editor: gameplay HUD ON" : "Editor: gameplay HUD OFF", 0.9);
+    }
+    if (this.input.wasPressed("9")) {
+      this._saveEditorWorld(false);
+    }
+    if (this.input.wasPressed("0")) {
+      this._importEditorFromClipboard();
+    }
+    if (this.input.wasPressed("Backspace")) {
+      const cleared = this.world?.eraseEditorAt?.(this.mouse.worldX, this.mouse.worldY, this.editor.brushSize);
+      if (cleared) this._notifyEditorWorldChanged();
+      this._msg(cleared ? "Editor: erased nearby authored changes" : "Editor: nothing nearby to erase", 0.8);
+    }
+    if (overHud) {
+      if (!this.mouse.down) {
+        if (this.editor.dragging) {
+          if (this.editor.tool === "bridge") this._commitEditorBridgeStroke();
+          else if (this.editor.tool === "road" || this.editor.tool === "river") this._commitEditorStroke(this.editor.tool);
+        }
+        this._flushEditorTerrainBatch(true);
+        this.editor.lastPaintX = NaN;
+        this.editor.lastPaintY = NaN;
+      }
+      return;
+    }
+    if (!usedPanelButton) this._handleEditorMouseTool();
+  }
+
+  _handleEditorPanelButtons() {
+    if (!this.mouse.clicked) return false;
+    const mx = this.mouse.x;
+    const my = this.mouse.y;
+    for (const button of this.getEditorButtonRects()) {
+      if (mx < button.x || mx > button.x + button.w || my < button.y || my > button.y + button.h) continue;
+      if (button.action?.startsWith?.("tool:")) {
+        this._setEditorTool(button.action.slice(5));
+      } else if (button.action?.startsWith?.("river-piece:")) {
+        this.editor.riverPiece = "straight";
+        this.editor.tool = "river";
+        this._msg("Editor: straight river section", 0.8);
+      } else if (button.action === "river-rot-left") {
+        this.editor.riverAngle -= Math.PI / 72;
+        this._msg(`Editor: river rotation ${Math.round((((this.editor.riverAngle || 0) * 180) / Math.PI) % 360)}deg`, 0.8);
+      } else if (button.action === "river-rot-right") {
+        this.editor.riverAngle += Math.PI / 72;
+        this._msg(`Editor: river rotation ${Math.round((((this.editor.riverAngle || 0) * 180) / Math.PI) % 360)}deg`, 0.8);
+      } else if (button.action === "undo") {
+        this.editor.lastStatus = "Undoing...";
+        const undone = this.world?.undoEditorAction?.();
+        if (undone) this._notifyEditorWorldChanged();
+        this._msg(undone ? "Editor: undid last change" : "Editor: nothing to undo", 0.9);
+      } else if (button.action === "revert-base") {
+        this.editor.lastStatus = "Reverting base map...";
+        const ok = this.world?.revertEditorToSessionBase?.();
+        if (ok) this.onEditorWorldChanged?.("terrain");
+        this._msg(ok ? "Editor: reverted to base map" : "Editor: no base map captured yet", 1.0);
+      } else if (button.action === "repair-paths") {
+        this.editor.lastStatus = "Repairing paths...";
+        const ok = this.world?.rebuildEditorTravelFromBase?.();
+        if (ok) this.onEditorWorldChanged?.("terrain");
+        this._msg(ok ? "Editor: rebuilt roads, rivers, bridges, and docks from the base world" : "Editor: path rebuild failed", 1.2);
+      } else if (button.action === "bake-rivers") {
+        this.editor.lastStatus = "Baking rivers...";
+        const ok = this.world?.bakeEditorRiversToTerrain?.();
+        if (ok) this.onEditorWorldChanged?.("terrain");
+        this._msg(ok ? "Editor: baked riverbeds into terrain" : "Editor: no rivers to bake", 1.1);
+      } else if (button.action === "save") this._saveEditorWorld(false);
+      else if (button.action === "save-play") this._saveEditorWorld(true);
+      else if (button.action === "play") this.enterPlayMode();
+      else if (button.action === "build") this.enterBuildMode();
+      else if (button.action === "hud") {
+        this.editor.showGameHud = !this.editor.showGameHud;
+        this._msg(this.editor.showGameHud ? "Editor: gameplay HUD ON" : "Editor: gameplay HUD OFF", 0.9);
+      } else if (button.action === "brush-down") {
+        this.editor.brushSize = Math.max(36, this.editor.brushSize - 20);
+      } else if (button.action === "brush-up") {
+        this.editor.brushSize = Math.min(520, this.editor.brushSize + 20);
+      } else if (button.action === "width-down") {
+        this.editor.strokeWidth = Math.max(24, this.editor.strokeWidth - 10);
+      } else if (button.action === "width-up") {
+        this.editor.strokeWidth = Math.min(220, this.editor.strokeWidth + 10);
+      } else if (button.action === "power-down") {
+        this.editor.terrainPower = Math.max(4, this.editor.terrainPower - 2);
+      } else if (button.action === "power-up") {
+        this.editor.terrainPower = Math.min(80, this.editor.terrainPower + 2);
+      } else if (button.action === "scale-down") {
+        this.editor.propScale = Math.max(0.4, this.editor.propScale - 0.1);
+      } else if (button.action === "scale-up") {
+        this.editor.propScale = Math.min(3.2, this.editor.propScale + 0.1);
+      } else if (button.action === "export") {
+        this.editor.exportText = this.world?.exportEditorData?.() || "";
+        this._copyTextToClipboard(this.editor.exportText, "Editor: export copied", "Editor: export ready in panel");
+      } else if (button.action === "import") {
+        this.editor.lastStatus = "Importing...";
+        this._importEditorFromClipboard();
+      } else if (button.action === "clear") {
+        this.editor.lastStatus = "Clearing...";
+        this.world?.clearEditorData?.();
+        this.onEditorWorldChanged?.("terrain");
+        this._msg("Editor: cleared authored changes", 1.0);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  _saveEditorWorld(andPlay = false) {
+    const ok = this.world?.saveEditorData?.();
+    this.editor.lastStatus = ok ? "Saved authored world data locally" : "Save failed";
+    this._msg(ok ? (andPlay ? "Editor: saved world, back to play" : "Editor: world saved") : "Editor: save failed", 1.1);
+    if (andPlay && ok) {
+      this.enterPlayMode();
+      this.editor.playMode = true;
+    }
+  }
+
+  _handleEditorMouseTool() {
+    const tool = this.editor.tool;
+    const x = this.mouse.worldX;
+    const y = this.mouse.worldY;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    if (tool === "river" && this.mouse.clicked) {
+      try {
+        const ok = this.worldVariant === "river-build"
+          ? this.world?.addEditorRiverCutSectionAt?.(
+              x,
+              y,
+              this.editor.riverAngle || 0,
+              Math.max(56, this.editor.strokeWidth * 0.95),
+            )
+          : this.world?.addEditorRiverPieceAt?.(
+              x,
+              y,
+              "straight",
+              this.editor.riverAngle || 0,
+              Math.max(56, this.editor.strokeWidth * 0.95),
+            );
+        if (ok) {
+          this.editor.lastStatus = this.worldVariant === "river-build" ? "Placed river trench cut" : "Placed straight river section";
+          this._notifyEditorWorldChanged();
+          this._msg(this.worldVariant === "river-build" ? "Editor: river trench placed" : "Editor: straight river placed", 0.8);
+        }
+      } catch (err) {
+        console.error("Editor river placement failed", err);
+        this.editor.lastStatus = "River placement failed";
+        this._msg("Editor: river placement failed", 1.2);
+      }
+      return;
+    }
+
+    if (tool === "road" || tool === "bridge") {
+      if (this.mouse.clicked && !this.editor.dragging) {
+        this.editor.dragging = true;
+        this.editor.stroke = [{ x, y, sx: this.mouse.x, sy: this.mouse.y }];
+      } else if (this.mouse.down && this.editor.dragging) {
+        const last = this.editor.stroke[this.editor.stroke.length - 1];
+        const step =
+          tool === "road"
+            ? Math.max(16, this.editor.brushSize * 0.1)
+            : Math.max(24, this.editor.brushSize * 0.18);
+        if (!last || Math.hypot(last.x - x, last.y - y) >= step) {
+          this.editor.stroke.push({ x, y, sx: this.mouse.x, sy: this.mouse.y });
+        }
+      } else if (!this.mouse.down && this.editor.dragging) {
+        if (tool === "bridge") this._commitEditorBridgeStroke();
+        else this._commitEditorStroke(tool);
+      }
+      return;
+    }
+
+    if ((tool === "raise" || tool === "lower" || tool === "water" || tool === "erase" || tool === "flatten" || tool === "smooth") && this.mouse.down) {
+      const dist = Math.hypot((this.editor.lastPaintX || 0) - x, (this.editor.lastPaintY || 0) - y);
+      if (!Number.isFinite(this.editor.lastPaintX) || dist >= Math.max(28, this.editor.brushSize * 0.18)) {
+        if (tool === "erase") {
+          this.world?.eraseEditorAt?.(x, y, this.editor.brushSize);
+          this._notifyEditorWorldChanged();
+        } else {
+          this._queueEditorTerrainStamp({
+            mode: tool,
+            x,
+            y,
+            radius: this.editor.brushSize,
+            power: this.editor.terrainPower,
+          });
+        }
+        this.editor.lastPaintX = x;
+        this.editor.lastPaintY = y;
+      }
+      this._flushEditorTerrainBatch(false);
+      return;
+    }
+
+    if (this.mouse.clicked && (tool === "tree" || tool === "rock" || tool === "clutter")) {
+      this.world?.addEditorPropAt?.(x, y, tool, this.editor.propScale);
+      this._notifyEditorDetailChanged();
+      this._msg(`Editor: ${this._editorToolName(tool).toLowerCase()} placed`, 0.8);
+      return;
+    }
+
+    if (this.mouse.clicked && ["camp", "town", "dungeon", "shrine", "cache", "secret", "dragon", "waystone", "herb"].includes(tool)) {
+      this.world?.addEditorPoiAt?.(x, y, tool);
+      this._notifyEditorDetailChanged();
+      this._msg(`Editor: ${this._editorToolName(tool).toLowerCase()} placed`, 0.8);
+      return;
+    }
+
+    if (!this.mouse.down) {
+      this._flushEditorTerrainBatch(true);
+      this.editor.lastPaintX = NaN;
+      this.editor.lastPaintY = NaN;
+    }
+
+    if (this.mouse.clicked && (tool === "bridge" || tool === "dock")) {
+      if (tool === "dock") {
+        this.world?.addEditorDockAt?.(x, y);
+        this._notifyEditorDetailChanged();
+        this._msg("Editor: dock placed", 0.8);
+      }
+    }
+  }
+
+  _commitEditorStroke(tool) {
+    const points = this.editor.stroke || [];
+    this.editor.dragging = false;
+    this.editor.stroke = [];
+    if (points.length < 2) return;
+    if (tool === "road") {
+      const sampled = this._simplifyEditorStroke(points, Math.max(32, this.editor.strokeWidth * 0.45));
+      this.editor.lastStatus = "Applying road...";
+      this.world?.addEditorRoadStroke?.(sampled, this.editor.strokeWidth);
+      this._notifyEditorWorldChanged();
+      this._msg(`Editor: road stroke saved (${sampled.length} pts)`, 0.9);
+    } else if (tool === "river") {
+      const start = points[0];
+      const end = points[points.length - 1];
+      const dx = (end?.x || 0) - (start?.x || 0);
+      const dy = (end?.y || 0) - (start?.y || 0);
+      const len = Math.hypot(dx, dy);
+      if (len < 40) return;
+      const steps = Math.max(8, Math.ceil(len / 36));
+      const sampled = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        sampled.push({
+          x: start.x + dx * t,
+          y: start.y + dy * t,
+        });
+      }
+      this.editor.lastStatus = "Applying river...";
+      this.world?.addEditorRiverStroke?.(sampled, Math.max(72, this.editor.strokeWidth * 1.2));
+      this._notifyEditorWorldChanged();
+      this._msg(`Editor: river section saved (${Math.round(len)})`, 0.9);
+    }
+  }
+
+  _commitEditorBridgeStroke() {
+    const points = this.editor.stroke || [];
+    this.editor.dragging = false;
+    this.editor.stroke = [];
+    if (points.length < 2) return;
+    const start = points[0];
+    const end = points[points.length - 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 40) return;
+    this.world?.addEditorBridgeAt?.((start.x + end.x) * 0.5, (start.y + end.y) * 0.5, {
+      angle: Math.atan2(dy, dx),
+      length: clamp(length, 60, 560),
+      width: clamp(this.editor.strokeWidth * 0.52, 24, 140),
+    });
+    this._notifyEditorDetailChanged();
+    this._msg(`Editor: bridge placed (${Math.round(length)})`, 0.9);
+  }
+
+  _copyTextToClipboard(text, successMsg, fallbackMsg) {
+    if (!text) {
+      this._msg("Editor: nothing to copy", 0.8);
+      return;
+    }
+    const clip = globalThis?.navigator?.clipboard;
+    if (clip?.writeText) {
+      clip.writeText(text)
+        .then(() => this._msg(successMsg, 0.9))
+        .catch(() => this._msg(fallbackMsg, 1.0));
+    } else {
+      this._msg(fallbackMsg, 1.0);
+    }
+  }
+
+  _importEditorFromClipboard() {
+    const clip = globalThis?.navigator?.clipboard;
+    if (!clip?.readText) {
+      this._msg("Editor: clipboard import unavailable here", 1.0);
+      return;
+    }
+    clip.readText()
+      .then((text) => {
+        const ok = this.world?.importEditorData?.(text);
+        this.editor.importedAt = ok ? Date.now() : 0;
+        this._msg(ok ? "Editor: imported world forge data" : "Editor: import failed", 1.1);
+      })
+      .catch(() => this._msg("Editor: clipboard import failed", 1.0));
   }
 
   _handleClassSelectInput() {
@@ -946,8 +1592,9 @@ export default class Game {
     this._handleDevToolsMouse();
     const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
     for (let i = 0; i < DEV_TOOL_ACTION_COUNT; i++) {
-      if (this.input.wasPressed(keys[i])) this._runDevToolAction(i + 1);
+      if (keys[i] && this.input.wasPressed(keys[i])) this._runDevToolAction(i + 1);
     }
+    if (this.input.wasPressed("h") || this.input.wasPressed("H")) this._runDevToolAction(11);
   }
 
   _handleDevToolsMouse() {
@@ -1021,6 +1668,9 @@ export default class Game {
     if (action === 10) {
       this._toggleProfiler();
     }
+    if (action === 11) {
+      this._toggleSpikeMonitor();
+    }
   }
 
   _toggleProfiler() {
@@ -1034,6 +1684,7 @@ export default class Game {
   }
 
   getDevToolLines() {
+    const perf = this.getPerfSnapshot?.() || {};
     return [
       "1 heal HP and mana",
       "2 add 250 gold",
@@ -1045,15 +1696,21 @@ export default class Game {
       "8 equip mythic best gear",
       this._isDevResetConfirmLive() ? "9 reset to a new game (press again now)" : "9 reset to a new game (confirm)",
       `0 profiler ${this.dev?.showProfiler ? "ON" : "OFF"} (F2 quick toggle)`,
-      `Hitch monitor ${this.dev?.showSpikeMonitor ? "ON" : "OFF"} (F1 quick toggle)`,
+      `H hitch monitor ${this.dev?.showSpikeMonitor ? "ON" : "OFF"} (F1 quick toggle)`,
+      `FPS ${Math.round(perf.fps || 0)} | Frame ${(perf.frameMs || 0).toFixed(1)}ms | Jank ${(perf.frameJank || 0).toFixed(1)}ms`,
       `Explored cells: ${this.world?.exportDiscovery?.()?.length || 0}`,
       `World span: ${((this.world?.mapHalfSize || 0) * 2).toLocaleString()} units`,
     ];
   }
 
+  getDevActionCount() {
+    return DEV_TOOL_ACTION_COUNT;
+  }
+
   getDevPanelLayout() {
     const w = Math.min(Math.max(this.w - 120, 430), 560);
-    const h = 362;
+    const lines = this.getDevToolLines?.() || [];
+    const h = Math.min(this.h - 36, Math.max(362, 102 + lines.length * 22));
     const x = ((this.w - w) / 2) | 0;
     const y = ((this.h - h) / 2) | 0;
     return {
@@ -1198,7 +1855,7 @@ export default class Game {
   _devResetGame() {
     this.save.clear?.();
     this.seed = (Date.now() & 0x7fffffff) | 0;
-    this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
+    this.world = new World(this.seed, { viewW: this.w, viewH: this.h, variant: this.worldVariant });
     const start = this.world.getStarterPoint?.() || this.world.spawn || { x: 0, y: 0 };
     this.hero = new Hero(start.x, start.y);
     this.enemies = [];
@@ -1235,7 +1892,7 @@ export default class Game {
       materials: { scrap: 0, ore: 0, hide: 0, essence: 0 },
     };
     this.hero.classId = "knight";
-    this.dungeon = { active: false, floor: 0, origin: null, room: null, roomIndex: 0, totalRooms: 0, roomRewarded: false, layout: null, currentRoomId: null, keys: 0, roomClearT: 0 };
+    this.dungeon = { active: false, kind: "depths", floor: 0, origin: null, lairId: null, room: null, roomIndex: 0, totalRooms: 0, roomRewarded: false, layout: null, currentRoomId: null, keys: 0, roomClearT: 0, hoardOpened: false };
     this.menu.open = "class-select";
     this.menu.mapZoom = 1;
     this.trackedObjective = "story";
@@ -1274,9 +1931,20 @@ export default class Game {
       my += this.touch.my || 0;
     }
 
-    const move = norm(mx, my);
+    const moveInput = { x: mx, y: my };
+    const redirectedMove = this.getMoveIntent?.(moveInput, this);
+    const move = norm(redirectedMove?.x ?? mx, redirectedMove?.y ?? my);
     if (Math.abs(mx) > 0.08 || Math.abs(my) > 0.08) this._noteMoveIntent(0.28);
     const speed = this._getHeroMoveSpeed();
+    if (Math.abs(move.x) > 0.01 || Math.abs(move.y) > 0.01) {
+      this.hero.lastMove.x = move.x;
+      this.hero.lastMove.y = move.y;
+      if ((this.mouse.aimRecentT || 0) <= 0.02) {
+        if (!this.hero.faceDir) this.hero.faceDir = { x: move.x, y: move.y };
+        this.hero.faceDir.x = move.x;
+        this.hero.faceDir.y = move.y;
+      }
+    }
 
     this.hero.vx = move.x * speed;
     this.hero.vy = move.y * speed;
@@ -1921,7 +2589,214 @@ export default class Game {
           this._msg("Warden seal crafted", 1.2);
         },
       },
+      {
+        id: "roadwarden-cloak",
+        name: "Roadwarden Cloak",
+        color: "#b8c7d8",
+        desc: "A weathered mantle stitched for long roads, cold passes, and hard travel.",
+        requires: { hide: 6, scrap: 3, herb: 2 },
+        resultText: "Crafts 1 rare armor",
+        craft: () => {
+          const item = makeGear("armor", Math.max(level, 5), "rare", hash2(this.seed, level, this.time | 0, 211));
+          item.name = "Roadwarden Cloak";
+          item.affix = "waymarked";
+          this.hero.inventory.push(item);
+          this._msg("Roadwarden Cloak crafted", 1.2);
+        },
+      },
+      {
+        id: "tideglass-phial",
+        name: "Tideglass Phial",
+        color: "#9ddfff",
+        desc: "A clear vessel tuned to riverlight and coastal fog, useful for deep travel and sharper recovery.",
+        requires: { essence: 2, herb: 3, ore: 2 },
+        resultText: "Grants 1 mana potion and reveals water crossings nearby",
+        craft: () => {
+          this.hero.potions.mana = (this.hero.potions.mana || 0) + 1;
+          this.world?.revealAround?.(this.hero.x, this.hero.y, 520);
+          this._spawnFloatingText(this.hero.x, this.hero.y - 28, "Tideglass", "#9ddfff");
+          this._msg("Tideglass phial prepared", 1.0);
+        },
+      },
     ];
+  }
+
+  getEditorToolLines() {
+    const snap = this.world?.getEditorSnapshot?.() || {};
+    const status = this.editor.lastStatus ? `Status: ${this.editor.lastStatus}` : "World Forge ready";
+    const riverPiece =
+      this.editor.tool === "river"
+        ? `  Straight  Rot ${Math.round((((this.editor.riverAngle || 0) * 180) / Math.PI) % 360)}deg`
+        : "";
+    if (this.worldVariant === "river-build") {
+      return [
+        `River Build  ${this._editorToolName()}${this.editor.dragging ? " (placing)" : ""}${riverPiece}`,
+        `Flat sandbox. Click to stamp V-shaped trench cuts. Rotate the trench and judge the shape only.`,
+        `Cuts ${snap.terrainStamps || 0}  ${status}`,
+        `Brush ${Math.round(this.editor.brushSize)}  Width ${Math.round(this.editor.strokeWidth)}  Pow ${Math.round(this.editor.terrainPower)}`,
+        `Mouse ${Math.round(this.mouse.worldX || 0)}, ${Math.round(this.mouse.worldY || 0)}`,
+      ];
+    }
+    return [
+      `${this.mode === "build" ? "Build" : "Play"}  ${this._editorToolName()}${this.editor.dragging ? " (drawing)" : ""}${riverPiece}`,
+      `Road drag. River = click straight sections. Click props/places. WASD pan, wheel zoom, F center.`,
+      `Roads ${snap.roads || 0}  Rivers ${snap.rivers || 0}  Bridges ${snap.bridges || 0}  Docks ${snap.docks || 0}`,
+      `Props ${snap.props || 0}  POIs ${snap.pois || 0}  Terrain ${snap.terrainStamps || 0}  ${status}`,
+      `Brush ${Math.round(this.editor.brushSize)}  Width ${Math.round(this.editor.strokeWidth)}  Pow ${Math.round(this.editor.terrainPower)}  Scale ${this.editor.propScale.toFixed(1)}`,
+      `Mouse ${Math.round(this.mouse.worldX || 0)}, ${Math.round(this.mouse.worldY || 0)}`,
+    ];
+  }
+
+  getEditorPanelLayout() {
+    const w = Math.min(Math.max(this.w - 220, 640), 760);
+    const lines = this.getEditorToolLines();
+    const h = Math.min(this.h - 56, Math.max(690, 352 + lines.length * 16));
+    return {
+      w,
+      h,
+      x: 24,
+      y: 24,
+      rowStart: 548,
+      rowStep: 16,
+    };
+  }
+
+  getEditorButtonRects() {
+    const { x, y, w, h } = this.getEditorPanelLayout();
+    const buttons = [];
+    const leftX = x + 18;
+    const topY = y + 58;
+    const gap = 10;
+    const sectionGap = 14;
+    const groupTitleH = 18;
+    let cursorY = topY;
+    const colW = 72;
+    const toolH = 22;
+    const toolGap = 4;
+    const groupCols = [4, 3, 3, 4];
+
+    const toolGroups = this.worldVariant === "river-build"
+      ? [
+          { label: "River", tools: ["river"] },
+        ]
+      : EDITOR_TOOL_GROUPS;
+
+    for (let gi = 0; gi < toolGroups.length; gi++) {
+      const group = toolGroups[gi];
+      const cols = groupCols[gi] || 4;
+      buttons.push({ action: `label:${group.label}`, label: group.label, x: leftX, y: cursorY, w: 160, h: groupTitleH, kind: "label" });
+      cursorY += groupTitleH + 8;
+      for (let i = 0; i < group.tools.length; i++) {
+        const tool = group.tools[i];
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        buttons.push({
+          action: `tool:${tool}`,
+          label: `${this._editorToolShortLabel(tool)}`,
+          hotkey: this._editorToolHotkey(tool),
+          x: leftX + col * (colW + toolGap),
+          y: cursorY + row * (toolH + toolGap),
+          w: colW,
+          h: toolH,
+          kind: "tool",
+          active: this.editor.tool === tool,
+        });
+      }
+      cursorY += Math.ceil(group.tools.length / cols) * (toolH + toolGap) + sectionGap;
+    }
+
+    if (this.worldVariant === "river-build") {
+      buttons.push({
+        action: "tool:river",
+        label: "River Seg",
+        hotkey: "2",
+        x: leftX,
+        y: cursorY,
+        w: 284,
+        h: 36,
+        kind: "tool",
+        active: this.editor.tool === "river",
+      });
+      cursorY += 46;
+    } else {
+      buttons.push({ action: "label:River Pieces", label: "River Pieces", x: leftX, y: cursorY, w: 160, h: groupTitleH, kind: "label" });
+      cursorY += groupTitleH + 8;
+      const riverPieceButtons = [
+        { action: "river-piece:straight", piece: "straight", label: "Straight", x: leftX, y: cursorY, w: 284, h: 36 },
+      ];
+      for (const button of riverPieceButtons) {
+        buttons.push({
+          ...button,
+          kind: "river-piece",
+          active: this.editor.tool === "river" && this.editor.riverPiece === button.piece,
+        });
+      }
+      cursorY += 46;
+    }
+    buttons.push({ action: "river-rot-left", label: "Rotate L", x: leftX, y: cursorY, w: 138, h: 24, kind: "control" });
+    buttons.push({ action: "river-rot-right", label: "Rotate R", x: leftX + 146, y: cursorY, w: 138, h: 24, kind: "control" });
+
+    const controlY = y + 58;
+    const controlX = x + w - 156;
+    const miniW = 24;
+    const bigW = 68;
+    const controlH = 22;
+    const controlRows = [
+      { label: "Brush", value: `${Math.round(this.editor.brushSize)}`, down: "brush-down", up: "brush-up" },
+      { label: "Width", value: `${Math.round(this.editor.strokeWidth)}`, down: "width-down", up: "width-up" },
+      { label: "Power", value: `${Math.round(this.editor.terrainPower)}`, down: "power-down", up: "power-up" },
+      { label: "Scale", value: `${this.editor.propScale.toFixed(1)}`, down: "scale-down", up: "scale-up" },
+    ];
+    for (let i = 0; i < controlRows.length; i++) {
+      const rowY = controlY + 16 + i * 28;
+      const row = controlRows[i];
+      buttons.push({ action: `label:${row.label}`, label: row.label, x: controlX, y: rowY - 18, w: 80, h: 16, kind: "label" });
+      buttons.push({ action: row.down, label: "-", x: controlX, y: rowY, w: miniW, h: controlH, kind: "control" });
+      buttons.push({ action: `value:${row.label}`, label: row.value, x: controlX + miniW + gap, y: rowY, w: bigW, h: controlH, kind: "value" });
+      buttons.push({ action: row.up, label: "+", x: controlX + miniW + gap + bigW + gap, y: rowY, w: miniW, h: controlH, kind: "control" });
+    }
+
+    const modeY = controlY + 132;
+    if (this.worldVariant !== "river-build") {
+      buttons.push({ action: "play", label: "Play", x: controlX, y: modeY, w: 44, h: 22, kind: "mode", active: this.mode !== "build" });
+      buttons.push({ action: "build", label: "Build", x: controlX + 48, y: modeY, w: 44, h: 22, kind: "mode", active: this.mode === "build" });
+      buttons.push({ action: "hud", label: this.editor.showGameHud ? "HUD" : "NoHUD", x: controlX + 96, y: modeY, w: 54, h: 22, kind: "mode", active: this.editor.showGameHud });
+    }
+
+    const actionX = controlX;
+    const actionW = 150;
+    const actionH = 24;
+    const actionTop = this.worldVariant === "river-build" ? modeY : modeY + 34;
+    const actionButtons = this.worldVariant === "river-build"
+      ? [
+          { action: "undo", label: "Undo", kind: "action" },
+          { action: "revert-base", label: "Revert", kind: "action-danger" },
+          { action: "clear", label: "Clear", kind: "action-danger" },
+          { action: "save", label: "Save", kind: "action" },
+          { action: "export", label: "Export", kind: "action" },
+          { action: "import", label: "Import", kind: "action" },
+        ]
+      : [
+        { action: "undo", label: "Undo", kind: "action" },
+        { action: "revert-base", label: "Revert", kind: "action-danger" },
+        { action: "repair-paths", label: "Repair", kind: "action-primary" },
+        { action: "bake-rivers", label: "Bake Rivers", kind: "action-primary" },
+        { action: "clear", label: "Clear", kind: "action-danger" },
+        { action: "save", label: "Save", kind: "action" },
+        { action: "save-play", label: "Save + Play", kind: "action-primary" },
+        { action: "export", label: "Export", kind: "action" },
+        { action: "import", label: "Import", kind: "action" },
+      ];
+    for (let i = 0; i < actionButtons.length; i++) {
+      buttons.push({
+        ...actionButtons[i],
+        x: actionX,
+        y: actionTop + i * (actionH + 8),
+        w: actionW,
+        h: actionH,
+      });
+    }
+    return buttons;
   }
 
   getInventoryEntries() {
@@ -3422,8 +4297,8 @@ export default class Game {
     this._cachedNearbyCache = check(this.world.caches, 58);
     this._cachedNearbyHerb = check(this.world.herbs, 54, (h) => !h.picked);
     this._cachedNearbySecret = check(this.world.secrets, 62);
-    this._cachedNearbyTown = check(this.world.towns, 96);
-    this._cachedNearbyTownDoor = this._findNearbyTownDoor(this._cachedNearbyTown || this.world.startTown, 42);
+    this._cachedNearbyTown = check([this.world.startTown, ...(this.world.towns || [])], 128);
+    this._cachedNearbyTownDoor = this._findNearbyTownDoor(this._cachedNearbyTown || this.world.startTown, 62);
     this._cachedNearbyDragonLair = check(this.world.dragonLairs, 110);
     if (this._cachedNearbySecret) this._discoverSecret(this._cachedNearbySecret);
   }
@@ -3441,6 +4316,16 @@ export default class Game {
     if (this.dungeon.active) {
       const room = this._getDungeonRoom(this.dungeon.currentRoomId);
       const currentClear = room ? !this._dungeonHasLivingEnemies(room.id) : !this._dungeonHasLivingEnemies();
+      if (this.dungeon.kind === "dragon-lair" && this._isHeroNearDragonHoard()) {
+        if (!currentClear) {
+          this._msg("The dragon guards the hoard", 1.0);
+        } else if (this.dungeon.hoardOpened) {
+          this._msg("The hoard is already open", 0.8);
+        } else {
+          this._openDragonHoard();
+        }
+        return;
+      }
       const cacheRoom = this._getDungeonNearbyCacheRoom();
       if (cacheRoom) {
         if (!cacheRoom.cleared) {
@@ -3455,10 +4340,13 @@ export default class Game {
 
       const door = this._getNearbyDungeonDoor();
       if (door) {
+        const doorUnlocked = this._isDungeonDoorUnlocked(door, room);
         if (door.open) {
           this._msg("Door is open", 0.7);
-        } else if (!currentClear) {
-          this._msg("Clear the room to open the door", 0.9);
+        } else if (door.locked === "clear" && !doorUnlocked && !currentClear) {
+          this._msg(door.locked === "clear" ? "Clear the room to unseal the door" : "The door is sealed", 0.9);
+        } else if (door.locked === "clear" && !doorUnlocked) {
+          this._msg("The door is still sealed", 0.9);
         } else if (door.locked === "key" && (this.dungeon.keys || 0) <= 0) {
           this._msg("You need a dungeon key", 1.0);
         } else {
@@ -3521,7 +4409,7 @@ export default class Game {
     }
 
     if (this._cachedNearbyDragonLair) {
-      this._challengeDragon(this._cachedNearbyDragonLair);
+      this._enterDragonLair(this._cachedNearbyDragonLair);
       return;
     }
 
@@ -3530,7 +4418,7 @@ export default class Game {
     }
   }
 
-  _findNearbyTownDoor(town, radius = 42) {
+  _findNearbyTownDoor(town, radius = 62) {
     if (!town?.buildings?.length) return null;
     const r2 = radius * radius;
     let best = null;
@@ -3609,6 +4497,17 @@ export default class Game {
     }
 
     this.menu.open = "town";
+  }
+
+  _primeDungeonStartDoors() {
+    const startId = this.dungeon?.layout?.startRoomId;
+    if (!startId) return;
+    for (const door of this.dungeon?.layout?.doors || []) {
+      if ((door.a === startId || door.b === startId) && door.locked === "clear") {
+        door.unlocked = true;
+        door.open = true;
+      }
+    }
   }
 
   _openTownVendor() {
@@ -4113,6 +5012,45 @@ export default class Game {
     this._msg("Ancient Dragon awakened", 2.0);
   }
 
+  _enterDragonLair(lair) {
+    if (this.dungeon.active || !lair) return;
+    const id = this._progressId(lair);
+    if (this.progress.defeatedDragons.has(id)) {
+      this._msg("This dragon lair is already broken", 1.0);
+      return;
+    }
+
+    this.dungeon.active = true;
+    this.dungeon.kind = "dragon-lair";
+    this.dungeon.floor = Math.max(8, (this.hero.level || 1) + (this.world.getDangerLevel?.(lair.x, lair.y) || 5) + 3);
+    this.dungeon.origin = { x: lair.x, y: lair.y };
+    this.dungeon.lairId = id;
+    this.dungeon.layout = this._buildDragonLair(lair);
+    this.dungeon.roomIndex = 1;
+    this.dungeon.totalRooms = 1;
+    this.dungeon.roomRewarded = false;
+    this.dungeon.keys = 0;
+    this.dungeon.roomClearT = 0;
+    this.dungeon.spawnQueue = [];
+    this.dungeon.hoardOpened = false;
+    this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
+    this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
+    this._primeDungeonStartDoors();
+    const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + 150 };
+    this.hero.x = start.x;
+    this.hero.y = start.y;
+    this.hero.vx = 0;
+    this.hero.vy = 0;
+    this.hero.state.sailing = false;
+    this.camera.x = this.hero.x;
+    this.camera.y = this.hero.y;
+    this.enemies = [];
+    this.projectiles = [];
+    this.loot = [];
+    this._msg("Dragon lair entered", 1.4);
+    this._updateDungeonState(0);
+  }
+
   _spawnDragonBoss(x, y, level, name = "Dragon", progressId = null) {
     const dragon = new Enemy(x, y, level, "dragon", hash2(x | 0, y | 0, this.seed), false, true);
     dragon.name = name;
@@ -4127,8 +5065,10 @@ export default class Game {
     if (this.dungeon.active) return;
 
     this.dungeon.active = true;
+    this.dungeon.kind = "depths";
     this.dungeon.floor = Math.max(1, (this.progress.dungeonBest || 0) + 1);
     this.dungeon.origin = { x: dungeonPoi.x, y: dungeonPoi.y };
+    this.dungeon.lairId = null;
     this.dungeon.layout = this._buildDungeonFloor();
     this.dungeon.roomIndex = 1;
     this.dungeon.totalRooms = this.dungeon.layout?.combatRooms || 1;
@@ -4136,8 +5076,10 @@ export default class Game {
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
     this.dungeon.spawnQueue = [];
+    this.dungeon.hoardOpened = false;
     this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
     this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
+    this._primeDungeonStartDoors();
     const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + 150 };
     this.hero.x = start.x;
     this.hero.y = start.y;
@@ -4156,6 +5098,7 @@ export default class Game {
 
   _descendDungeon() {
     if (!this.dungeon.active) return;
+    if (this.dungeon.kind === "dragon-lair") return;
     this.progress.dungeonBest = Math.max(this.progress.dungeonBest || 0, this.dungeon.floor || 0);
     this.dungeon.floor = Math.max(1, (this.dungeon.floor || 1) + 1);
     this.dungeon.layout = this._buildDungeonFloor();
@@ -4165,8 +5108,10 @@ export default class Game {
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
     this.dungeon.spawnQueue = [];
+    this.dungeon.hoardOpened = false;
     this.dungeon.currentRoomId = this.dungeon.layout?.startRoomId || null;
     this.dungeon.room = this._getDungeonRoom(this.dungeon.currentRoomId);
+    this._primeDungeonStartDoors();
     const start = this.dungeon.layout?.returnStair || { x: this.dungeon.room.x, y: this.dungeon.room.y + this.dungeon.room.h * 0.28 };
     this.hero.x = start.x;
     this.hero.y = start.y;
@@ -4180,6 +5125,173 @@ export default class Game {
     if (this.dungeon.floor % 3 === 0) this._awardRelicShards(1, "depths");
     this._updateDungeonState(0);
     this._msg(`Descended: ${this._dungeonTheme(this.dungeon.floor).name}`, 1.4);
+  }
+
+  _buildDragonLair(lair) {
+    const originX = lair?.x || this.hero.x;
+    const originY = lair?.y || this.hero.y;
+    const rooms = [];
+    const corridors = [];
+    const doors = [];
+    const walkRects = [];
+
+    const makeRoom = (id, type, x, y, w, h) => {
+      const room = {
+        id,
+        type,
+        x,
+        y,
+        w,
+        h,
+        discovered: id === "start",
+        spawned: false,
+        cleared: id === "start",
+        rewardClaimed: id === "start",
+        cacheOpened: false,
+        openings: [],
+        decor: [],
+      };
+      rooms.push(room);
+      walkRects.push({ x, y, w: Math.max(140, w - 40), h: Math.max(140, h - 40), kind: "room", roomId: id });
+      return room;
+    };
+
+    const addOpening = (room, side, center, span) => room.openings.push({ side, center, span });
+    const makeDoor = (a, b, x, y, vertical, locked, label, blockerW, blockerH, frameSpan) => ({
+      id: `${a}_${b}`,
+      a,
+      b,
+      x,
+      y,
+      vertical,
+      open: locked === "none",
+      unlocked: locked === "none" || locked === "clear",
+      locked,
+      label,
+      blocker: { x, y, w: blockerW, h: blockerH },
+      frameSpan,
+    });
+
+    const start = makeRoom("start", "start", originX, originY + 240, 760, 460);
+    const hall = makeRoom("hall", "crypt", originX, originY - 120, 600, 380);
+    const cache = makeRoom("loot", "loot", originX - 420, originY - 420, 480, 320);
+    const keyRoom = makeRoom("key", "key", originX + 430, originY - 430, 500, 340);
+    const antechamber = makeRoom("ante", "crypt", originX, originY - 760, 760, 420);
+    const hoard = makeRoom("boss", "boss", originX, originY - 1360, 1120, 720);
+
+    const verticalCorridor = (a, b, width = 108) => {
+      const top = a.y < b.y ? a : b;
+      const bottom = top === a ? b : a;
+      const startY = top.y + top.h * 0.5 - 18;
+      const endY = bottom.y - bottom.h * 0.5 + 18;
+      const corridor = { x: top.x, y: (startY + endY) * 0.5, w: width, h: Math.max(44, endY - startY), kind: "corridor", rooms: [a.id, b.id], orientation: "v", decor: [] };
+      corridors.push(corridor);
+      walkRects.push(corridor);
+      addOpening(top, "bottom", top.x, corridor.w + 4);
+      addOpening(bottom, "top", bottom.x, corridor.w + 4);
+      return corridor;
+    };
+    const horizontalCorridor = (a, b, height = 96) => {
+      const left = a.x < b.x ? a : b;
+      const right = left === a ? b : a;
+      const startX = left.x + left.w * 0.5 - 18;
+      const endX = right.x - right.w * 0.5 + 18;
+      const corridor = { x: (startX + endX) * 0.5, y: left.y, w: Math.max(44, endX - startX), h: height, kind: "corridor", rooms: [a.id, b.id], orientation: "h", decor: [] };
+      corridors.push(corridor);
+      walkRects.push(corridor);
+      addOpening(left, "right", left.y, corridor.h + 4);
+      addOpening(right, "left", right.y, corridor.h + 4);
+      return corridor;
+    };
+
+    const startHall = verticalCorridor(start, hall, 108);
+    const hallAnte = verticalCorridor(hall, antechamber, 108);
+    const anteBoss = verticalCorridor(antechamber, hoard, 120);
+    const hallCache = horizontalCorridor(hall, cache, 92);
+    const hallKey = horizontalCorridor(hall, keyRoom, 92);
+
+    doors.push(
+      makeDoor("start", "hall", start.x, start.y + start.h * 0.5 - 7, false, "clear", "Entry Gate", startHall.w + 8, 18, startHall.w - 10),
+      makeDoor("hall", "cache", cache.x + cache.w * 0.5 - 7, cache.y, true, "clear", "Store Door", 18, hallCache.h + 8, hallCache.h - 10),
+      makeDoor("hall", "key", hall.x + hall.w * 0.5 - 7, keyRoom.y, true, "clear", "Archive Gate", 18, hallKey.h + 8, hallKey.h - 10),
+      makeDoor("hall", "ante", hall.x, hall.y + hall.h * 0.5 - 7, false, "clear", "Deep Gate", hallAnte.w + 8, 18, hallAnte.w - 10),
+      makeDoor("ante", "boss", antechamber.x, antechamber.y + antechamber.h * 0.5 - 7, false, "key", "Dragon Seal", anteBoss.w + 8, 18, anteBoss.w - 10),
+    );
+
+    start.decor.push(
+      { kind: "banner", x: start.x - start.w * 0.24, y: start.y - start.h * 0.28, sx: 1.1, sy: 1 },
+      { kind: "banner", x: start.x + start.w * 0.24, y: start.y - start.h * 0.28, sx: 1.1, sy: 1 },
+      { kind: "brazer", x: start.x - start.w * 0.26, y: start.y + start.h * 0.08, sx: 1, sy: 1 },
+      { kind: "brazer", x: start.x + start.w * 0.26, y: start.y + start.h * 0.08, sx: 1, sy: 1 },
+      { kind: "crate", x: start.x - 70, y: start.y + 46, sx: 1, sy: 1 },
+    );
+    hall.decor.push(
+      { kind: "pillar", x: hall.x - hall.w * 0.26, y: hall.y - hall.h * 0.08, sx: 1.1, sy: 1.1 },
+      { kind: "pillar", x: hall.x + hall.w * 0.26, y: hall.y - hall.h * 0.08, sx: 1.1, sy: 1.1 },
+      { kind: "rubble", x: hall.x - 88, y: hall.y + 74, sx: 1.15, sy: 1 },
+      { kind: "bones", x: hall.x + 96, y: hall.y + 58, sx: 1.1, sy: 1 },
+    );
+    cache.decor.push(
+      { kind: "crate", x: cache.x - 60, y: cache.y + 26, sx: 1.1, sy: 1 },
+      { kind: "crate", x: cache.x + 48, y: cache.y - 18, sx: 1, sy: 1 },
+      { kind: "treasure", x: cache.x + 8, y: cache.y + 48, sx: 1, sy: 1 },
+    );
+    keyRoom.decor.push(
+      { kind: "shelf", x: keyRoom.x - 96, y: keyRoom.y - 48, sx: 1.1, sy: 1 },
+      { kind: "shelf", x: keyRoom.x + 96, y: keyRoom.y - 48, sx: 1.1, sy: 1 },
+      { kind: "table", x: keyRoom.x, y: keyRoom.y + 24, sx: 1.1, sy: 1 },
+    );
+    antechamber.decor.push(
+      { kind: "pillar", x: antechamber.x - antechamber.w * 0.26, y: antechamber.y - 12, sx: 1.2, sy: 1.2 },
+      { kind: "pillar", x: antechamber.x + antechamber.w * 0.26, y: antechamber.y - 12, sx: 1.2, sy: 1.2 },
+      { kind: "brazer", x: antechamber.x - antechamber.w * 0.28, y: antechamber.y + antechamber.h * 0.16, sx: 1, sy: 1 },
+      { kind: "brazer", x: antechamber.x + antechamber.w * 0.28, y: antechamber.y + antechamber.h * 0.16, sx: 1, sy: 1 },
+      { kind: "stalagmite", x: antechamber.x, y: antechamber.y - 82, sx: 1.1, sy: 1.1 },
+    );
+    hoard.decor.push(
+      { kind: "dais", x: hoard.x, y: hoard.y + hoard.h * 0.1, sx: 2.4, sy: 1.4 },
+      { kind: "pillar", x: hoard.x - hoard.w * 0.24, y: hoard.y - hoard.h * 0.06, sx: 1.2, sy: 1.2 },
+      { kind: "pillar", x: hoard.x + hoard.w * 0.24, y: hoard.y - hoard.h * 0.06, sx: 1.2, sy: 1.2 },
+      { kind: "banner", x: hoard.x - hoard.w * 0.28, y: hoard.y - hoard.h * 0.3, sx: 1.25, sy: 1.1 },
+      { kind: "banner", x: hoard.x + hoard.w * 0.28, y: hoard.y - hoard.h * 0.3, sx: 1.25, sy: 1.1 },
+      { kind: "bones", x: hoard.x - 120, y: hoard.y + 96, sx: 1.2, sy: 1.2 },
+      { kind: "lava", x: hoard.x + 180, y: hoard.y + 110, sx: 1.3, sy: 1.1 },
+      { kind: "treasure", x: hoard.x + 32, y: hoard.y + 84, sx: 1.2, sy: 1.2 },
+    );
+    startHall.decor.push(
+      { kind: "sconce", x: startHall.x - startHall.w * 0.22, y: startHall.y - startHall.h * 0.2, sx: 0.9, sy: 1 },
+      { kind: "sconce", x: startHall.x - startHall.w * 0.22, y: startHall.y + startHall.h * 0.2, sx: 0.9, sy: 1 }
+    );
+    hallAnte.decor.push(
+      { kind: "sconce", x: hallAnte.x - hallAnte.w * 0.22, y: hallAnte.y - hallAnte.h * 0.26, sx: 0.9, sy: 1 },
+      { kind: "sconce", x: hallAnte.x - hallAnte.w * 0.22, y: hallAnte.y + hallAnte.h * 0.26, sx: 0.9, sy: 1 },
+      { kind: "rubble", x: hallAnte.x + 18, y: hallAnte.y + 12, sx: 1, sy: 1 }
+    );
+    anteBoss.decor.push(
+      { kind: "sconce", x: anteBoss.x - anteBoss.w * 0.22, y: anteBoss.y - anteBoss.h * 0.28, sx: 0.9, sy: 1 },
+      { kind: "sconce", x: anteBoss.x - anteBoss.w * 0.22, y: anteBoss.y + anteBoss.h * 0.28, sx: 0.9, sy: 1 },
+      { kind: "bones", x: anteBoss.x + 10, y: anteBoss.y + 62, sx: 1.1, sy: 1 }
+    );
+
+    const blockedRects = this._buildDungeonBlockedRects({ rooms, corridors });
+    const returnStair = { x: start.x, y: start.y + start.h * 0.5 - 78 };
+    const hoardPoint = { x: hoard.x, y: hoard.y + hoard.h * 0.12 };
+
+    return {
+      seed: hash2(this.seed, originX | 0, originY | 0, 9917),
+      rooms,
+      corridors,
+      doors,
+      walkRects,
+      blockedRects,
+      startRoomId: "start",
+      bossRoomId: "boss",
+      currentRoomId: "start",
+      combatRooms: rooms.filter((r) => r.type !== "start").length,
+      returnStair,
+      exitStair: null,
+      hoard: hoardPoint,
+    };
   }
 
   _buildDungeonFloor() {
@@ -4245,9 +5357,10 @@ export default class Game {
           y: left.y,
           vertical: true,
           open: locked === "none",
+          unlocked: locked === "none" || (locked === "clear" && (a.id === "start" || b.id === "start")),
           locked,
           label,
-          blocker: { x: left.x + left.w * 0.5 - 7, y: left.y, w: 12, h: corridor.h - 20 },
+          blocker: { x: left.x + left.w * 0.5 - 7, y: left.y, w: 18, h: corridor.h + 8 },
           frameSpan: corridor.h - 10,
         };
         addOpening(left, "right", left.y, corridor.h + 2);
@@ -4266,9 +5379,10 @@ export default class Game {
           y: top.y + top.h * 0.5 - 7,
           vertical: false,
           open: locked === "none",
+          unlocked: locked === "none" || (locked === "clear" && (a.id === "start" || b.id === "start")),
           locked,
           label,
-          blocker: { x: top.x, y: top.y + top.h * 0.5 - 7, w: corridor.w - 20, h: 12 },
+          blocker: { x: top.x, y: top.y + top.h * 0.5 - 7, w: corridor.w + 8, h: 18 },
           frameSpan: corridor.w - 10,
         };
         addOpening(top, "bottom", top.x, corridor.w + 2);
@@ -4287,23 +5401,17 @@ export default class Game {
         name: "forked-depths",
         rooms: [
           ["start", "start", 0, 0, 680, 460],
-          ["guard", "hall", 0, -1, 600, 380],
-          ["loot", "loot", -1, -1, 500, 340],
-          ["armory", "armory", 1, -1, 520, 340],
-          ["crypt", "crypt", 0, -2, 620, 390],
-          ["shrine", "shrine", -1, -2, 500, 330],
-          ["key", "key", 1, -2, 500, 330],
-          ["boss", "boss", 0, -3, 840, 520],
+          ["loot", "loot", -1.1, -0.95, 560, 320],
+          ["key", "key", 1.08, -1.08, 500, 360],
+          ["crypt", "crypt", 0.12, -1.04, 700, 430],
+          ["boss", "boss", -0.06, -2.18, 900, 540],
         ],
         links: [
-          ["start", "guard", "clear", "Gate"],
-          ["guard", "loot", "clear", "Loot Door"],
-          ["guard", "armory", "clear", "Armory Door"],
-          ["guard", "crypt", "clear", "Crypt Gate"],
-          ["loot", "shrine", "clear", "Shrine Door"],
-          ["armory", "key", "clear", "Archive Door"],
+          ["start", "loot", "clear", "Loot Door"],
+          ["start", "key", "clear", "Key Door"],
+          ["start", "crypt", "clear", "Crypt Gate"],
           ["crypt", "boss", "key", "Boss Gate"],
-          ["shrine", "crypt", "clear", "Stone Door"],
+          ["loot", "crypt", "clear", "Stone Door"],
           ["key", "crypt", "clear", "Stone Door"],
         ],
       },
@@ -4311,25 +5419,17 @@ export default class Game {
         name: "long-spine",
         rooms: [
           ["start", "start", 0, 0, 650, 450],
-          ["hallA", "hall", 0, -1, 560, 340],
-          ["hallB", "hall", 0, -2, 580, 350],
-          ["loot", "loot", -1, -1, 500, 320],
-          ["armory", "armory", 1, -2, 500, 320],
-          ["shrine", "shrine", -1, -3, 500, 320],
-          ["key", "key", 1, -3, 500, 320],
-          ["crypt", "crypt", 0, -4, 620, 400],
-          ["boss", "boss", 0, -5, 860, 540],
+          ["shrine", "shrine", -1.12, -0.96, 540, 360],
+          ["key", "key", 1.02, -1.06, 500, 320],
+          ["crypt", "crypt", 0.08, -1.02, 620, 450],
+          ["boss", "boss", 0, -2.2, 820, 580],
         ],
         links: [
-          ["start", "hallA", "clear", "Entry Gate"],
-          ["hallA", "hallB", "clear", "North Gate"],
-          ["hallA", "loot", "clear", "Loot Door"],
-          ["hallB", "armory", "clear", "Armory Door"],
-          ["hallB", "crypt", "clear", "Crypt Gate"],
-          ["loot", "shrine", "clear", "Shrine Door"],
-          ["armory", "key", "clear", "Key Door"],
+          ["start", "shrine", "clear", "Shrine Door"],
+          ["start", "key", "clear", "Key Door"],
+          ["start", "crypt", "clear", "Crypt Gate"],
           ["crypt", "boss", "key", "Boss Gate"],
-          ["shrine", "crypt", "clear", "Hidden Gate"],
+          ["shrine", "crypt", "clear", "Stone Door"],
           ["key", "crypt", "clear", "Iron Gate"],
         ],
       },
@@ -4337,27 +5437,17 @@ export default class Game {
         name: "ring-vault",
         rooms: [
           ["start", "start", 0, 0, 660, 450],
-          ["west", "hall", -1, 0, 540, 340],
-          ["east", "hall", 1, 0, 540, 340],
-          ["north", "hall", 0, -1, 620, 360],
-          ["loot", "loot", -1, -1, 500, 320],
-          ["key", "key", 1, -1, 500, 320],
-          ["shrine", "shrine", -1, -2, 500, 320],
-          ["armory", "armory", 1, -2, 500, 320],
-          ["crypt", "crypt", 0, -2, 620, 390],
-          ["boss", "boss", 0, -3, 840, 520],
+          ["armory", "armory", -1.08, -1.02, 560, 340],
+          ["key", "key", 1.12, -0.9, 500, 340],
+          ["crypt", "crypt", 0, -1.08, 680, 410],
+          ["boss", "boss", 0.04, -2.1, 880, 500],
         ],
         links: [
-          ["start", "west", "clear", "West Door"],
-          ["start", "east", "clear", "East Door"],
-          ["start", "north", "clear", "North Gate"],
-          ["west", "loot", "clear", "Loot Door"],
-          ["east", "key", "clear", "Archive Door"],
-          ["north", "crypt", "clear", "Crypt Gate"],
-          ["loot", "shrine", "clear", "Shrine Door"],
-          ["key", "armory", "clear", "Armory Door"],
-          ["shrine", "crypt", "clear", "Stone Door"],
+          ["start", "armory", "clear", "Armory Door"],
+          ["start", "key", "clear", "Archive Door"],
+          ["start", "crypt", "clear", "Crypt Gate"],
           ["armory", "crypt", "clear", "Stone Door"],
+          ["key", "crypt", "clear", "Iron Gate"],
           ["crypt", "boss", "key", "Boss Gate"],
         ],
       },
@@ -4365,23 +5455,17 @@ export default class Game {
         name: "switchback-descent",
         rooms: [
           ["start", "start", 0, 0, 660, 430],
-          ["south", "hall", 1, 0, 540, 320],
-          ["turnA", "hall", 1, -1, 520, 320],
-          ["westA", "loot", 0, -1, 500, 300],
-          ["turnB", "hall", -1, -1, 520, 320],
-          ["shrine", "shrine", -1, -2, 500, 320],
-          ["key", "key", 0, -2, 520, 320],
-          ["crypt", "crypt", 1, -2, 620, 380],
-          ["boss", "boss", 1, -3, 860, 520],
+          ["loot", "loot", -1.14, -0.9, 540, 300],
+          ["key", "key", 1.05, -1.12, 500, 360],
+          ["crypt", "crypt", -0.08, -1.06, 700, 360],
+          ["boss", "boss", 0.1, -2.16, 840, 560],
         ],
         links: [
-          ["start", "south", "clear", "Gate"],
-          ["south", "turnA", "clear", "Turn Door"],
-          ["turnA", "westA", "clear", "Loot Door"],
-          ["westA", "turnB", "clear", "Stone Gate"],
-          ["turnB", "shrine", "clear", "Shrine Door"],
-          ["turnB", "key", "clear", "Archive Door"],
-          ["key", "crypt", "clear", "Crypt Door"],
+          ["start", "loot", "clear", "Loot Door"],
+          ["start", "key", "clear", "Archive Door"],
+          ["start", "crypt", "clear", "Crypt Door"],
+          ["loot", "crypt", "clear", "Stone Gate"],
+          ["key", "crypt", "clear", "Iron Gate"],
           ["crypt", "boss", "key", "Boss Gate"],
         ],
       },
@@ -4389,21 +5473,15 @@ export default class Game {
         name: "cathedral-run",
         rooms: [
           ["start", "start", 0, 0, 700, 460],
-          ["nave", "hall", 0, -1, 760, 340],
-          ["westWing", "armory", -1, -1, 500, 320],
-          ["eastWing", "loot", 1, -1, 500, 320],
-          ["apse", "crypt", 0, -2, 720, 380],
-          ["shrine", "shrine", -1, -2, 520, 320],
-          ["key", "key", 1, -2, 520, 320],
-          ["boss", "boss", 0, -3, 920, 560],
+          ["shrine", "shrine", -1.06, -0.92, 520, 380],
+          ["key", "key", 1.08, -1.06, 540, 320],
+          ["apse", "crypt", 0, -1.02, 760, 420],
+          ["boss", "boss", 0, -2.18, 980, 540],
         ],
         links: [
-          ["start", "nave", "clear", "Entry Gate"],
-          ["nave", "westWing", "clear", "West Door"],
-          ["nave", "eastWing", "clear", "East Door"],
-          ["nave", "apse", "clear", "Apse Gate"],
-          ["westWing", "shrine", "clear", "Shrine Door"],
-          ["eastWing", "key", "clear", "Key Door"],
+          ["start", "shrine", "clear", "West Door"],
+          ["start", "key", "clear", "East Door"],
+          ["start", "apse", "clear", "Apse Gate"],
           ["apse", "boss", "key", "Boss Gate"],
           ["shrine", "apse", "clear", "Stone Door"],
           ["key", "apse", "clear", "Stone Door"],
@@ -4521,7 +5599,7 @@ export default class Game {
       const right = room.x + room.w * 0.5;
       const top = room.y - room.h * 0.5;
       const bottom = room.y + room.h * 0.5;
-      const wall = 8;
+      const wall = 5;
       const openingsBySide = { top: [], right: [], bottom: [], left: [] };
       for (const opening of room.openings || []) openingsBySide[opening.side].push(opening);
 
@@ -4558,8 +5636,8 @@ export default class Game {
     }
 
     for (const corridor of layout.corridors || []) {
-      const wall = 6;
-      const trim = 28;
+      const wall = 3;
+      const trim = 54;
       if (corridor.orientation === "h") {
         addRect(corridor.x, corridor.y - corridor.h * 0.5 + wall * 0.5, Math.max(10, corridor.w - trim * 2), wall);
         addRect(corridor.x, corridor.y + corridor.h * 0.5 - wall * 0.5, Math.max(10, corridor.w - trim * 2), wall);
@@ -4840,10 +5918,17 @@ export default class Game {
 
   _getNearbyDungeonDoor(radius = 104) {
     if (!this.dungeon.active) return null;
+    const rectDist2 = (rect) => {
+      const dx = Math.max(Math.abs(this.hero.x - rect.x) - rect.w * 0.5, 0);
+      const dy = Math.max(Math.abs(this.hero.y - rect.y) - rect.h * 0.5, 0);
+      return dx * dx + dy * dy;
+    };
+    const roomId = this.dungeon.currentRoomId;
     let best = null;
     let bestD2 = radius * radius;
     for (const door of this.dungeon?.layout?.doors || []) {
-      const d2 = dist2(this.hero.x, this.hero.y, door.x, door.y);
+      if (roomId && door.a !== roomId && door.b !== roomId) continue;
+      const d2 = rectDist2(door.blocker || { x: door.x, y: door.y, w: 16, h: 16 });
       if (d2 <= bestD2) {
         best = door;
         bestD2 = d2;
@@ -4887,6 +5972,17 @@ export default class Game {
     this._msg(door.locked === "key" ? "Dungeon key used" : "Door opened", 1.0);
   }
 
+  _isDungeonDoorUnlocked(door, room = this._getDungeonRoom(this.dungeon?.currentRoomId)) {
+    if (!door) return false;
+    if (door.open || door.locked === "none") return true;
+    if (door.locked === "key") return (this.dungeon?.keys || 0) > 0;
+    if (door.locked !== "clear") return !!door.unlocked;
+    if (door.unlocked) return true;
+    if (!room) return false;
+    if ((door.a === room.id || door.b === room.id) && room.id === this.dungeon?.layout?.startRoomId) return true;
+    return !!room.cleared;
+  }
+
   _dungeonHasLivingEnemies(roomId = this.dungeon.currentRoomId) {
     return this.enemies.some((e) => e?.alive && (!roomId || e.dungeonRoomId === roomId));
   }
@@ -4907,6 +6003,13 @@ export default class Game {
     if (room.type !== "boss" && floor % 2 === 0) {
       const potionType = room.type === "shrine" || floor % 4 === 0 ? "mana" : "hp";
       this.hero.potions[potionType] = (this.hero.potions[potionType] || 0) + 1;
+    }
+
+    if (room.type === "key" && !room.cacheOpened) {
+      room.cacheOpened = true;
+      this.dungeon.keys = (this.dungeon.keys || 0) + 1;
+      this._spawnFloatingText(this.hero.x, this.hero.y - 52, "Dungeon Key", "#8be9ff");
+      this._msg("Key room cleared", 1.0);
     }
 
     if (room.type === "boss") {
@@ -4936,6 +6039,19 @@ export default class Game {
 
   _makeDungeonWaveEnemies(room = this._getDungeonRoom()) {
     if (!room || room.type === "start") return [];
+    if (this.dungeon.kind === "dragon-lair") {
+      if (room.type !== "boss") return [];
+      const level = Math.max(10, this.dungeon.floor || this.hero.level || 1);
+      const dragon = new Enemy(room.x, room.y - 24, level, "dragon", hash2(room.x | 0, room.y | 0, this.seed, level), false, true);
+      dragon.name = "Ancient Dragon";
+      dragon.progressId = this.dungeon.lairId || null;
+      dragon.affix = dragon.name;
+      dragon.dungeonRoomId = room.id;
+      dragon.extraLoot = 40;
+      dragon.hp = Math.round((dragon.hp || dragon.maxHp || 100) * 1.25);
+      dragon.maxHp = dragon.hp;
+      return [dragon];
+    }
     const floor = Math.max(1, this.dungeon.floor || 1);
     const theme = this._dungeonTheme(floor);
     const roomSeed = hash2(this.seed, floor, room.id.length, room.x | 0, room.y | 0);
@@ -4972,6 +6088,10 @@ export default class Game {
   _queueDungeonWave(room = this._getDungeonRoom()) {
     const enemies = this._makeDungeonWaveEnemies(room);
     if (!enemies?.length) return;
+    if (this.dungeon.kind === "dragon-lair") {
+      this.enemies.push(...enemies);
+      return;
+    }
     let delay = 0;
     for (const enemy of enemies) {
       this.dungeon.spawnQueue.push({ enemy, delay, roomId: room.id });
@@ -5023,7 +6143,7 @@ export default class Game {
       room.cleared = true;
       this._claimDungeonClearReward(room);
       for (const door of this.dungeon.layout.doors || []) {
-        if (!door.open && door.locked === "clear" && (door.a === room.id || door.b === room.id)) door.open = true;
+        if (!door.open && door.locked === "clear" && (door.a === room.id || door.b === room.id)) door.unlocked = true;
       }
     }
 
@@ -5062,6 +6182,36 @@ export default class Game {
     this._msg("The cache restores your reserves", 1.2);
   }
 
+  _isHeroNearDragonHoard(radius = 110) {
+    const p = this.dungeon?.layout?.hoard;
+    return !!p && dist2(this.hero.x, this.hero.y, p.x, p.y) <= radius * radius;
+  }
+
+  _openDragonHoard() {
+    if (!this.dungeon?.active || this.dungeon.kind !== "dragon-lair" || this.dungeon.hoardOpened) return;
+    const hoard = this.dungeon?.layout?.hoard;
+    if (!hoard) return;
+    this.dungeon.hoardOpened = true;
+    const level = Math.max(8, this.dungeon.floor || this.hero.level || 1);
+    const gold = 260 + level * 22;
+    this.loot.push(new Loot(hoard.x - 28, hoard.y + 8, "gold", { amount: Math.round(gold * 0.45) }));
+    this.loot.push(new Loot(hoard.x + 24, hoard.y + 10, "gold", { amount: Math.round(gold * 0.55) }));
+    this.loot.push(new Loot(hoard.x - 12, hoard.y - 18, "potion", { potionType: "hp" }));
+    this.loot.push(new Loot(hoard.x + 10, hoard.y - 18, "potion", { potionType: "mana" }));
+    const slots = ["weapon", "armor", "helm", "boots"];
+    for (let i = 0; i < 2; i++) {
+      const slot = slots[Math.abs(hash2(this.seed, level, i, hoard.x | 0, hoard.y | 0)) % slots.length];
+      const rarity = i === 0 || level >= 12 ? "epic" : "rare";
+      const item = makeGear(slot, Math.max(level, this.hero.level || 1), rarity, hash2(this.seed, slot.length, i, level));
+      item.name = `Hoard-Kept ${item.name}`;
+      this.loot.push(new Loot(hoard.x + (i === 0 ? -6 : 16), hoard.y - 28 - i * 6, "gear", item));
+    }
+    this.hero.giveXP?.(18 + level * 3);
+    this._awardRelicShards(3, "dragon-hoard");
+    this._spawnFloatingText(hoard.x, hoard.y - 34, "Dragon hoard claimed", "#ffd36e");
+    this._msg("The hoard spills open", 1.8);
+  }
+
   _leaveDungeon() {
     if (!this.dungeon.active) return;
 
@@ -5073,9 +6223,13 @@ export default class Game {
     this.hero.vx = 0;
     this.hero.vy = 0;
     this.hero.state.sailing = false;
-    this.progress.dungeonBest = Math.max(this.progress.dungeonBest || 0, this.dungeon.floor || 0);
+    if (this.dungeon.kind !== "dragon-lair") {
+      this.progress.dungeonBest = Math.max(this.progress.dungeonBest || 0, this.dungeon.floor || 0);
+    }
     this.dungeon.active = false;
+    this.dungeon.kind = "depths";
     this.dungeon.room = null;
+    this.dungeon.lairId = null;
     this.dungeon.roomIndex = 0;
     this.dungeon.totalRooms = 0;
     this.dungeon.roomRewarded = false;
@@ -5084,6 +6238,7 @@ export default class Game {
     this.dungeon.keys = 0;
     this.dungeon.roomClearT = 0;
     this.dungeon.spawnQueue = [];
+    this.dungeon.hoardOpened = false;
 
     this.camera.x = this.hero.x;
     this.camera.y = this.hero.y;
@@ -5208,10 +6363,16 @@ export default class Game {
       const floor = this.dungeon.floor || 1;
       const room = this._getDungeonRoom();
       const alive = room ? this.enemies.reduce((n, e) => n + (e?.alive && e.dungeonRoomId === room.id ? 1 : 0), 0) : this.enemies.reduce((n, e) => n + (e?.alive ? 1 : 0), 0);
-      const theme = this._dungeonTheme(floor);
+      const theme = this.dungeon.kind === "dragon-lair" ? { name: "Dragon Lair" } : this._dungeonTheme(floor);
       const lockedDoor = (this.dungeon?.layout?.doors || []).find((door) => !door.open && (door.a === room?.id || door.b === room?.id));
       const cacheRoom = room && !room.cacheOpened && ["loot", "key", "shrine"].includes(room.type) ? room : null;
-      let detail = alive > 0
+      let detail = this.dungeon.kind === "dragon-lair"
+        ? alive > 0
+          ? "The dragon sits on the hoard. Slay it to claim the treasure."
+          : !this.dungeon.hoardOpened
+            ? "The dragon is dead. Press F at the hoard to claim it."
+            : "Hoard claimed. Use the OUT sigil to leave."
+        : alive > 0
         ? `${alive} enemies remain in the ${this._titleCase(room?.type || "room")}.`
         : cacheRoom
         ? "Room clear. Search the cache, then unlock the next door."
@@ -5223,10 +6384,10 @@ export default class Game {
         ? "Boss defeated. Use the stairs to descend or the OUT sigil to leave."
         : "Room clear. Explore onward.";
       return this._objective(
-        `${theme.name} Floor ${floor}`,
+        this.dungeon.kind === "dragon-lair" ? "Dragon Lair" : `${theme.name} Floor ${floor}`,
         detail,
         null,
-        "#dc7cff"
+        this.dungeon.kind === "dragon-lair" ? "#ff8a5c" : "#dc7cff"
       );
     }
 
@@ -5685,7 +6846,7 @@ export default class Game {
 
       if (Number.isFinite(+data.seed) && (data.seed | 0) !== this.seed) {
         this.seed = data.seed | 0;
-        this.world = new World(this.seed, { viewW: this.w, viewH: this.h });
+        this.world = new World(this.seed, { viewW: this.w, viewH: this.h, variant: this.worldVariant });
         this._rng = new RNG(hash2(this.seed, 9001));
       }
 
