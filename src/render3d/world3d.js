@@ -2,6 +2,8 @@ import * as THREE from "three";
 
 const TERRAIN_SIZE = 24000;
 const TERRAIN_SEGMENTS = 128;
+const RIVER_BUILD_TERRAIN_SIZE = 2400;
+const RIVER_BUILD_TERRAIN_SEGMENTS = 420;
 const LOCAL_TERRAIN_SIZE = 4200;
 const LOCAL_TERRAIN_SEGMENTS = 220;
 const BUILD_LOCAL_TERRAIN_SIZE = 2800;
@@ -104,6 +106,18 @@ function angleDelta(a, b) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return Math.abs(d);
+}
+
+function cutEndpoints(cut) {
+  const angle = cut?.angle || 0;
+  const length = cut?.length || 240;
+  const half = length * 0.5;
+  const dx = Math.cos(angle) * half;
+  const dy = Math.sin(angle) * half;
+  return {
+    start: { x: (cut?.x || 0) - dx, y: (cut?.y || 0) - dy },
+    end: { x: (cut?.x || 0) + dx, y: (cut?.y || 0) + dy },
+  };
 }
 
 function progressId(point) {
@@ -211,6 +225,12 @@ export default class World3DApp {
       interval: 0.18,
       dirty: true,
     };
+    this.testState = {
+      elapsed: 0,
+      interval: 0.35,
+      el: null,
+      audit: null,
+    };
 
     this.overworldGroup = new THREE.Group();
     this.overworldDetailGroup = new THREE.Group();
@@ -250,6 +270,8 @@ export default class World3DApp {
     this.waterShimmer = null;
     this.terrainMesh = null;
     this.waterMesh = null;
+    this.animatedWaterSurfaces = [];
+    this.lastWaterAnimTime = 0;
     this.terrainHeightfield = null;
     this.localTerrainHeightfield = null;
     this.localTerrainMesh = null;
@@ -292,7 +314,7 @@ export default class World3DApp {
     await this.nextFrame();
 
     this.setBootProgress("Loading gameplay systems...", 0.08);
-    const { default: Game } = await import("../game.js?v=20260524s");
+    const { default: Game } = await import("../game.js?v=20260529g");
     await this.nextFrame();
 
     this.game = new Game(this.overlayCanvas, {
@@ -314,7 +336,9 @@ export default class World3DApp {
     await this.primeWorldBoot();
     await this.buildSceneBoot();
     this.createDebugPanel();
+    this.createTestStateProbe();
     this.updateHud();
+    this.updateTestState();
     this.recenter(true);
     this.focusOverlayCanvas();
 
@@ -356,8 +380,16 @@ export default class World3DApp {
 
   refreshEditorWorldNow(kind = "terrain") {
     const buildMode = this.game?.mode === "build";
+    const riverBuildMode = this.world?.variant === "river-build";
+    const hasMainWorldRiverCuts = buildMode && !riverBuildMode && !!(this.world?.editorState?.riverCuts?.length);
     if (kind !== "detail") {
-      if (buildMode) {
+      if (buildMode && riverBuildMode) {
+        this.addTerrain();
+      } else if (hasMainWorldRiverCuts) {
+        this.addTerrain();
+        this.addWater();
+        this.rebuildLocalTerrainPatch(true);
+      } else if (buildMode) {
         this.rebuildLocalTerrainPatch(true);
       } else {
         this.addTerrain();
@@ -567,12 +599,15 @@ export default class World3DApp {
 
   addTerrain() {
     const suppressAuthoredRiverTerrain = this.game?.mode === "build" && this.world?.suppressEditorRiverCarve;
+    const isRiverBuild = this.world?.variant === "river-build";
     if (this.terrainMesh?.parent) {
       this.terrainMesh.parent.remove(this.terrainMesh);
       this.disposeGroup(this.terrainMesh);
       this.terrainMesh = null;
     }
-    const geometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+    const terrainSize = isRiverBuild ? RIVER_BUILD_TERRAIN_SIZE : TERRAIN_SIZE;
+    const terrainSegments = isRiverBuild ? RIVER_BUILD_TERRAIN_SEGMENTS : TERRAIN_SEGMENTS;
+    const geometry = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
     geometry.rotateX(-Math.PI * 0.5);
     const pos = geometry.attributes.position;
     const colors = [];
@@ -582,6 +617,7 @@ export default class World3DApp {
     const roadWearColor = new THREE.Color(0xd0ae87);
     const riverBankColor = new THREE.Color(0x425d73);
     const riverWaterColor = new THREE.Color(0x4f99df);
+        const trenchColor = new THREE.Color(0x3d2417);
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -589,6 +625,16 @@ export default class World3DApp {
       const sample = this.world._sampleCell(x, z);
       let height = this.heightAt(x, z, sample);
       const color = this.colorForSample(sample);
+      if (isRiverBuild) {
+        const cutField = this.world?._riverBuildCutFieldAt?.(x, z);
+        if (cutField?.frac > 0.001) {
+          color.lerp(trenchColor, 0.44 + cutField.frac * 0.36);
+          blendWeights[i] = Math.max(blendWeights[i], 0.95);
+        }
+        heights[i] = height;
+        colors.push(color.r, color.g, color.b);
+        continue;
+      }
       const roadDist = this.roadDistanceAt(x, z);
       const riverInfo = this.world._nearestRiverInfo?.(x, z);
       let riverFrac = 0;
@@ -641,6 +687,11 @@ export default class World3DApp {
       }
 
       if (Number.isFinite(roadDist) && roadDist < 128 && sample.zone !== "ocean") {
+        const roadProfile = this.roadProfileHeightAt(x, z, roadDist, sample);
+        if (roadProfile?.blend > 0.01) {
+          const gradeMix = Math.pow(roadProfile.blend, roadProfile.road?.kind === "main" ? 0.72 : 0.9) * (roadProfile.road?.kind === "main" ? 0.96 : roadProfile.road?.kind === "connector" ? 0.84 : 0.62);
+          height = height * (1 - gradeMix) + roadProfile.height * gradeMix;
+        }
         const shoulderFrac = 1 - clamp(roadDist / 128, 0, 1);
         const centerFrac = 1 - clamp(roadDist / 42, 0, 1);
         const rutFrac = 1 - clamp(roadDist / 18, 0, 1);
@@ -654,10 +705,10 @@ export default class World3DApp {
       colors.push(color.r, color.g, color.b);
     }
 
-    const stride = TERRAIN_SEGMENTS + 1;
+    const stride = terrainSegments + 1;
     const smoothedHeights = new Float32Array(heights);
-    for (let y = 1; y < TERRAIN_SEGMENTS; y++) {
-      for (let x = 1; x < TERRAIN_SEGMENTS; x++) {
+    for (let y = 1; y < terrainSegments; y++) {
+      for (let x = 1; x < terrainSegments; x++) {
         const idx = y * stride + x;
         const blend = blendWeights[idx];
         if (blend <= 0.04) continue;
@@ -689,8 +740,8 @@ export default class World3DApp {
     this.overworldGroup.add(terrain);
     this.terrainMesh = terrain;
     this.terrainHeightfield = {
-      size: TERRAIN_SIZE,
-      segments: TERRAIN_SEGMENTS,
+      size: terrainSize,
+      segments: terrainSegments,
       centerX: 0,
       centerY: 0,
       heights,
@@ -699,6 +750,15 @@ export default class World3DApp {
 
   rebuildLocalTerrainPatch(force = false) {
     if (!this.game || this.game?.dungeon?.active) return;
+    if (this.world?.variant === "river-build") {
+      if (this.localTerrainMesh?.parent) {
+        this.localTerrainMesh.parent.remove(this.localTerrainMesh);
+        this.disposeGroup(this.localTerrainMesh);
+        this.localTerrainMesh = null;
+      }
+      this.localTerrainHeightfield = null;
+      return;
+    }
     const buildMode = this.game?.mode === "build";
     const suppressAuthoredRiverTerrain = buildMode && this.world?.suppressEditorRiverCarve;
     const activeCenter = this.getActiveWorldCenter();
@@ -782,6 +842,11 @@ export default class World3DApp {
       }
 
       if (Number.isFinite(roadDist) && roadDist < 128 && sample.zone !== "ocean") {
+        const roadProfile = this.roadProfileHeightAt(x, z, roadDist, sample);
+        if (roadProfile?.blend > 0.01) {
+          const gradeMix = Math.pow(roadProfile.blend, roadProfile.road?.kind === "main" ? 0.72 : 0.9) * (roadProfile.road?.kind === "main" ? 0.96 : roadProfile.road?.kind === "connector" ? 0.84 : 0.62);
+          height = height * (1 - gradeMix) + roadProfile.height * gradeMix;
+        }
         const shoulderFrac = 1 - clamp(roadDist / 128, 0, 1);
         const centerFrac = 1 - clamp(roadDist / 42, 0, 1);
         const rutFrac = 1 - clamp(roadDist / 18, 0, 1);
@@ -879,6 +944,80 @@ export default class World3DApp {
     return best;
   }
 
+  heightFromGround(x, y, ground, sample = null) {
+    const s = sample || this.world._sampleCell(x, y);
+    if (this.world?.variant === "river-build") {
+      return (ground - 0.46) * 760;
+    }
+    if (this.world?.flatOverworld) {
+      const edgeBandFrac = this.world._edgeMountainFrac?.(x, y) || 0;
+      let h = ground * 1850;
+      h += Math.max(0, ground - 0.24) * 320;
+      h += Math.max(0, ground - 0.5) * 760;
+      if (s.zone === "highlands") h += 220;
+      if (s.zone === "mountain") h += 620;
+      if (s.zone === "ocean") h -= 760;
+      if (s.zone === "river") h -= 260;
+      h += Math.pow(edgeBandFrac, 1.18) * 1380;
+      return h;
+    }
+    const ridge = this.world._mountainInfluenceAt?.(x, y) || 0;
+    const pass = this.world._mountainPassInfluenceAt?.(x, y) || 0;
+    const edgeAbs = Math.max(Math.abs(x), Math.abs(y));
+    const edgeBandFrac = clamp((edgeAbs - (this.world.mapHalfSize - 720)) / 720, 0, 1);
+    let h = Math.max(0, ground - 0.18) * 240;
+    h += ridge * 260;
+    h -= pass * 80;
+    if (s.zone === "mountain") h += 180;
+    if (s.zone === "stone flats") h += 70;
+    h += edgeBandFrac * 700;
+    if (s.isWater) h = Math.min(h, -8);
+    return h;
+  }
+
+  roadProfileHeightAt(x, y, roadDist = null, sample = null) {
+    const roads = this.world?.roads || [];
+    if (!roads.length) return null;
+    let best = null;
+    for (const road of roads) {
+      const pts = road.points || [];
+      if (pts.length < 2) continue;
+      const pad = (road.width || 24) * 1.8 + 48;
+      const bounds = this.getRoadBounds(road);
+      if (x < bounds.minX - pad || x > bounds.maxX + pad || y < bounds.minY - pad || y > bounds.maxY + pad) continue;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = clamp(((x - a.x) * dx + (y - a.y) * dy) / len2, 0, 1);
+        const qx = a.x + dx * t;
+        const qy = a.y + dy * t;
+        const dist = Math.hypot(x - qx, y - qy);
+        if (dist > pad) continue;
+        const ag = this.world._groundAt(a.x, a.y);
+        const bg = this.world._groundAt(b.x, b.y);
+        const gradeGround = ag + (bg - ag) * t;
+        const segSample = sample || this.world._sampleCell(qx, qy);
+        const gradeHeight = this.heightFromGround(qx, qy, gradeGround, segSample);
+        const score = dist + (road.kind === "main" ? 0 : road.kind === "connector" ? 18 : 40);
+        if (!best || score < best.score) {
+          best = { score, dist, road, height: gradeHeight };
+        }
+      }
+    }
+    if (!best) return null;
+    const blendRadius = Math.max(42, (best.road.width || 24) * (best.road.kind === "main" ? 2.4 : best.road.kind === "connector" ? 2.0 : 1.5));
+    const dist = roadDist != null ? roadDist : best.dist;
+    if (dist > blendRadius) return null;
+    return {
+      height: best.height,
+      blend: clamp(1 - dist / blendRadius, 0, 1),
+      road: best.road,
+    };
+  }
+
   getRoadBounds(road) {
     if (
       Number.isFinite(road?.minX) &&
@@ -918,20 +1057,28 @@ export default class World3DApp {
       this.disposeGroup(this.waterShimmer);
       this.waterShimmer = null;
     }
-    const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 1, 1);
+    if (this.world?.variant === "river-build") return;
+    const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 120, 120);
     geo.rotateX(-Math.PI * 0.5);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x1b3f5f,
       transparent: true,
-      opacity: 0.7,
+      opacity: this.world?.flatOverworld ? 0.82 : 0.7,
       roughness: 0.18,
       metalness: 0.04,
     });
     const water = new THREE.Mesh(geo, mat);
-    water.position.y = -2.5;
+    water.position.y = this.world?.flatOverworld ? 120 : -2.5;
     water.renderOrder = 1;
     this.overworldGroup.add(water);
     this.waterMesh = water;
+    this.registerAnimatedWaterSurface(water, {
+      amplitude: 1.65,
+      speed: 0.58,
+      freqA: 0.0018,
+      freqB: 0.0028,
+      chop: 0.42,
+    });
 
     const shimmer = new THREE.Mesh(
       new THREE.PlaneGeometry(TERRAIN_SIZE * 0.92, TERRAIN_SIZE * 0.92, 1, 1),
@@ -944,7 +1091,7 @@ export default class World3DApp {
       })
     );
     shimmer.rotation.x = -Math.PI * 0.5;
-    shimmer.position.y = -1.7;
+    shimmer.position.y = this.world?.flatOverworld ? 121.2 : -1.7;
     shimmer.renderOrder = 2;
     this.overworldGroup.add(shimmer);
     this.waterShimmer = shimmer;
@@ -962,6 +1109,67 @@ export default class World3DApp {
   addRoads(group = this.overworldDetailGroup, centerX = this.game?.hero?.x || 0, centerY = this.game?.hero?.y || 0, radius = OVERWORLD_PROP_RADIUS + 700) {
     const roadGroup = new THREE.Group();
     roadGroup.name = "roads";
+    const roads = (this.world?.roads || []).filter((road) => {
+      const minX = (road.minX ?? Math.min(road.ax || 0, road.bx || 0)) - radius;
+      const maxX = (road.maxX ?? Math.max(road.ax || 0, road.bx || 0)) + radius;
+      const minY = (road.minY ?? Math.min(road.ay || 0, road.by || 0)) - radius;
+      const maxY = (road.maxY ?? Math.max(road.ay || 0, road.by || 0)) + radius;
+      return centerX >= minX && centerX <= maxX && centerY >= minY && centerY <= maxY;
+    });
+    const trunkBaseMat = new THREE.MeshStandardMaterial({ color: 0x6e5a44, roughness: 0.98, metalness: 0.01 });
+    const trunkTopMat = new THREE.MeshStandardMaterial({ color: 0xb79b70, roughness: 0.95, metalness: 0.02 });
+    const connectorBaseMat = new THREE.MeshStandardMaterial({ color: 0x665441, roughness: 0.98, metalness: 0.01 });
+    const connectorTopMat = new THREE.MeshStandardMaterial({ color: 0xa98b62, roughness: 0.96, metalness: 0.01 });
+    const trailMat = new THREE.MeshStandardMaterial({ color: 0x8d7552, roughness: 0.98, metalness: 0.01 });
+    const markerMain = 0xe3c892;
+    const markerConnector = 0xc6ab79;
+
+    for (const road of roads) {
+      const pts = road.points;
+      if (!pts || pts.length < 2 || road.visible === false) continue;
+      const kind = road.kind || "trail";
+      const width = Math.max(18, road.width || 22);
+      if (kind === "main") {
+        const base = this.makeTerrainHugRibbon(pts, width * 1.34, 0.12, trunkBaseMat, Math.max(18, width * 0.4), {
+          smoothing: 0.92,
+          ceilingWeight: 0.02,
+          minClearance: 0.06,
+        });
+        const top = this.makeTerrainHugRibbon(pts, width * 0.9, 0.34, trunkTopMat, Math.max(14, width * 0.3), {
+          smoothing: 0.95,
+          ceilingWeight: 0.02,
+          minClearance: 0.06,
+        });
+        const markers = this.makePathMarkerGroup(pts, width * 0.18, 0.48, 86, markerMain, 0.32);
+        if (base) roadGroup.add(base);
+        if (top) roadGroup.add(top);
+        if (markers) roadGroup.add(markers);
+        continue;
+      }
+      if (kind === "connector") {
+        const base = this.makeTerrainHugRibbon(pts, width * 1.16, 0.1, connectorBaseMat, Math.max(16, width * 0.34), {
+          smoothing: 0.94,
+          ceilingWeight: 0.025,
+          minClearance: 0.05,
+        });
+        const top = this.makeTerrainHugRibbon(pts, width * 0.82, 0.28, connectorTopMat, Math.max(12, width * 0.28), {
+          smoothing: 0.96,
+          ceilingWeight: 0.02,
+          minClearance: 0.05,
+        });
+        const markers = this.makePathMarkerGroup(pts, width * 0.12, 0.4, 110, markerConnector, 0.18);
+        if (base) roadGroup.add(base);
+        if (top) roadGroup.add(top);
+        if (markers) roadGroup.add(markers);
+        continue;
+      }
+      const trail = this.makeTerrainHugRibbon(pts, width * 0.82, 0.18, trailMat, Math.max(10, width * 0.22), {
+        smoothing: 0.97,
+        ceilingWeight: 0.015,
+        minClearance: 0.04,
+      });
+      if (trail) roadGroup.add(trail);
+    }
     group.add(roadGroup);
   }
 
@@ -969,6 +1177,27 @@ export default class World3DApp {
     if (this.world?.variant === "river-build") {
       const riverGroup = new THREE.Group();
       riverGroup.name = "rivers";
+      const sourceMesh = this.makeRiverBuildSourcePool();
+      if (sourceMesh) {
+        sourceMesh.renderOrder = 4;
+        riverGroup.add(sourceMesh);
+      }
+      const cuts = this.world?.editorState?.riverCuts || [];
+      if (cuts.length) {
+        for (const cut of cuts) {
+          const mesh = this.makeRiverBuildSlopeSectionChannel(
+            cut.x || 0,
+            cut.y || 0,
+            cut.angle || 0,
+            cut.length || 320,
+            cut.width || 160,
+          );
+          if (mesh) {
+            mesh.renderOrder = 5;
+            riverGroup.add(mesh);
+          }
+        }
+      }
       group.add(riverGroup);
       return;
     }
@@ -997,7 +1226,76 @@ export default class World3DApp {
 
     const buildMode = this.game?.mode === "build";
     const riverBuildMode = buildMode && this.world?.variant === "river-build";
+    const editorCuts = this.world?.editorState?.riverCuts || [];
     const authoredStraightSections = [];
+    if (!riverBuildMode && editorCuts.length) {
+      if (buildMode) {
+        for (const cut of editorCuts) {
+          const mesh = this.makeRiverBuildSlopeSectionChannel(
+            cut.x || 0,
+            cut.y || 0,
+            cut.angle || 0,
+            cut.length || 240,
+            cut.width || 140,
+            { includeWater: true }
+          );
+          if (mesh) {
+            mesh.renderOrder = 5;
+            riverGroup.add(mesh);
+          }
+        }
+      }
+      if (!buildMode) {
+        const cutGroups = this.groupRiverBuildCutSections(editorCuts).map((g) => this.sortRiverBuildCutGroup(g));
+          const cutWaterMat = new THREE.MeshStandardMaterial({
+            color: 0x1f4b6b,
+            roughness: 0.38,
+            metalness: 0.02,
+            emissive: 0x0a1b27,
+            emissiveIntensity: 0.04,
+            side: THREE.DoubleSide,
+            transparent: false,
+            depthWrite: true,
+            depthTest: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -14,
+            polygonOffsetUnits: -14,
+          });
+        for (const cutGroup of cutGroups) {
+          if (!cutGroup.length) continue;
+          const centerline = [];
+          let totalWidth = 0;
+          const firstPts = cutEndpoints(cutGroup[0]);
+          centerline.push(firstPts.start);
+          for (const cut of cutGroup) {
+            centerline.push({ x: cut.x || 0, y: cut.y || 0 });
+            totalWidth += Math.max(100, (cut.width || 140) * 1.04);
+          }
+          const lastPts = cutEndpoints(cutGroup[cutGroup.length - 1]);
+          centerline.push(lastPts.end);
+            const width = totalWidth / Math.max(1, cutGroup.length);
+            const smooth = this.smoothPath(centerline, 120, 0.22);
+            const clipped = smooth.map((p) => ({ x: p.x, y: p.y }));
+            this.world?._clipRiverPathToCoast?.(clipped, 0.245);
+            if (clipped.length < 2) continue;
+            const channel = this.makeConnectedBuildRiverChannel(clipped, width * 0.98, cutWaterMat, {
+              includeTrench: false,
+              includeWaterSides: false,
+              taperCoastEnd: true,
+              coastCutoff: 0.245,
+              includeWaterfalls: true,
+            });
+            if (channel) {
+              channel.renderOrder = 6;
+              channel.traverse((node) => {
+                node.frustumCulled = false;
+                node.renderOrder = 6;
+              });
+              riverGroup.add(channel);
+            }
+          }
+        }
+      }
     for (const band of this.world._riverBands || []) {
       const raw = this.world._clipRiverPathToCoast?.(this.world._riverPath?.(band) || [], 0.245) || this.world._riverPath?.(band) || [];
       if (!raw || raw.length < 2) continue;
@@ -1041,33 +1339,38 @@ export default class World3DApp {
         }
         continue;
       }
-      const mesh = authoredSection
-        ? ((band.sectionKind === "straight" || band.sectionKind === "wide")
-            ? this.makeSectionWaterStamp(
-                band.sectionCenterX ?? centerX,
-                band.sectionCenterY ?? centerY,
-                band.sectionAngle || 0,
-                band.sectionLength || (band.sectionKind === "wide" ? 328 : 264),
-                buildRadius * 2.42,
-                buildRiverMat,
-                0.22
-              )
-            : this.makeSurfacePaintRibbon(
-                this.smoothPath(raw, 16, 0.1),
-                buildRadius * 2.42,
-                0.22,
-                buildRiverMat,
-                Math.max(36, buildRadius * 0.46)
-              ))
-        : buildMode
-          ? this.makeSurfacePaintRibbon(
-              smooth,
-              buildRadius * 2,
-              0.12,
-              buildRiverMat,
-              Math.max(28, buildRadius * 0.34)
-            )
-          : this.makeFlatWaterRibbon(smooth, width * 1.42, waterY, waterMat);
+      let mesh = null;
+      if (authoredSection) {
+        if (band.sectionKind === "straight" || band.sectionKind === "wide") {
+          mesh = this.makeSectionWaterStamp(
+            band.sectionCenterX ?? centerX,
+            band.sectionCenterY ?? centerY,
+            band.sectionAngle || 0,
+            band.sectionLength || (band.sectionKind === "wide" ? 328 : 264),
+            buildRadius * 2.42,
+            buildRiverMat,
+            0.22
+          );
+        } else {
+          mesh = this.makeSurfacePaintRibbon(
+            this.smoothPath(raw, 16, 0.1),
+            buildRadius * 2.42,
+            0.22,
+            buildRiverMat,
+            Math.max(36, buildRadius * 0.46)
+          );
+        }
+      } else if (buildMode) {
+        mesh = this.makeSurfacePaintRibbon(
+          smooth,
+          buildRadius * 2,
+          0.12,
+          buildRiverMat,
+          Math.max(28, buildRadius * 0.34)
+        );
+      } else {
+        mesh = this.makeFlatWaterRibbon(smooth, width * 1.42, waterY, waterMat);
+      }
       if (!mesh) continue;
       mesh.renderOrder = 4;
       riverGroup.add(mesh);
@@ -1195,6 +1498,13 @@ export default class World3DApp {
         depthWrite: false,
       })
     );
+    this.registerAnimatedWaterSurface(waterMesh, {
+      amplitude: Math.max(0.32, outerHalf * 0.05),
+      speed: 0.92,
+      freqA: 0.009,
+      freqB: 0.014,
+      chop: 0.22,
+    });
 
     const g = new THREE.Group();
     g.add(trenchMesh);
@@ -1226,47 +1536,153 @@ export default class World3DApp {
     }
   }
 
-  makeConnectedBuildRiverChannel(points, width, waterMaterial) {
+  makeConnectedBuildRiverChannel(points, width, waterMaterial, opts = {}) {
     if (!points?.length || points.length < 2) return null;
+    const includeTrench = opts.includeTrench !== false;
+    const includeWaterSides = opts.includeWaterSides !== false;
+    const includeWaterfalls = opts.includeWaterfalls !== false;
+    const taperCoastEnd = !!opts.taperCoastEnd;
+    const coastCutoff = Number.isFinite(opts.coastCutoff) ? opts.coastCutoff : 0.245;
     const group = new THREE.Group();
     const trenchVertices = [];
     const trenchIndices = [];
     const waterVertices = [];
     const waterIndices = [];
-    const outerHalf = width * 0.52;
-    const innerHalf = width * 0.36;
+    const waterSideVertices = [];
+    const waterSideIndices = [];
+    const waterfallVertices = [];
+    const waterfallIndices = [];
+    const outerHalf = width * 0.585;
+    const innerHalf = width * 0.5;
     const depth = Math.max(16, width * 0.18);
+    const oceanSurfaceY = (this.waterMesh?.position?.y ?? -2.5) + 0.12;
+    let prevSlice = null;
+    let travel = 0;
+    let mouthStart = null;
     for (let i = 0; i < points.length; i++) {
       const prev = points[Math.max(0, i - 1)];
       const here = points[i];
       const next = points[Math.min(points.length - 1, i + 1)];
+      if (i > 0) {
+        const last = points[i - 1];
+        travel += Math.hypot(here.x - last.x, here.y - last.y);
+      }
       const dx = next.x - prev.x;
       const dy = next.y - prev.y;
       const len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len;
       const ny = dx / len;
       const surface = this.sampleRenderedTerrainSmoothHeight(here.x, here.y, Math.max(18, width * 0.18));
-      const topY = surface + 0.35;
-      const bottomY = surface - depth;
-      const outerLX = here.x + nx * outerHalf;
-      const outerLY = here.y + ny * outerHalf;
-      const outerRX = here.x - nx * outerHalf;
-      const outerRY = here.y - ny * outerHalf;
-      const innerLX = here.x + nx * innerHalf;
-      const innerLY = here.y + ny * innerHalf;
-      const innerRX = here.x - nx * innerHalf;
-      const innerRY = here.y - ny * innerHalf;
+      let topY = surface + 0.22;
+      let bottomY = surface - depth;
+      let widthScale = 1;
+      let coastBlend = 0;
+      if (taperCoastEnd) {
+        const coastGround = this.world?._groundAt?.(here.x, here.y);
+        if (coastGround < coastCutoff + 0.09) {
+          const remain = points.length - 1 - i;
+          const endFade = THREE.MathUtils.clamp(1 - (remain / 4), 0, 1);
+          const coastFade = THREE.MathUtils.clamp((coastCutoff + 0.09 - coastGround) / 0.12, 0, 1);
+          coastBlend = coastFade * endFade;
+          widthScale *= 1 + coastBlend * 2.2;
+          if (remain <= 0) widthScale *= 0.88;
+        }
+      }
+      if (!mouthStart && taperCoastEnd && coastBlend > 0.34 && i >= 2) {
+        mouthStart = {
+          last: { x: points[i - 1].x, y: points[i - 1].y },
+          prev: { x: points[i - 2].x, y: points[i - 2].y },
+          blend: coastBlend,
+        };
+        break;
+      }
+      if (coastBlend > 0.001) {
+        topY = THREE.MathUtils.lerp(topY, oceanSurfaceY + 0.55, coastBlend * 0.9);
+        bottomY = THREE.MathUtils.lerp(bottomY, oceanSurfaceY - 1.2, coastBlend);
+        if (bottomY > topY - 0.7) bottomY = topY - 0.7;
+      }
+      const t = points.length <= 1 ? 0 : i / (points.length - 1);
+      const edgeFade = Math.sin(Math.PI * THREE.MathUtils.clamp(t, 0, 1));
+      const nA = Math.sin(travel * 0.0068 + 0.9);
+      const nB = Math.sin(travel * 0.0135 + 2.1);
+      const widthNoise = (nA * 0.65 + nB * 0.35) * 0.09 * edgeFade;
+      const bankAsym = Math.sin(travel * 0.011 + 1.7) * 0.055 * edgeFade;
+      const centerShift = Math.sin(travel * 0.0047 + 0.4) * width * 0.028 * edgeFade;
+      const centerX = here.x + nx * centerShift;
+      const centerY = here.y + ny * centerShift;
+      const localOuterHalfL = outerHalf * widthScale * (1 + widthNoise + bankAsym);
+      const localOuterHalfR = outerHalf * widthScale * (1 + widthNoise - bankAsym);
+      const localInnerHalfL = Math.max(1.6, innerHalf * widthScale * (1 + widthNoise * 0.72 + bankAsym * 0.55));
+      const localInnerHalfR = Math.max(1.6, innerHalf * widthScale * (1 + widthNoise * 0.72 - bankAsym * 0.55));
+      const outerLX = centerX + nx * localOuterHalfL;
+      const outerLY = centerY + ny * localOuterHalfL;
+      const outerRX = centerX - nx * localOuterHalfR;
+      const outerRY = centerY - ny * localOuterHalfR;
+      const innerLX = centerX + nx * localInnerHalfL;
+      const innerLY = centerY + ny * localInnerHalfL;
+      const innerRX = centerX - nx * localInnerHalfR;
+      const innerRY = centerY - ny * localInnerHalfR;
       trenchVertices.push(
         outerLX, topY, outerLY,
         innerLX, bottomY, innerLY,
         innerRX, bottomY, innerRY,
         outerRX, topY, outerRY
       );
-      const waterY = bottomY + depth * 0.82;
+      const bankY = topY - Math.max(0.55, width * 0.004);
+      let waterY = Math.min(bankY, bottomY + depth * 0.992);
+      let waterFloorY = bottomY + Math.max(0.9, depth * 0.18);
+      if (coastBlend > 0.001) {
+        waterY = THREE.MathUtils.lerp(waterY, oceanSurfaceY + 0.08, coastBlend * 0.95);
+        waterFloorY = THREE.MathUtils.lerp(waterFloorY, oceanSurfaceY - 0.55, coastBlend);
+      }
+      const waterCoverL = localInnerHalfL * 1.06;
+      const waterCoverR = localInnerHalfR * 1.06;
+      const waterLX = centerX + nx * waterCoverL;
+      const waterLY = centerY + ny * waterCoverL;
+      const waterLMX = centerX + nx * (waterCoverL * 0.5);
+      const waterLMY = centerY + ny * (waterCoverL * 0.5);
+      const waterMX = centerX;
+      const waterMY = centerY;
+      const waterRMX = centerX - nx * (waterCoverR * 0.5);
+      const waterRMY = centerY - ny * (waterCoverR * 0.5);
+      const waterRX = centerX - nx * waterCoverR;
+      const waterRY = centerY - ny * waterCoverR;
       waterVertices.push(
-        innerLX, waterY, innerLY,
-        innerRX, waterY, innerRY
+        waterLX, waterY, waterLY,
+        waterLMX, waterY, waterLMY,
+        waterMX, waterY, waterMY,
+        waterRMX, waterY, waterRMY,
+        waterRX, waterY, waterRY
       );
+      waterSideVertices.push(
+        waterLX, waterY, waterLY,
+        waterLX, waterFloorY, waterLY,
+        waterRX, waterFloorY, waterRY,
+        waterRX, waterY, waterRY
+      );
+      if (includeWaterfalls && prevSlice && coastBlend < 0.22 && (prevSlice.coastBlend || 0) < 0.22) {
+        const drop = Math.abs(prevSlice.waterY - waterY);
+        if (drop > Math.max(8, width * 0.05)) {
+          const fallBase = waterfallVertices.length / 3;
+          const highY = Math.max(prevSlice.waterY, waterY);
+          const lowY = Math.min(prevSlice.waterY, waterY);
+          const fallLX = (prevSlice.waterLX + waterLX) * 0.5;
+          const fallLY = (prevSlice.waterLY + waterLY) * 0.5;
+          const fallRX = (prevSlice.waterRX + waterRX) * 0.5;
+          const fallRY = (prevSlice.waterRY + waterRY) * 0.5;
+          waterfallVertices.push(
+            fallLX, highY, fallLY,
+            fallLX, lowY, fallLY,
+            fallRX, lowY, fallRY,
+            fallRX, highY, fallRY
+          );
+          waterfallIndices.push(
+            fallBase + 0, fallBase + 1, fallBase + 3,
+            fallBase + 3, fallBase + 1, fallBase + 2
+          );
+        }
+      }
+      prevSlice = { waterY, waterLX, waterLY, waterRX, waterRY, coastBlend };
       if (i > 0) {
         const a = (i - 1) * 4;
         const b = i * 4;
@@ -1275,30 +1691,481 @@ export default class World3DApp {
           a + 1, b + 1, a + 2, a + 2, b + 1, b + 2,
           a + 2, b + 2, a + 3, a + 3, b + 2, b + 3
         );
-        const wa = (i - 1) * 2;
-        const wb = i * 2;
-        waterIndices.push(wa, wb, wa + 1, wa + 1, wb, wb + 1);
+        const wa = (i - 1) * 5;
+        const wb = i * 5;
+        for (let k = 0; k < 4; k++) {
+          waterIndices.push(
+            wa + k, wb + k, wa + k + 1,
+            wa + k + 1, wb + k, wb + k + 1
+          );
+        }
+        const wsa = (i - 1) * 4;
+        const wsb = i * 4;
+        waterSideIndices.push(
+          wsa + 0, wsb + 0, wsa + 1, wsa + 1, wsb + 0, wsb + 1,
+          wsa + 1, wsb + 1, wsa + 2, wsa + 2, wsb + 1, wsb + 2,
+          wsa + 2, wsb + 2, wsa + 3, wsa + 3, wsb + 2, wsb + 3
+        );
       }
     }
-    const trenchGeometry = new THREE.BufferGeometry();
-    trenchGeometry.setAttribute("position", new THREE.Float32BufferAttribute(trenchVertices, 3));
-    trenchGeometry.setIndex(trenchIndices);
-    trenchGeometry.computeVertexNormals();
-    const trenchMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5b3f2a,
-      roughness: 0.96,
-      metalness: 0.01,
-      side: THREE.DoubleSide,
-    });
-    const trenchMesh = new THREE.Mesh(trenchGeometry, trenchMaterial);
-    group.add(trenchMesh);
+    if (includeTrench) {
+      const trenchGeometry = new THREE.BufferGeometry();
+      trenchGeometry.setAttribute("position", new THREE.Float32BufferAttribute(trenchVertices, 3));
+      trenchGeometry.setIndex(trenchIndices);
+      trenchGeometry.computeVertexNormals();
+      const trenchMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5b3f2a,
+        roughness: 0.96,
+        metalness: 0.01,
+        side: THREE.DoubleSide,
+      });
+      const trenchMesh = new THREE.Mesh(trenchGeometry, trenchMaterial);
+      group.add(trenchMesh);
+    }
     const waterGeometry = new THREE.BufferGeometry();
     waterGeometry.setAttribute("position", new THREE.Float32BufferAttribute(waterVertices, 3));
     waterGeometry.setIndex(waterIndices);
     waterGeometry.computeVertexNormals();
     const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    waterMesh.renderOrder = 7;
     group.add(waterMesh);
+    this.registerAnimatedWaterSurface(waterMesh, {
+      amplitude: Math.max(0.26, width * 0.0032),
+      speed: 0.82,
+      freqA: 0.0088,
+      freqB: 0.0145,
+      chop: 0.18,
+    });
+    if (includeWaterSides) {
+      const waterSideGeometry = new THREE.BufferGeometry();
+      waterSideGeometry.setAttribute("position", new THREE.Float32BufferAttribute(waterSideVertices, 3));
+      waterSideGeometry.setIndex(waterSideIndices);
+      waterSideGeometry.computeVertexNormals();
+      const waterSideMesh = new THREE.Mesh(waterSideGeometry, waterMaterial);
+      waterSideMesh.renderOrder = 7;
+      group.add(waterSideMesh);
+    }
+    if (waterfallVertices.length) {
+      const waterfallGeometry = new THREE.BufferGeometry();
+      waterfallGeometry.setAttribute("position", new THREE.Float32BufferAttribute(waterfallVertices, 3));
+      waterfallGeometry.setIndex(waterfallIndices);
+      waterfallGeometry.computeVertexNormals();
+      const waterfallMesh = new THREE.Mesh(waterfallGeometry, waterMaterial);
+      waterfallMesh.renderOrder = 7;
+      group.add(waterfallMesh);
+    }
+    if (taperCoastEnd && (mouthStart || points.length >= 2)) {
+      const last = mouthStart?.last || points[points.length - 1];
+      const prev = mouthStart?.prev || points[points.length - 2];
+      if (this.world?._groundAt?.(last.x, last.y) < coastCutoff + 0.06) {
+        const dx = last.x - prev.x;
+        const dy = last.y - prev.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const nx = -uy;
+        const ny = ux;
+        const mouthHalfA = innerHalf * 1.1;
+        const mouthHalfB = innerHalf * 1.46;
+        const mouthHalfC = innerHalf * 1.88;
+        const mouthLength = Math.max(width * 0.96, 92);
+        const mouthSurface = this.sampleRenderedTerrainSmoothHeight(last.x, last.y, Math.max(18, width * 0.18));
+        const mouthTopY = mouthSurface + 0.18;
+        const mouthBottomY = mouthSurface - depth;
+        const mouthWaterY = Math.min(oceanSurfaceY + 0.1, Math.min(mouthTopY - 0.34, mouthBottomY + depth * 0.997));
+        const midAX = last.x + ux * (mouthLength * 0.32);
+        const midAY = last.y + uy * (mouthLength * 0.32);
+        const midBX = last.x + ux * (mouthLength * 0.72);
+        const midBY = last.y + uy * (mouthLength * 0.72);
+        const tipX = last.x + ux * mouthLength;
+        const tipY = last.y + uy * mouthLength;
+        const mouthMaterial = new THREE.MeshStandardMaterial({
+          color: 0x1b3f5f,
+          roughness: 0.2,
+          metalness: 0.04,
+          emissive: 0x09141d,
+          emissiveIntensity: 0.025,
+          side: THREE.DoubleSide,
+          depthWrite: true,
+          depthTest: true,
+          polygonOffset: true,
+          polygonOffsetFactor: -14,
+          polygonOffsetUnits: -14,
+        });
+        const fanGeometry = new THREE.BufferGeometry();
+        fanGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
+          last.x + nx * mouthHalfA, mouthWaterY, last.y + ny * mouthHalfA,
+          last.x - nx * mouthHalfA, mouthWaterY, last.y - ny * mouthHalfA,
+          midAX + nx * mouthHalfB, mouthWaterY, midAY + ny * mouthHalfB,
+          midAX - nx * mouthHalfB, mouthWaterY, midAY - ny * mouthHalfB,
+          midBX + nx * mouthHalfC, mouthWaterY, midBY + ny * mouthHalfC,
+          midBX - nx * mouthHalfC, mouthWaterY, midBY - ny * mouthHalfC,
+          tipX, mouthWaterY, tipY
+        ], 3));
+        fanGeometry.setIndex([
+          0, 2, 1,
+          1, 2, 3,
+          2, 4, 3,
+          3, 4, 5,
+          4, 6, 5
+        ]);
+        fanGeometry.computeVertexNormals();
+        const fanMesh = new THREE.Mesh(fanGeometry, mouthMaterial);
+        fanMesh.renderOrder = 7;
+        group.add(fanMesh);
+        this.registerAnimatedWaterSurface(fanMesh, {
+          amplitude: Math.max(0.14, width * 0.0022),
+          speed: 0.72,
+          freqA: 0.0075,
+          freqB: 0.012,
+          chop: 0.12,
+        });
+      }
+    }
     return group;
+  }
+
+  addRiverBuildCutWater(group, cuts, material) {
+    for (const cut of cuts) {
+      const mesh = this.makeRiverBuildSectionSlopeWater(
+        cut.x || 0,
+        cut.y || 0,
+        cut.angle || 0,
+        cut.length || 320,
+        cut.width || 160,
+        material,
+      );
+      if (mesh) {
+        mesh.renderOrder = 5;
+        group.add(mesh);
+      }
+    }
+  }
+
+  groupRiverBuildCutSections(cuts) {
+    const remaining = cuts.slice();
+    const groups = [];
+    const distLimit = 220;
+    const angleLimit = Math.PI / 10;
+    while (remaining.length) {
+      const seed = remaining.shift();
+      const group = [seed];
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let i = remaining.length - 1; i >= 0; i--) {
+          const candidate = remaining[i];
+          if (this.shouldJoinRiverBuildCutGroup(group, candidate, distLimit, angleLimit)) {
+            group.push(candidate);
+            remaining.splice(i, 1);
+            changed = true;
+          }
+        }
+      }
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  shouldJoinRiverBuildCutGroup(group, candidate, endpointDist, angleLimit) {
+    for (const item of group) {
+      const da = angleDelta(item.angle || 0, candidate.angle || 0);
+      if (da > angleLimit) continue;
+      if (Math.hypot((item.x || 0) - (candidate.x || 0), (item.y || 0) - (candidate.y || 0)) <= endpointDist) return true;
+    }
+    return false;
+  }
+
+  sortRiverBuildCutGroup(group) {
+    if (!group.length) return [];
+    const avgAngle = group.reduce((sum, item) => sum + (item.angle || 0), 0) / group.length;
+    const dirX = Math.cos(avgAngle);
+    const dirY = Math.sin(avgAngle);
+    return group.slice().sort((a, b) => ((a.x || 0) * dirX + (a.y || 0) * dirY) - ((b.x || 0) * dirX + (b.y || 0) * dirY));
+  }
+
+  makeRiverBuildWaterRibbon(points, width, material, spread = 12) {
+    if (!points?.length || points.length < 2) return null;
+
+    const expanded = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (!Number.isFinite(len) || len < 1) continue;
+      const steps = Math.max(1, Math.ceil(len / 18));
+      for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        expanded.push({
+          x: a.x + dx * t,
+          y: a.y + dy * t,
+        });
+      }
+    }
+
+    const vertices = [];
+    const indices = [];
+    const half = width * 0.5;
+
+    for (let i = 0; i < expanded.length; i++) {
+      const prev = expanded[Math.max(0, i - 1)];
+      const here = expanded[i];
+      const next = expanded[Math.min(expanded.length - 1, i + 1)];
+      const dx = next.x - prev.x;
+      const dy = next.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      const leftX = here.x + nx * half;
+      const leftY = here.y + ny * half;
+      const rightX = here.x - nx * half;
+      const rightY = here.y - ny * half;
+      const trenchSurface = this.sampleRenderedTerrainSmoothHeight(here.x, here.y, Math.max(12, spread * 0.7));
+      const waterH = trenchSurface + 6.0;
+
+      vertices.push(leftX, waterH, leftY, rightX, waterH, rightY);
+
+      if (i > 0) {
+        const a = (i - 1) * 2;
+        const b = a + 1;
+        const c = i * 2;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    this.registerAnimatedWaterSurface(mesh, {
+      amplitude: Math.max(0.28, width * 0.0042),
+      speed: 0.84,
+      freqA: 0.008,
+      freqB: 0.012,
+      chop: 0.18,
+    });
+    return mesh;
+  }
+
+  makeRiverBuildSectionSlopeWater(cx, cy, angle, length, width, material) {
+    const halfL = Math.max(42, length * 0.42);
+    const halfW = Math.max(20, width * 0.32);
+    const cosA = Math.cos(angle || 0);
+    const sinA = Math.sin(angle || 0);
+    const startX = cx - cosA * halfL;
+    const startY = cy - sinA * halfL;
+    const endX = cx + cosA * halfL;
+    const endY = cy + sinA * halfL;
+    const startH = ((this.world?._groundAt?.(startX, startY) ?? 0.46) - 0.46) * 760 + 8.0;
+    const endH = ((this.world?._groundAt?.(endX, endY) ?? 0.46) - 0.46) * 760 + 8.0;
+    const nx = -sinA;
+    const ny = cosA;
+    const verts = [
+      startX + nx * halfW, startH, startY + ny * halfW,
+      startX - nx * halfW, startH, startY - ny * halfW,
+      endX + nx * halfW, endH, endY + ny * halfW,
+      endX - nx * halfW, endH, endY - ny * halfW,
+    ];
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geometry.setIndex([0, 2, 1, 1, 2, 3]);
+    geometry.computeVertexNormals();
+    return new THREE.Mesh(geometry, material);
+  }
+
+  makeRiverBuildSlopeSectionChannel(cx, cy, angle, length, width, opts = {}) {
+    const includeWater = opts.includeWater !== false;
+    const halfL = Math.max(56, length * 0.37);
+    const outerHalf = Math.max(18, width * 0.31);
+    const innerHalf = Math.max(15, width * 0.25);
+    const cosA = Math.cos(angle || 0);
+    const sinA = Math.sin(angle || 0);
+    const nx = -sinA;
+    const ny = cosA;
+    const slices = Math.max(7, Math.round(length / 44));
+    const trenchVerts = [];
+    const trenchIdx = [];
+    const waterVerts = [];
+    const waterSideVerts = [];
+    const waterSideIdx = [];
+    const waterBodyHalf = Math.max(0, halfL - innerHalf * 0.95);
+    const sampleGround = (wx, wy) => {
+      if (this.world?._groundAt) return this.world._groundAt(wx, wy);
+      return 0.46;
+    };
+    const sampleRenderY = (wx, wy) => {
+      if (this.world?.variant === "river-build") {
+        return (sampleGround(wx, wy) - 0.46) * 760;
+      }
+      return this.heightAt(wx, wy);
+    };
+    for (let i = 0; i <= slices; i++) {
+      const t = i / slices;
+      const along = -halfL + t * halfL * 2;
+      const px = cx + cosA * along;
+      const py = cy + sinA * along;
+      const outerLeftG = sampleGround(px + nx * outerHalf, py + ny * outerHalf);
+      const innerLeftG = sampleGround(px + nx * innerHalf, py + ny * innerHalf);
+      const centerG = sampleGround(px, py);
+      const innerRightG = sampleGround(px - nx * innerHalf, py - ny * innerHalf);
+      const outerRightG = sampleGround(px - nx * outerHalf, py - ny * outerHalf);
+      const outerLeftY = sampleRenderY(px + nx * outerHalf, py + ny * outerHalf);
+      const innerLeftY = sampleRenderY(px + nx * innerHalf, py + ny * innerHalf);
+      const centerY = sampleRenderY(px, py);
+      const innerRightY = sampleRenderY(px - nx * innerHalf, py - ny * innerHalf);
+      const outerRightY = sampleRenderY(px - nx * outerHalf, py - ny * outerHalf);
+      trenchVerts.push(
+        px + nx * outerHalf, outerLeftY, py + ny * outerHalf,
+        px + nx * innerHalf, innerLeftY, py + ny * innerHalf,
+        px, centerY, py,
+        px - nx * innerHalf, innerRightY, py - ny * innerHalf,
+        px - nx * outerHalf, outerRightY, py - ny * outerHalf,
+      );
+      const bankY = Math.min(innerLeftY, innerRightY);
+      const targetFill = centerY + (bankY - centerY) * 0.72;
+      const waterY = Math.min(bankY - 1.4, targetFill);
+      const absAlong = Math.abs(along);
+      let capScale = 1;
+      if (absAlong > waterBodyHalf) {
+        const capSpan = Math.max(1, halfL - waterBodyHalf);
+        const capT = clamp((absAlong - waterBodyHalf) / capSpan, 0, 1);
+        capScale = Math.sqrt(Math.max(0, 1 - capT * capT));
+      }
+      const waterHalf = Math.max(1.5, innerHalf * 1.02 * capScale);
+      waterVerts.push(
+        px + nx * waterHalf, waterY, py + ny * waterHalf,
+        px - nx * waterHalf, waterY, py - ny * waterHalf,
+      );
+      const sideFloorY = centerY + 0.9;
+      waterSideVerts.push(
+        px + nx * waterHalf, waterY, py + ny * waterHalf,
+        px + nx * waterHalf, sideFloorY, py + ny * waterHalf,
+        px - nx * waterHalf, sideFloorY, py - ny * waterHalf,
+        px - nx * waterHalf, waterY, py - ny * waterHalf
+      );
+      if (i === 0) continue;
+      const prevBase = (i - 1) * 5;
+      const currBase = i * 5;
+      trenchIdx.push(
+        prevBase + 0, currBase + 0, prevBase + 1, prevBase + 1, currBase + 0, currBase + 1,
+        prevBase + 1, currBase + 1, prevBase + 2, prevBase + 2, currBase + 1, currBase + 2,
+        prevBase + 2, currBase + 2, prevBase + 3, prevBase + 3, currBase + 2, currBase + 3,
+        prevBase + 3, currBase + 3, prevBase + 4, prevBase + 4, currBase + 3, currBase + 4
+      );
+      const prevWaterBase = (i - 1) * 4;
+      const currWaterBase = i * 4;
+      waterSideIdx.push(
+        prevWaterBase + 0, currWaterBase + 0, prevWaterBase + 1, prevWaterBase + 1, currWaterBase + 0, currWaterBase + 1,
+        prevWaterBase + 1, currWaterBase + 1, prevWaterBase + 2, prevWaterBase + 2, currWaterBase + 1, currWaterBase + 2,
+        prevWaterBase + 2, currWaterBase + 2, prevWaterBase + 3, prevWaterBase + 3, currWaterBase + 2, currWaterBase + 3
+      );
+    }
+    const trenchGeo = new THREE.BufferGeometry();
+    trenchGeo.setAttribute("position", new THREE.Float32BufferAttribute(trenchVerts, 3));
+    trenchGeo.setIndex(trenchIdx);
+    trenchGeo.computeVertexNormals();
+    const trenchMat = new THREE.MeshStandardMaterial({
+      color: 0x4a382a,
+      roughness: 0.98,
+      metalness: 0.01,
+      side: THREE.DoubleSide,
+    });
+    const trenchMesh = new THREE.Mesh(trenchGeo, trenchMat);
+
+    const g = new THREE.Group();
+    g.add(trenchMesh);
+    if (includeWater) {
+      const waterGeo = new THREE.BufferGeometry();
+      waterGeo.setAttribute("position", new THREE.Float32BufferAttribute(waterVerts, 3));
+      const waterIdx = [];
+      for (let i = 1; i <= slices; i++) {
+        const prev = (i - 1) * 2;
+        const curr = i * 2;
+        waterIdx.push(prev + 0, curr + 0, prev + 1, prev + 1, curr + 0, curr + 1);
+      }
+      waterGeo.setIndex(waterIdx);
+      waterGeo.computeVertexNormals();
+      const waterMat = new THREE.MeshStandardMaterial({
+        color: this.world?.variant === "river-build" ? 0x3f87bf : 0x1b3f5f,
+        roughness: this.world?.variant === "river-build" ? 0.14 : 0.18,
+        metalness: this.world?.variant === "river-build" ? 0.02 : 0.04,
+        emissive: this.world?.variant === "river-build" ? 0x0d2634 : 0x0b2131,
+        emissiveIntensity: this.world?.variant === "river-build" ? 0.12 : 0.08,
+        transparent: true,
+        opacity: this.world?.variant === "river-build" ? 0.985 : 0.9,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+      this.registerAnimatedWaterSurface(waterMesh, {
+        amplitude: this.world?.variant === "river-build" ? 1.05 : 0.78,
+        speed: 0.88,
+        freqA: 0.0085,
+        freqB: 0.0135,
+        chop: 0.24,
+      });
+
+      const waterSideGeo = new THREE.BufferGeometry();
+      waterSideGeo.setAttribute("position", new THREE.Float32BufferAttribute(waterSideVerts, 3));
+      waterSideGeo.setIndex(waterSideIdx);
+      waterSideGeo.computeVertexNormals();
+      const waterSideMesh = new THREE.Mesh(waterSideGeo, waterMat);
+      g.add(waterMesh);
+      g.add(waterSideMesh);
+    }
+    return g;
+  }
+
+  makeRiverBuildSourcePool() {
+    const source = this.world?.riverBuildSource;
+    if (!source || !this.world?._groundAt) return null;
+    const rings = 14;
+    const rimPts = 22;
+    const verts = [];
+    const idx = [];
+    const worldToRenderY = (ground) => (ground - 0.46) * 760;
+    for (let r = 0; r <= rings; r++) {
+      const rf = r / rings;
+      const radius = source.radius * rf;
+      for (let i = 0; i <= rimPts; i++) {
+        const a = (i / rimPts) * Math.PI * 2;
+        const wx = source.x + Math.cos(a) * radius;
+        const wy = source.y + Math.sin(a) * radius;
+        const gy = worldToRenderY(this.world._groundAt(wx, wy)) + 2.8;
+        verts.push(wx, gy, wy);
+      }
+    }
+    const row = rimPts + 1;
+    for (let r = 1; r <= rings; r++) {
+      const prev = (r - 1) * row;
+      const curr = r * row;
+      for (let i = 1; i <= rimPts; i++) {
+        idx.push(prev + i - 1, curr + i - 1, prev + i, prev + i, curr + i - 1, curr + i);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x63b8ee,
+      transparent: true,
+      opacity: 0.76,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    return new THREE.Mesh(geo, mat);
   }
 
   groupStraightRiverSections(sections) {
@@ -1360,17 +2227,18 @@ export default class World3DApp {
   addBridges(group = this.overworldDetailGroup, centerX = this.game?.hero?.x || 0, centerY = this.game?.hero?.y || 0, radius = OVERWORLD_PROP_RADIUS + 600) {
     const bridgeGroup = new THREE.Group();
     bridgeGroup.name = "bridges";
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x8c6943, roughness: 0.93, metalness: 0.02 });
-    const plankMat = new THREE.MeshStandardMaterial({ color: 0xb48b5e, roughness: 0.88, metalness: 0.02 });
-    const railMat = new THREE.MeshStandardMaterial({ color: 0x5b4127, roughness: 0.95, metalness: 0.03 });
-    const ropeMat = new THREE.MeshStandardMaterial({ color: 0x9e7b53, roughness: 0.96, metalness: 0.01 });
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x7d5d3c, roughness: 0.94, metalness: 0.02 });
+    const plankMat = new THREE.MeshStandardMaterial({ color: 0xc19d6c, roughness: 0.88, metalness: 0.02 });
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x563c24, roughness: 0.96, metalness: 0.03 });
+    const ropeMat = new THREE.MeshStandardMaterial({ color: 0x9f8460, roughness: 0.96, metalness: 0.01 });
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a877f, roughness: 0.99, metalness: 0.01 });
 
     for (const bridge of this.world.bridges || []) {
       const dx = (bridge.cx || 0) - centerX;
       const dy = (bridge.cy || 0) - centerY;
       if (dx * dx + dy * dy > radius * radius) continue;
       const length = Math.max(36, bridge.length || 80);
-      const width = Math.max(26, (bridge.width || 34) * 0.72);
+      const width = Math.max(30, (bridge.width || 34) * 0.86);
       const angle = -(bridge.angle || 0);
       const dirX = Math.cos(bridge.angle || 0);
       const dirY = Math.sin(bridge.angle || 0);
@@ -1382,7 +2250,45 @@ export default class World3DApp {
       const waterLift = (this.waterMesh?.position?.y ?? -2.5) + 9;
       const startBase = Math.max(this.sampleRenderedTerrainHeight(startX, startY), waterLift);
       const endBase = Math.max(this.sampleRenderedTerrainHeight(endX, endY), waterLift);
+      const abutmentLength = Math.min(18, Math.max(10, width * 0.3));
+      for (const end of [
+        { x: startX, y: startY, base: startBase, sign: -1 },
+        { x: endX, y: endY, base: endBase, sign: 1 },
+      ]) {
+        const abutment = new THREE.Mesh(
+          new THREE.BoxGeometry(abutmentLength, 8, width * 1.16),
+          stoneMat
+        );
+        abutment.position.set(
+          end.x + dirX * end.sign * (abutmentLength * 0.24),
+          end.base + 4.2,
+          end.y + dirY * end.sign * (abutmentLength * 0.24)
+        );
+        abutment.rotation.y = angle;
+        abutment.castShadow = true;
+        abutment.receiveShadow = true;
+        bridgeGroup.add(abutment);
+      }
       const segments = Math.max(4, Math.round(length / 22));
+      const pierSpacing = 30;
+      const piers = Math.max(0, Math.floor(length / pierSpacing) - 1);
+      for (let p = 0; p < piers; p++) {
+        const t = (p + 1) / (piers + 1);
+        const px = startX + (endX - startX) * t;
+        const py = startY + (endY - startY) * t;
+        const baseHeight = startBase + (endBase - startBase) * t;
+        const camber = Math.sin(t * Math.PI) * 5.5;
+        const pierTop = baseHeight + 8.2 + camber;
+        const pier = new THREE.Mesh(
+          new THREE.BoxGeometry(Math.max(4.5, width * 0.14), Math.max(10, pierTop - waterLift + 4), Math.max(6, width * 0.28)),
+          stoneMat
+        );
+        pier.position.set(px, (waterLift + pierTop) * 0.5 - 1.2, py);
+        pier.rotation.y = angle;
+        pier.castShadow = true;
+        pier.receiveShadow = true;
+        bridgeGroup.add(pier);
+      }
       for (let i = 0; i < segments; i++) {
         const t = segments === 1 ? 0.5 : i / (segments - 1);
         const localX = (t - 0.5) * length;
@@ -1392,25 +2298,25 @@ export default class World3DApp {
         const baseHeight = startBase + (endBase - startBase) * t;
         const pos = new THREE.Vector3(segCenterX, baseHeight + 12 + camber, segCenterY);
 
-        const deck = new THREE.Mesh(new THREE.BoxGeometry(length / segments + 4, 3.6, width), woodMat);
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(length / segments + 5, 4.2, width), woodMat);
         deck.position.copy(pos);
         deck.rotation.y = angle;
         deck.castShadow = true;
         deck.receiveShadow = true;
         bridgeGroup.add(deck);
 
-        const plank = new THREE.Mesh(new THREE.BoxGeometry(length / segments + 3, 1.2, width * 0.88), plankMat);
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(length / segments + 4, 1.4, width * 0.9), plankMat);
         plank.position.copy(pos);
-        plank.position.y += 2.2;
+        plank.position.y += 2.7;
         plank.rotation.y = angle;
         plank.receiveShadow = true;
         bridgeGroup.add(plank);
 
         for (const side of [-1, 1]) {
-          const post = new THREE.Mesh(new THREE.BoxGeometry(2.8, 12 + camber * 0.14, 2.8), railMat);
+          const post = new THREE.Mesh(new THREE.BoxGeometry(3.2, 13 + camber * 0.14, 3.2), railMat);
           post.position.copy(pos);
-          post.position.y += 7.5;
-          const postOffset = new THREE.Vector3(0, 0, side * (width * 0.42));
+          post.position.y += 8.3;
+          const postOffset = new THREE.Vector3(0, 0, side * (width * 0.44));
           postOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
           post.position.add(postOffset);
           post.castShadow = true;
@@ -1419,7 +2325,7 @@ export default class World3DApp {
       }
 
       for (const side of [-1, 1]) {
-        const rail = this.makeRaisedBridgeRail(length, width * 0.43 * side, 18.5, angle, {
+        const rail = this.makeRaisedBridgeRail(length, width * 0.45 * side, 19.5, angle, {
           x: startX,
           y: startY,
           z: startBase + 12,
@@ -1528,12 +2434,15 @@ export default class World3DApp {
       return dx * dx + dy * dy <= radius * radius;
     };
 
-    if (this.world.startTown && withinRadius(this.world.startTown.x, this.world.startTown.y)) {
+    if (this.world.startTown && withinRadius(this.world.startTown.x, this.world.startTown.y) && !this.world?._isNearRiverChannel?.(this.world.startTown.x, this.world.startTown.y, 80)) {
       addHouse(this.world.startTown.x, this.world.startTown.y, 120, 100, 58, { color: 0xbfa786 });
       for (const building of this.world.startTown.buildings || []) {
+        const bx = this.world.startTown.x + (building.x || 0);
+        const by = this.world.startTown.y + (building.y || 0);
+        if (this.world?._isNearRiverChannel?.(bx, by, Math.max(34, (building.w || 40) * 0.65))) continue;
         addHouse(
-          this.world.startTown.x + (building.x || 0),
-          this.world.startTown.y + (building.y || 0),
+          bx,
+          by,
           Math.max(26, (building.w || 40) * 0.85),
           Math.max(24, (building.h || 40) * 0.85),
           34,
@@ -1544,9 +2453,10 @@ export default class World3DApp {
 
     for (const town of this.world.towns || []) {
       if (!withinRadius(town.x, town.y)) continue;
+      if (this.world?._isNearRiverChannel?.(town.x, town.y, 64)) continue;
       addHouse(town.x, town.y, 74, 58, 38, { color: 0xb69a74 });
-      addHouse(town.x - 38, town.y + 42, 44, 34, 28, { color: 0x9f835f });
-      addHouse(town.x + 46, town.y - 34, 40, 30, 26, { color: 0x8d775e });
+      if (!this.world?._isNearRiverChannel?.(town.x - 38, town.y + 42, 34)) addHouse(town.x - 38, town.y + 42, 44, 34, 28, { color: 0x9f835f });
+      if (!this.world?._isNearRiverChannel?.(town.x + 46, town.y - 34, 32)) addHouse(town.x + 46, town.y - 34, 40, 30, 26, { color: 0x8d775e });
     }
 
     for (const camp of this.world.camps || []) {
@@ -1695,6 +2605,7 @@ export default class World3DApp {
     for (const tree of this.world._trees || []) {
       if (!withinPropRadius(tree.x, tree.y)) continue;
       if (this.roadDistanceAt(tree.x, tree.y) < 52) continue;
+      if (this.world?._isNearRiverChannel?.(tree.x, tree.y, 18)) continue;
       const sample = this.world._sampleCell(tree.x, tree.y);
       const target = sample.zone === "ashlands" || sample.zone === "ash fields" ? ashTrees : trees;
       target.push({ x: tree.x, y: tree.y, scale: Math.max(0.7, tree.scale || 1) });
@@ -1703,6 +2614,7 @@ export default class World3DApp {
     for (const rock of this.world._rocks || []) {
       if (!withinPropRadius(rock.x, rock.y)) continue;
       if (this.roadDistanceAt(rock.x, rock.y) < 28) continue;
+      if (this.world?._isNearRiverChannel?.(rock.x, rock.y, 16)) continue;
       rocks.push({
         x: rock.x,
         y: rock.y,
@@ -1715,6 +2627,7 @@ export default class World3DApp {
     for (const item of this.world._clutter || []) {
       if (!withinPropRadius(item.x, item.y)) continue;
       if (this.roadDistanceAt(item.x, item.y) < 42) continue;
+      if (this.world?._isNearRiverChannel?.(item.x, item.y, 16)) continue;
       const sample = this.world._sampleCell(item.x, item.y);
       const target = sample.zone === "stone flats" || sample.zone === "ashlands" || sample.zone === "highlands" ? dryClutter : clutter;
       target.push({
@@ -3186,6 +4099,74 @@ export default class World3DApp {
     return curve.getPoints(samples).map((p) => ({ x: p.x, y: p.z }));
   }
 
+  registerAnimatedWaterSurface(mesh, opts = {}) {
+    const pos = mesh?.geometry?.getAttribute?.("position");
+    if (!mesh || !pos) return mesh;
+    this.animatedWaterSurfaces.push({
+      mesh,
+      base: Float32Array.from(pos.array),
+      amplitude: Number.isFinite(opts.amplitude) ? opts.amplitude : 1.2,
+      speed: Number.isFinite(opts.speed) ? opts.speed : 1,
+      freqA: Number.isFinite(opts.freqA) ? opts.freqA : 0.01,
+      freqB: Number.isFinite(opts.freqB) ? opts.freqB : 0.018,
+      chop: Number.isFinite(opts.chop) ? opts.chop : 0.35,
+      phase: Number.isFinite(opts.phase) ? opts.phase : Math.random() * Math.PI * 2,
+    });
+    return mesh;
+  }
+
+  updateAnimatedWaterSurfaces(timeSec) {
+    if (!this.animatedWaterSurfaces?.length) return;
+    const live = [];
+    for (const entry of this.animatedWaterSurfaces) {
+      const mesh = entry?.mesh;
+      const pos = mesh?.geometry?.getAttribute?.("position");
+      if (!mesh || !mesh.parent || !pos || !entry.base || entry.base.length !== pos.array.length) continue;
+      const arr = pos.array;
+      const base = entry.base;
+      const amp = entry.amplitude;
+      const t = timeSec * entry.speed + entry.phase;
+      for (let i = 0; i < arr.length; i += 3) {
+        const bx = base[i];
+        const by = base[i + 1];
+        const bz = base[i + 2];
+        const waveA = Math.sin(bx * entry.freqA + bz * entry.freqB + t);
+        const waveB = Math.sin(bx * (entry.freqB * 0.72) - bz * (entry.freqA * 1.35) + t * 1.37 + 1.1);
+        const rippleA = Math.sin((bx * entry.freqA * 6.8) + (bz * entry.freqB * 5.9) + t * 3.7 + 0.7);
+        const rippleB = Math.sin((bx * entry.freqB * 9.1) - (bz * entry.freqA * 7.6) + t * 4.5 + 2.3);
+        const rippleC = Math.sin((bx + bz) * (entry.freqA * 11.5) + t * 5.6 + 1.6);
+        const rippleD = Math.sin((bx - bz) * (entry.freqB * 10.8) + t * 6.4 + 0.2);
+        arr[i + 1] = by
+          + waveA * amp * 0.24
+          + waveB * amp * entry.chop * 0.16
+          + rippleA * amp * 0.16
+          + rippleB * amp * 0.11
+          + rippleC * amp * 0.08
+          + rippleD * amp * 0.05;
+      }
+      pos.needsUpdate = true;
+      live.push(entry);
+    }
+    this.animatedWaterSurfaces = live;
+  }
+
+  extendPlayRiverMouth(points, width, coastCutoff = 0.245) {
+    if (!points?.length || points.length < 2) return points;
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    if ((this.world?._groundAt?.(last.x, last.y) ?? 1) >= coastCutoff + 0.06) return points;
+    const dx = last.x - prev.x;
+    const dy = last.y - prev.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    points.push({
+      x: last.x + ux * Math.max(10, width * 0.06),
+      y: last.y + uy * Math.max(10, width * 0.06),
+    });
+    return points;
+  }
+
   makePathRibbon(points, width, lift, material) {
     if (!points?.length || points.length < 2) return null;
 
@@ -3781,6 +4762,9 @@ export default class World3DApp {
   colorForSample(sample) {
     if (sample.isWater) return new THREE.Color(0x23496b);
     switch (sample.zone) {
+      case "ocean":
+      case "river":
+        return new THREE.Color(0x3c607d);
       case "mountain":
         return new THREE.Color(0x717782);
       case "stone flats":
@@ -3802,21 +4786,7 @@ export default class World3DApp {
   heightAt(x, y, sample = null) {
     const s = sample || this.world._sampleCell(x, y);
     const ground = this.world._groundAt(x, y);
-    if (this.world?.variant === "river-build") {
-      return (ground - 0.46) * 420;
-    }
-    const ridge = this.world._mountainInfluenceAt?.(x, y) || 0;
-    const pass = this.world._mountainPassInfluenceAt?.(x, y) || 0;
-    const edgeAbs = Math.max(Math.abs(x), Math.abs(y));
-    const edgeBandFrac = clamp((edgeAbs - (this.world.mapHalfSize - 720)) / 720, 0, 1);
-    let h = Math.max(0, ground - 0.18) * 240;
-    h += ridge * 260;
-    h -= pass * 80;
-    if (s.zone === "mountain") h += 180;
-    if (s.zone === "stone flats") h += 70;
-    h += edgeBandFrac * 700;
-    if (s.isWater) h = Math.min(h, -8);
-    return h;
+    return this.heightFromGround(x, y, ground, s);
   }
 
   toVec3(x, y, lift = 0) {
@@ -4627,6 +5597,108 @@ export default class World3DApp {
     this.debug.body = body;
   }
 
+  createTestStateProbe() {
+    let probe = document.getElementById("bk-test-state");
+    if (!probe) {
+      probe = document.createElement("script");
+      probe.type = "application/json";
+      probe.id = "bk-test-state";
+      document.body.appendChild(probe);
+    }
+    this.testState.el = probe;
+  }
+
+  updateTestState() {
+    if (!this.testState.el || !this.game || !this.world) return;
+    if (!this.testState.audit) {
+      this.testState.audit = this.buildCoarseWorldAudit();
+    }
+    const hero = this.game.hero;
+    const settlements = [this.world.startTown, ...(this.world.towns || [])].filter(Boolean);
+    const probe = {
+      bootStatus: this.bootStatus,
+      bootProgress: this.bootProgress,
+      hero: hero
+        ? {
+            x: Math.round(hero.x || 0),
+            y: Math.round(hero.y || 0),
+            zone: this.world.getZoneName?.(hero.x, hero.y) || null,
+          }
+        : null,
+      counts: {
+        roads: this.world.roads?.length || 0,
+        bridges: this.world.bridges?.length || 0,
+        rivers: this.world._riverBands?.length || 0,
+        docks: this.world.docks?.length || 0,
+        settlements: settlements.length,
+      },
+      towns: settlements.map((town) => ({
+        name: town.name || "Town",
+        water: !!this.world._sampleCellRaw?.(town.x, town.y)?.isWater,
+        x: Math.round(town.x || 0),
+        y: Math.round(town.y || 0),
+      })),
+      audit: this.testState.audit,
+    };
+    this.testState.el.textContent = JSON.stringify(probe);
+  }
+
+  buildCoarseWorldAudit() {
+    if (!this.world) return null;
+    let wetRoadSamples = 0;
+    let totalRoadSamples = 0;
+    for (const road of this.world.roads || []) {
+      const pts = road.points || [];
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const steps = Math.max(2, Math.ceil(Math.hypot(dx, dy) / 120));
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          const x = a.x + dx * t;
+          const y = a.y + dy * t;
+          totalRoadSamples++;
+          if (this.world._sampleCellRaw(x, y).isWater && !this.world.getBridgeAt(x, y)) {
+            wetRoadSamples++;
+          }
+        }
+      }
+    }
+
+    let bridgeCrossings = 0;
+    for (const bridge of this.world.bridges || []) {
+      const path = bridge.path || [];
+      let waterHits = 0;
+      let checks = 0;
+      for (let i = 1; i < path.length; i++) {
+        const a = path[i - 1];
+        const b = path[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const steps = Math.max(3, Math.ceil(Math.hypot(dx, dy) / 64));
+        for (let s = 1; s < steps; s++) {
+          const t = s / steps;
+          checks++;
+          if (this.world._sampleCellRaw(a.x + dx * t, a.y + dy * t).isWater) {
+            waterHits++;
+          }
+        }
+      }
+      if (checks > 0 && waterHits / checks >= 0.2) bridgeCrossings++;
+    }
+
+    return {
+      townsDry: [this.world.startTown, ...(this.world.towns || [])]
+        .filter(Boolean)
+        .every((town) => !this.world._sampleCellRaw(town.x, town.y).isWater),
+      wetRoadSamples,
+      totalRoadSamples,
+      bridgeCrossings,
+    };
+  }
+
   toggleDebug() {
     this.debug.enabled = !this.debug.enabled;
     if (this.debug.panel) this.debug.panel.style.display = this.debug.enabled ? "block" : "none";
@@ -4779,7 +5851,17 @@ export default class World3DApp {
     this.game.noteFrame?.(frame);
     this.refreshOverworldDetailIfNeeded();
     this.syncSceneFromGame(frame);
+    const waterTime = now * 0.001;
+    if (!this.lastWaterAnimTime || waterTime - this.lastWaterAnimTime >= (1 / 30)) {
+      this.updateAnimatedWaterSurfaces(waterTime);
+      this.lastWaterAnimTime = waterTime;
+    }
     this.updateHudIfNeeded(frame);
+    this.testState.elapsed += frame;
+    if (this.testState.elapsed >= this.testState.interval) {
+      this.testState.elapsed = 0;
+      this.updateTestState();
+    }
     this.game.draw();
     this.updateShadowRefresh();
     this.renderer.render(this.scene, this.camera);

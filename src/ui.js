@@ -1253,6 +1253,8 @@ export default class UI {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
+    this._drawMapRiverOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, opts);
+
     for (const road of world.roads || []) {
       const pad = 40;
       if ((road.maxX ?? Infinity) + pad < viewLeft || (road.minX ?? -Infinity) - pad > right || (road.maxY ?? Infinity) + pad < viewTop || (road.minY ?? -Infinity) - pad > bottom) continue;
@@ -3502,6 +3504,116 @@ export default class UI {
     }
 
     ctx.restore();
+  }
+
+  _drawMapRiverOverlay(ctx, game, x, y, w, h, viewLeft, viewTop, viewSpan, opts = {}) {
+    const world = game?.world;
+    const cuts = world?.editorState?.riverCuts || [];
+    if (!cuts.length) return;
+
+    const px = w / viewSpan;
+    const py = h / viewSpan;
+    const right = viewLeft + viewSpan;
+    const bottom = viewTop + viewSpan;
+    const revealRequired = opts.revealRequired !== false;
+    const groups = this._groupMapRiverCuts(cuts);
+
+    for (const group of groups) {
+      if (!group.length) continue;
+      const ordered = this._sortMapRiverCuts(group);
+      const points = [];
+      const first = this._mapRiverCutEndpoints(ordered[0]);
+      points.push(first.start);
+      let visible = false;
+      let revealed = !revealRequired;
+      for (const cut of ordered) {
+        const p = { x: cut.x || 0, y: cut.y || 0 };
+        points.push(p);
+        if (!revealed && this._isMapPointRevealed(game, p)) revealed = true;
+        if (p.x >= viewLeft - 80 && p.x <= right + 80 && p.y >= viewTop - 80 && p.y <= bottom + 80) visible = true;
+      }
+      const last = this._mapRiverCutEndpoints(ordered[ordered.length - 1]);
+      points.push(last.end);
+      if (!visible || !revealed || points.length < 2) continue;
+
+      const avgWidth = ordered.reduce((sum, cut) => sum + Math.max(90, cut.width || 140), 0) / Math.max(1, ordered.length);
+      const riverBaseW = Math.max(2.2, avgWidth / Math.max(220, viewSpan) * 10.5);
+      const riverTopW = Math.max(1.2, riverBaseW * 0.62);
+
+      ctx.strokeStyle = opts.riverBase || "rgba(15,34,48,0.92)";
+      ctx.lineWidth = riverBaseW;
+      ctx.beginPath();
+      ctx.moveTo(x + (points[0].x - viewLeft) * px, y + (points[0].y - viewTop) * py);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(x + (points[i].x - viewLeft) * px, y + (points[i].y - viewTop) * py);
+      }
+      ctx.stroke();
+
+      ctx.strokeStyle = opts.riverTop || "rgba(45,97,136,0.98)";
+      ctx.lineWidth = riverTopW;
+      ctx.beginPath();
+      ctx.moveTo(x + (points[0].x - viewLeft) * px, y + (points[0].y - viewTop) * py);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(x + (points[i].x - viewLeft) * px, y + (points[i].y - viewTop) * py);
+      }
+      ctx.stroke();
+    }
+  }
+
+  _groupMapRiverCuts(cuts) {
+    const remaining = cuts.slice();
+    const groups = [];
+    const distLimit = 240;
+    const angleLimit = Math.PI / 9;
+    while (remaining.length) {
+      const seed = remaining.shift();
+      const group = [seed];
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let i = remaining.length - 1; i >= 0; i--) {
+          const candidate = remaining[i];
+          if (this._shouldJoinMapRiverCutGroup(group, candidate, distLimit, angleLimit)) {
+            group.push(candidate);
+            remaining.splice(i, 1);
+            changed = true;
+          }
+        }
+      }
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  _shouldJoinMapRiverCutGroup(group, candidate, endpointDist, angleLimit) {
+    for (const item of group) {
+      let da = (item.angle || 0) - (candidate.angle || 0);
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
+      if (Math.abs(da) > angleLimit) continue;
+      if (Math.hypot((item.x || 0) - (candidate.x || 0), (item.y || 0) - (candidate.y || 0)) <= endpointDist) return true;
+    }
+    return false;
+  }
+
+  _sortMapRiverCuts(group) {
+    if (!group.length) return [];
+    const avgAngle = group.reduce((sum, item) => sum + (item.angle || 0), 0) / group.length;
+    const dirX = Math.cos(avgAngle);
+    const dirY = Math.sin(avgAngle);
+    return group.slice().sort((a, b) => ((a.x || 0) * dirX + (a.y || 0) * dirY) - ((b.x || 0) * dirX + (b.y || 0) * dirY));
+  }
+
+  _mapRiverCutEndpoints(cut) {
+    const length = Math.max(120, Math.min(560, +cut?.length || 240));
+    const angle = Number.isFinite(+cut?.angle) ? +cut.angle : 0;
+    const half = length * 0.5;
+    const dx = Math.cos(angle) * half;
+    const dy = Math.sin(angle) * half;
+    return {
+      start: { x: (+cut?.x || 0) - dx, y: (+cut?.y || 0) - dy },
+      end: { x: (+cut?.x || 0) + dx, y: (+cut?.y || 0) + dy },
+    };
   }
 
   _drawEditorPanel(ctx, game) {

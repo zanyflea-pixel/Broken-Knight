@@ -100,18 +100,189 @@ function sectionUnionFrac2D(x, y, rivers) {
   };
 }
 
+function riverCutFieldAt(x, y, cuts) {
+  if (!Array.isArray(cuts) || !cuts.length) return null;
+  let topA = 0;
+  let topB = 0;
+  let topC = 0;
+  let floorSum = 0;
+  let weightSum = 0;
+  let widthMax = 0;
+  for (const cut of cuts) {
+    const width = clamp(+cut.width || 120, 48, 320);
+    const length = clamp(+cut.length || 264, 120, 560);
+    const frac = sectionFootprintFrac2D(
+      x,
+      y,
+      cut.x || 0,
+      cut.y || 0,
+      cut.angle || 0,
+      length + width * 0.72,
+      width * 1.48
+    );
+    if (frac <= 0.001) continue;
+    const weight = frac * frac;
+    if (Number.isFinite(cut.floor)) {
+      floorSum += cut.floor * weight;
+      weightSum += weight;
+    }
+    if (width > widthMax) widthMax = width;
+    if (frac >= topA) {
+      topC = topB;
+      topB = topA;
+      topA = frac;
+    } else if (frac >= topB) {
+      topC = topB;
+      topB = frac;
+    } else if (frac > topC) {
+      topC = frac;
+    }
+  }
+  const union = 1 - (1 - topA) * (1 - topB * 0.985) * (1 - topC * 0.94);
+  if (union <= 0.001) return null;
+  return {
+    frac: clamp(union, 0, 1),
+    floor: weightSum > 0 ? floorSum / weightSum : null,
+    width: widthMax,
+  };
+}
+
+function riverCutEndpoints(cut) {
+  const length = clamp(+cut?.length || 264, 120, 560);
+  const angle = Number.isFinite(+cut?.angle) ? +cut.angle : 0;
+  const half = length * 0.5;
+  const dx = Math.cos(angle) * half;
+  const dy = Math.sin(angle) * half;
+  return {
+    start: { x: (+cut?.x || 0) - dx, y: (+cut?.y || 0) - dy },
+    end: { x: (+cut?.x || 0) + dx, y: (+cut?.y || 0) + dy },
+    angle,
+    length,
+  };
+}
+
+function normalizeAngleNear(angle, reference) {
+  let out = angle || 0;
+  let ref = reference || 0;
+  while (out - ref > Math.PI) out -= Math.PI * 2;
+  while (out - ref < -Math.PI) out += Math.PI * 2;
+  return out;
+}
+
+function buildRiverCutsFromPolyline(points, width = 136, length = 240) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  let path = points.map((p) => ({ x: +p.x || 0, y: +p.y || 0 }));
+  for (let pass = 0; pass < 2; pass++) {
+    const next = [path[0]];
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      next.push(
+        { x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 },
+        { x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 }
+      );
+    }
+    next.push(path[path.length - 1]);
+    path = next;
+  }
+  const cuts = [];
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const dx = (+b.x || 0) - (+a.x || 0);
+    const dy = (+b.y || 0) - (+a.y || 0);
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1) continue;
+    const angle = Math.atan2(dy, dx);
+    const step = Math.max(72, length * 0.48);
+    const steps = Math.max(1, Math.ceil(dist / step));
+    for (let s = 0; s < steps; s++) {
+      const t = (s + 0.5) / steps;
+      cuts.push({
+        x: (+a.x || 0) + dx * t,
+        y: (+a.y || 0) + dy * t,
+        angle,
+        width,
+        length,
+      });
+    }
+  }
+  return cuts;
+}
+
+function clonePoint2D(p) {
+  return { x: +p.x || 0, y: +p.y || 0 };
+}
+
+function riverBuildMountainBase(x, y) {
+  const northFrac = clamp(((-y) - 220) / 1220, 0, 1);
+  if (northFrac <= 0) return 0;
+  const ridgeWidth = 920;
+  const ridgeShape = Math.exp(-((x * x) / (ridgeWidth * ridgeWidth)));
+  const slope = smoothstep(0.02, 0.98, northFrac);
+  return slope * (0.10 + ridgeShape * 0.10);
+}
+
+function riverBuildBaseGround(x, y) {
+  return 0.46 + riverBuildMountainBase(x, y);
+}
+
+function mainWorldFlatGround(x, y, mapHalfSize, seed = 61291) {
+  const warpX = x + (fbm(x * 0.00023 + 81, y * 0.00023 - 24, seed + 5, 3) - 0.5) * 2600;
+  const warpY = y + (fbm(x * 0.00023 - 56, y * 0.00023 + 47, seed + 7, 3) - 0.5) * 2600;
+
+  const continents = fbm(warpX * 0.000085, warpY * 0.000085, seed + 11, 5);
+  const macro = fbm(warpX * 0.00019 - 17, warpY * 0.00019 + 31, seed + 29, 4);
+  const hills = fbm(warpX * 0.00072 + 27, warpY * 0.00072 - 19, seed + 57, 5);
+  const rough = fbm(warpX * 0.00155 - 71, warpY * 0.00155 + 43, seed + 91, 3);
+  const basins = fbm(warpX * 0.0002 + 59, warpY * 0.0002 - 13, seed + 123, 4);
+  const mountainFieldA = 1 - Math.abs(fbm(warpX * 0.00031 + 141, warpY * 0.00031 - 63, seed + 211, 4) - 0.5) * 2;
+  const mountainFieldB = 1 - Math.abs(fbm(warpX * 0.00044 - 88, warpY * 0.00044 + 119, seed + 307, 4) - 0.5) * 2;
+  const interiorMountainMask = smoothstep(0.56, 0.86, fbm(warpX * 0.00012 - 15, warpY * 0.00012 + 73, seed + 401, 4));
+  const plateauMask = smoothstep(0.5, 0.84, fbm(warpX * 0.00016 + 203, warpY * 0.00016 - 114, seed + 509, 4));
+  const plainsMask = smoothstep(0.54, 0.88, fbm(warpX * 0.00011 - 303, warpY * 0.00011 + 211, seed + 557, 4));
+  const basinMask = smoothstep(0.42, 0.8, basins);
+
+  let value = 0.1 + continents * 0.4 + macro * 0.16;
+  value += Math.pow(clamp(hills, 0, 1), 1.14) * 0.1;
+  value += rough * 0.02;
+  value += smoothstep(0.54, 0.9, mountainFieldA) * interiorMountainMask * 0.28;
+  value += smoothstep(0.5, 0.88, mountainFieldB) * interiorMountainMask * 0.22;
+  value += plateauMask * 0.1;
+  value -= basinMask * 0.22;
+  value = value * (1 - plainsMask * 0.46) + (0.36 + macro * 0.08) * (plainsMask * 0.46);
+
+  const lowlandField = smoothstep(0.52, 0.9, fbm(warpX * 0.00014 - 201, warpY * 0.00014 + 67, seed + 601, 4));
+  value -= lowlandField * 0.12;
+
+  const edgeAbs = Math.max(Math.abs(x), Math.abs(y));
+  const oceanBand = smoothstep(mapHalfSize - 4200, mapHalfSize - 620, edgeAbs);
+  const coastNoise = fbm(warpX * 0.00034 + 83, warpY * 0.00034 - 61, seed + 143, 4);
+  const oceanCuts = smoothstep(0.28, 0.82, coastNoise);
+  value -= oceanBand * (0.18 + oceanCuts * 0.26);
+
+  const mountainBand = smoothstep(mapHalfSize - 2500, mapHalfSize - 220, edgeAbs);
+  const edgePeaks = smoothstep(0.36, 0.88, fbm(warpX * 0.00058 - 107, warpY * 0.00058 + 73, seed + 211, 4));
+  const edgeHeight = 0.8 + edgePeaks * 0.28;
+  value = value * (1 - mountainBand) + Math.max(value, edgeHeight) * mountainBand;
+
+  return clamp(value, -0.24, 1.24);
+}
+
 export default class World {
   constructor(seed = 12345, opts = {}) {
     this.variant = opts.variant || "default";
-    this.buildId = this.variant === "river-build" ? "river-build-v1" : "rpg-v162";
-    this.seed = (seed | 0) || 12345;
+    this.buildId = this.variant === "river-build" ? "river-build-v1" : "rpg-v169";
+    const defaultSeed = this.variant === "river-build" ? 12345 : 61291;
+    this.seed = (seed | 0) || defaultSeed;
+    this.flatOverworld = this.variant === "terrain-only";
 
     this.tileSize = opts.tileSize || 24;
     this.viewW = opts.viewW || 960;
     this.viewH = opts.viewH || 540;
 
-    this.mapHalfSize = this.variant === "river-build" ? 1800 : 12000;
-    this.boundsHalfSize = this.variant === "river-build" ? 2200 : 14500;
+    this.mapHalfSize = this.variant === "river-build" ? 2600 : 12000;
+    this.boundsHalfSize = this.variant === "river-build" ? 3000 : 14500;
 
     this.spawn = { x: 0, y: 0 };
     this.startTown = null;
@@ -191,7 +362,7 @@ export default class World {
     this._moistureCacheLimit = 18000;
     this._runtimeRawSampleCacheLimit = 12000;
     this._runtimeCellCacheLimit = 12000;
-    this.editorStorageKey = `broke-knight-world-editor-v1:${this.variant}:${this.seed}`;
+    this.editorStorageKey = `broke-knight-world-editor-${this.variant === "river-build" ? "v2" : "v19"}:${this.variant}:${this.seed}`;
     this.editorState = this._makeEmptyEditorState();
     this._editorBase = null;
     this._editorSessionBaseState = null;
@@ -211,17 +382,62 @@ export default class World {
     this._mountainRenderData = [];
     this._mountainRenderBuildIndex = 0;
     this._bootRawSampleCache = new Map();
+    this._riverBuildCutGrid = null;
+    this._terrainMacroRidges = [];
+    this._terrainMacroBasins = [];
+    this._terrainMacroPlains = [];
+    this.riverBuildSource = this.variant === "river-build"
+      ? { x: 0, y: -2050, radius: 220, depth: 0.045 }
+      : null;
 
     if (this.variant === "river-build") {
       this._buildRiverCaches();
       this._roadPath = null;
       this._captureEditorBase();
-      this._loadEditorData();
+      this.editorState = this._makeEmptyEditorState();
+      this._editorSessionBaseState = this._cloneEditorStateData(this.editorState);
+      this._rebuildRiverBuildCutGrid();
       this._bootRawSampleCache = null;
       return;
     }
 
+    if (this.flatOverworld) {
+      this.spawn = { x: 0, y: 0 };
+      this.startTown = null;
+      this.showRoads = false;
+      this._buildTerrainMacroFeatures();
+      this._riverBands = this._makeRiverBands();
+      this._mergeIntersectingMainRivers(this._riverBands);
+      this._buildRiverCaches();
+      this._mountainRanges = [];
+      this._mountainPasses = [];
+      this.roads = [];
+      this.bridges = [];
+      this.docks = [];
+      this.camps = [];
+      this.towns = [];
+      this.waystones = [];
+      this.dungeons = [];
+      this.shrines = [];
+      this.caches = [];
+      this.herbs = [];
+      this.secrets = [];
+      this.dragonLairs = [];
+      this._trees = [];
+      this._rocks = [];
+      this._clutter = [];
+      this._buildRoadCaches();
+      this._captureEditorBase();
+      this.editorState = this._makeEmptyEditorState();
+      this._editorSessionBaseState = this._cloneEditorStateData(this.editorState);
+      this._bootRawSampleCache = null;
+      this._queueWarmupTasks();
+      return;
+    }
+
+    this._buildTerrainMacroFeatures();
     this._riverBands = this._makeRiverBands();
+    this._mergeIntersectingMainRivers(this._riverBands);
     this._buildRiverCaches();
     this._mountainRanges = this._makeMountainRanges();
     this._mountainPasses = this._makeMountainPasses();
@@ -229,11 +445,11 @@ export default class World {
     this._buildPOIs();
     this._buildRoadNetwork();
     this._finalizeBridges();
-    this._stripBaseTravelNetwork();
     this._buildRoadCaches();
     this._ensureSpawnSafety();
     this._captureEditorBase();
-    this._loadEditorData();
+    this.editorState = this._makeEmptyEditorState();
+    this._editorSessionBaseState = this._cloneEditorStateData(this.editorState);
     this._bootRawSampleCache = null;
     this._queueWarmupTasks();
   }
@@ -242,6 +458,7 @@ export default class World {
     return {
       roads: [],
       rivers: [],
+      riverCuts: [],
       bridges: [],
       docks: [],
       props: [],
@@ -250,6 +467,351 @@ export default class World {
       actions: [],
       updatedAt: 0,
     };
+  }
+
+  _riverBuildCutFieldAt(x, y) {
+    if (this.variant !== "river-build") {
+      return riverCutFieldAt(x, y, this.editorState?.riverCuts || []);
+    }
+    const grid = this._riverBuildCutGrid;
+    if (!grid?.height?.length || !grid?.frac?.length) {
+      return riverCutFieldAt(x, y, this.editorState?.riverCuts || []);
+    }
+    const half = grid.size * 0.5;
+    const fx = (x + half) / grid.cell;
+    const fy = (y + half) / grid.cell;
+    const ix = Math.floor(fx);
+    const iy = Math.floor(fy);
+    if (ix < 0 || iy < 0 || ix >= grid.resolution - 1 || iy >= grid.resolution - 1) return null;
+    const tx = fx - ix;
+    const ty = fy - iy;
+    const idx = iy * grid.resolution + ix;
+    const stride = grid.resolution;
+    const i00 = idx;
+    const i10 = idx + 1;
+    const i01 = idx + stride;
+    const i11 = idx + stride + 1;
+    const lerp = (a, b, t) => a * (1 - t) + b * t;
+    const bilerp = (arr) => {
+      const top = lerp(arr[i00], arr[i10], tx);
+      const bottom = lerp(arr[i01], arr[i11], tx);
+      return lerp(top, bottom, ty);
+    };
+    const frac = bilerp(grid.frac);
+    if (frac <= 0.001) return null;
+    return {
+      frac,
+      floor: bilerp(grid.height),
+      width: bilerp(grid.width),
+      height: bilerp(grid.height),
+    };
+  }
+
+  _seedDefaultMainWorldRivers() {
+    if (this.variant === "river-build") return false;
+    const presetDefs = [
+      // Far west system
+      { width: 102, length: 194, points: [
+        { x: -8600, y: -8600 },
+        { x: -8380, y: -6400 },
+        { x: -8160, y: -3800 },
+        { x: -7940, y: -800 },
+        { x: -7740, y: 2800 },
+        { x: -7600, y: 6200 },
+        { x: -7480, y: 9000 },
+        { x: -7420, y: 10800 },
+      ]},
+      { width: 66, length: 152, points: [
+        { x: -10400, y: -4200 },
+        { x: -9800, y: -3900 },
+        { x: -9200, y: -3400 },
+        { x: -8680, y: -2500 },
+        { x: -8280, y: -1400 },
+      ]},
+      { width: 60, length: 144, points: [
+        { x: -9800, y: 2200 },
+        { x: -9300, y: 2400 },
+        { x: -8820, y: 2900 },
+        { x: -8360, y: 3600 },
+        { x: -7900, y: 4800 },
+      ]},
+      { width: 56, length: 138, points: [
+        { x: -9400, y: 7600 },
+        { x: -8920, y: 7480 },
+        { x: -8440, y: 7240 },
+        { x: -7980, y: 6840 },
+        { x: -7600, y: 6200 },
+      ]},
+
+      // West-central system
+      { width: 110, length: 202, points: [
+        { x: -5200, y: -9000 },
+        { x: -4980, y: -6900 },
+        { x: -4760, y: -4300 },
+        { x: -4540, y: -1400 },
+        { x: -4300, y: 1800 },
+        { x: -4100, y: 5200 },
+        { x: -3940, y: 8500 },
+        { x: -3860, y: 10800 },
+      ]},
+      { width: 68, length: 154, points: [
+        { x: -6600, y: -2600 },
+        { x: -6100, y: -2300 },
+        { x: -5600, y: -1900 },
+        { x: -5100, y: -1200 },
+        { x: -4700, y: -200 },
+      ]},
+      { width: 62, length: 146, points: [
+        { x: -6200, y: 4200 },
+        { x: -5700, y: 4300 },
+        { x: -5220, y: 4580 },
+        { x: -4740, y: 5100 },
+        { x: -4300, y: 5900 },
+      ]},
+      { width: 58, length: 140, points: [
+        { x: -5600, y: 9200 },
+        { x: -5140, y: 9120 },
+        { x: -4700, y: 8960 },
+        { x: -4280, y: 8780 },
+        { x: -3940, y: 8500 },
+      ]},
+
+      // East-central system
+      { width: 108, length: 200, points: [
+        { x: 4200, y: -9000 },
+        { x: 4040, y: -7000 },
+        { x: 3880, y: -4400 },
+        { x: 3720, y: -1200 },
+        { x: 3560, y: 2400 },
+        { x: 3420, y: 5600 },
+        { x: 3300, y: 8600 },
+        { x: 3240, y: 10800 },
+      ]},
+      { width: 66, length: 150, points: [
+        { x: 6100, y: -3200 },
+        { x: 5600, y: -2900 },
+        { x: 5140, y: -2440 },
+        { x: 4700, y: -1700 },
+        { x: 4300, y: -700 },
+      ]},
+      { width: 60, length: 144, points: [
+        { x: 5800, y: 2600 },
+        { x: 5340, y: 2840 },
+        { x: 4900, y: 3340 },
+        { x: 4480, y: 4120 },
+        { x: 4000, y: 5200 },
+      ]},
+      { width: 56, length: 138, points: [
+        { x: 5200, y: 8600 },
+        { x: 4760, y: 8500 },
+        { x: 4320, y: 8340 },
+        { x: 3880, y: 8140 },
+        { x: 3440, y: 7840 },
+      ]},
+
+      // Far east system
+      { width: 100, length: 192, points: [
+        { x: 8600, y: -8600 },
+        { x: 8420, y: -6500 },
+        { x: 8240, y: -3900 },
+        { x: 8060, y: -900 },
+        { x: 7880, y: 2600 },
+        { x: 7720, y: 6000 },
+        { x: 7580, y: 8900 },
+        { x: 7520, y: 10800 },
+      ]},
+      { width: 64, length: 148, points: [
+        { x: 10300, y: -4200 },
+        { x: 9720, y: -3920 },
+        { x: 9160, y: -3500 },
+        { x: 8640, y: -2720 },
+        { x: 8240, y: -1600 },
+      ]},
+      { width: 58, length: 140, points: [
+        { x: 10000, y: 2200 },
+        { x: 9460, y: 2460 },
+        { x: 8940, y: 2960 },
+        { x: 8440, y: 3700 },
+        { x: 7940, y: 4740 },
+      ]},
+      { width: 54, length: 134, points: [
+        { x: 9600, y: 8200 },
+        { x: 9140, y: 8120 },
+        { x: 8700, y: 7980 },
+        { x: 8260, y: 7760 },
+        { x: 7800, y: 7300 },
+      ]},
+    ];
+    const seededCuts = [];
+    for (const preset of presetDefs) {
+      const points = (preset.points || []).map(clonePoint2D);
+      const chain = buildRiverCutsFromPolyline(points, preset.width, preset.length);
+      for (const cut of chain) {
+        const floor = Math.max(0.18, this._groundAt(cut.x, cut.y) - 0.022);
+        seededCuts.push({
+          x: cut.x,
+          y: cut.y,
+          angle: cut.angle,
+          width: cut.width,
+          length: cut.length,
+          floor,
+          sectionId: this._editorNextId(),
+        });
+      }
+    }
+    if (!seededCuts.length) return false;
+    this.editorState.riverCuts = seededCuts;
+    this.applyEditorState();
+    return true;
+  }
+
+  _riverSettlementAvoidersForSeed(extraPad = 0) {
+    const avoiders = [];
+    const addTown = (town, base = 0) => {
+      if (!town) return;
+      avoiders.push({ x: town.x, y: town.y, r: 140 + base + extraPad });
+      avoiders.push({ x: town.x - 38, y: town.y + 42, r: 110 + base + extraPad });
+      avoiders.push({ x: town.x + 46, y: town.y - 34, r: 110 + base + extraPad });
+      for (const building of town.buildings || []) {
+        avoiders.push({
+          x: town.x + (building.x || 0),
+          y: town.y + (building.y || 0),
+          r: Math.max(90, Math.max(building.w || 0, building.h || 0) * 1.1) + base + extraPad,
+        });
+      }
+    };
+    addTown(this.startTown, 40);
+    for (const town of this.towns || []) addTown(town, town.coastal ? 36 : 24);
+    return avoiders;
+  }
+
+  _rerouteSeedPolylineAroundSettlements(points, width = 120) {
+    if (!Array.isArray(points) || points.length < 2) return points || [];
+    const avoiders = this._riverSettlementAvoidersForSeed(Math.max(20, width * 0.45));
+    if (!avoiders.length) return points.map(clonePoint2D);
+    let out = points.map(clonePoint2D);
+    for (let pass = 0; pass < 3; pass++) {
+      const next = [out[0]];
+      let changed = false;
+      for (let i = 0; i < out.length - 1; i++) {
+        const a = out[i];
+        const b = out[i + 1];
+        let best = null;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const nx = -uy;
+        const ny = ux;
+        for (const avoid of avoiders) {
+          const vx = avoid.x - a.x;
+          const vy = avoid.y - a.y;
+          const t = clamp((vx * dx + vy * dy) / Math.max(1, dx * dx + dy * dy), 0, 1);
+          const qx = a.x + dx * t;
+          const qy = a.y + dy * t;
+          const dist = Math.hypot(qx - avoid.x, qy - avoid.y);
+          if (dist >= avoid.r) continue;
+          const severity = avoid.r - dist;
+          if (!best || severity > best.severity) {
+            let sx = qx - avoid.x;
+            let sy = qy - avoid.y;
+            let sl = Math.hypot(sx, sy);
+            if (sl < 1) {
+              const sign = (((i + pass) & 1) === 0) ? 1 : -1;
+              sx = nx * sign;
+              sy = ny * sign;
+              sl = 1;
+            }
+            const sign = (sx * nx + sy * ny) >= 0 ? 1 : -1;
+            const push = avoid.r + Math.max(40, width * 0.4);
+            best = {
+              severity,
+              point: {
+                x: avoid.x + (sx / sl) * avoid.r + nx * sign * push,
+                y: avoid.y + (sy / sl) * avoid.r + ny * sign * push,
+              },
+            };
+          }
+        }
+        if (best) {
+          next.push(best.point);
+          changed = true;
+        }
+        next.push(b);
+      }
+      out = next;
+      if (!changed) break;
+    }
+    return out;
+  }
+
+  _rebuildRiverBuildCutGrid() {
+    if (this.variant !== "river-build") return;
+    const resolution = 220;
+    const size = this.boundsHalfSize * 2;
+    const cell = size / (resolution - 1);
+    const base = 0.46;
+    const height = new Float32Array(resolution * resolution);
+    const frac = new Float32Array(resolution * resolution);
+    const width = new Float32Array(resolution * resolution);
+    height.fill(base);
+    const cuts = this.editorState?.riverCuts || [];
+    if (!cuts.length) {
+      this._riverBuildCutGrid = { resolution, size, cell, height, frac, width };
+      return;
+    }
+    for (const cut of cuts) {
+      const cutWidth = clamp(+cut.width || 120, 80, 320);
+      const cutLength = clamp(+cut.length || 264, 120, 560);
+      const angle = Number.isFinite(+cut.angle) ? +cut.angle : 0;
+      const cosA = Math.cos(-angle);
+      const sinA = Math.sin(-angle);
+      const halfL = Math.max(1, cutLength * 0.64);
+      const halfW = Math.max(1, cutWidth * 0.58);
+      const capRadius = Math.min(halfW, halfL);
+      const spineHalf = Math.max(0, halfL - capRadius);
+      const minX = cut.x - (cutLength * 0.8 + cutWidth);
+      const maxX = cut.x + (cutLength * 0.8 + cutWidth);
+      const minY = cut.y - (cutLength * 0.8 + cutWidth);
+      const maxY = cut.y + (cutLength * 0.8 + cutWidth);
+      const gx0 = clamp(Math.floor((minX + size * 0.5) / cell), 0, resolution - 1);
+      const gx1 = clamp(Math.ceil((maxX + size * 0.5) / cell), 0, resolution - 1);
+      const gy0 = clamp(Math.floor((minY + size * 0.5) / cell), 0, resolution - 1);
+      const gy1 = clamp(Math.ceil((maxY + size * 0.5) / cell), 0, resolution - 1);
+      const centerDepth = clamp(cutWidth * 0.00005 + 0.011, 0.014, 0.026);
+      for (let gy = gy0; gy <= gy1; gy++) {
+        const wy = -size * 0.5 + gy * cell;
+        for (let gx = gx0; gx <= gx1; gx++) {
+          const wx = -size * 0.5 + gx * cell;
+          const f = sectionFootprintFrac2D(
+            wx,
+            wy,
+            cut.x || 0,
+            cut.y || 0,
+            cut.angle || 0,
+            cutLength + cutWidth * 0.35,
+            cutWidth * 1.06
+          );
+          if (f <= 0.001) continue;
+          const dx = wx - (cut.x || 0);
+          const dy = wy - (cut.y || 0);
+          const lx = dx * cosA - dy * sinA;
+          const clampedX = clamp(lx, -spineHalf, spineHalf);
+          const centerWX = (cut.x || 0) + clampedX * Math.cos(angle);
+          const centerWY = (cut.y || 0) + clampedX * Math.sin(angle);
+          const localBase = riverBuildBaseGround(centerWX, centerWY);
+          const localFloor = Math.max(0.18, localBase - centerDepth);
+          const u = 1 - f;
+          const target = localFloor + Math.pow(u, 1.65) * (localBase - localFloor);
+          const idx = gy * resolution + gx;
+          height[idx] = Math.min(height[idx], target);
+          frac[idx] = 1 - (1 - frac[idx]) * (1 - f);
+          width[idx] = Math.max(width[idx], cutWidth);
+        }
+      }
+    }
+    this._riverBuildCutGrid = { resolution, size, cell, height, frac, width };
   }
 
   _stripBaseTravelNetwork() {
@@ -404,6 +966,7 @@ export default class World {
   }
 
   saveEditorData() {
+    if (this.variant !== "river-build") return false;
     const storage = this._getEditorStorage();
     this.editorState.updatedAt = Date.now();
     if (!storage) return false;
@@ -417,6 +980,7 @@ export default class World {
   }
 
   _loadEditorData() {
+    if (this.variant !== "river-build") return false;
     const storage = this._getEditorStorage();
     if (!storage) return false;
     try {
@@ -434,6 +998,8 @@ export default class World {
   clearEditorData() {
     this.editorState = this._makeEmptyEditorState();
     this.applyEditorState();
+    this._editorSessionBaseState = this._cloneEditorStateData(this.editorState);
+    if (this.variant !== "river-build") return;
     const storage = this._getEditorStorage();
     if (storage) {
       try {
@@ -451,7 +1017,7 @@ export default class World {
     if (!this._editorSessionBaseState) return false;
     this.editorState = this._cloneEditorStateData(this._editorSessionBaseState);
     this.applyEditorState();
-    this.saveEditorData();
+    if (this.variant === "river-build") this.saveEditorData();
     return true;
   }
 
@@ -462,6 +1028,15 @@ export default class World {
     this.editorState = {
       roads: [],
       rivers: [],
+      riverCuts: Array.isArray(normalized.riverCuts) ? normalized.riverCuts.map((cut) => ({
+        x: +cut.x || 0,
+        y: +cut.y || 0,
+        angle: Number.isFinite(+cut.angle) ? +cut.angle : 0,
+        width: clamp(+cut.width || 120, 48, 280),
+        length: clamp(+cut.length || 264, 120, 520),
+        floor: Number.isFinite(+cut.floor) ? +cut.floor : null,
+        sectionId: +cut.sectionId || null,
+      })) : [],
       bridges: [],
       docks: Array.isArray(normalized.docks) ? normalized.docks.map((dock) => ({
         x: +dock.x || 0,
@@ -529,7 +1104,7 @@ export default class World {
     this.dragonLairs = (this._editorBase.dragonLairs || []).map((item) => ({ ...item }));
 
     for (const road of this.editorState.roads || []) {
-      const piece = this._makeRoadPiece(road.points, road.width, road.visible !== false);
+      const piece = this._makeRoadPiece(road.points, road.width, road.visible !== false, road.kind || "trail");
       if (piece) this.roads.push(piece);
     }
 
@@ -625,12 +1200,24 @@ export default class World {
     this._buildRiverCaches();
     this._buildRoadCaches();
     this._rebuildRoadPath();
+    this._sanitizePoiPlacements();
+    this._prunePropsNearAuthoredRivers();
     this._rebuildTreeBuckets?.();
     this._rebuildRockBuckets?.();
     this._rebuildClutterBuckets?.();
+    this._rebuildRiverBuildCutGrid();
     this._invalidateWorldCaches();
     this.editorRevision++;
     return true;
+  }
+
+  _prunePropsNearAuthoredRivers() {
+    const cuts = this.editorState?.riverCuts || [];
+    if (!cuts.length) return;
+    const keep = (item, pad = 0) => !this._isNearRiverChannel(item.x || 0, item.y || 0, pad);
+    this._trees = (this._trees || []).filter((item) => keep(item, 22));
+    this._rocks = (this._rocks || []).filter((item) => keep(item, 16));
+    this._clutter = (this._clutter || []).filter((item) => keep(item, 18));
   }
 
   getEditorRevision() {
@@ -938,30 +1525,112 @@ export default class World {
     const river = this.createEditorRiverPieceData(x, y, "straight", angle, width);
     if (!river) return false;
     const sectionId = this._editorNextId();
-    const sampled = this._sampleEditorStrokePoints(river.points, Math.max(14, river.width * 0.12), 8);
-    const sectionAngle = river.sectionAngle || 0;
-    const nx = -Math.sin(sectionAngle);
-    const ny = Math.cos(sectionAngle);
-    const lateralSteps = [-0.95, -0.72, -0.48, -0.24, 0, 0.24, 0.48, 0.72, 0.95];
-    const floorBase = Number.isFinite(river.floor) ? river.floor : this._sampleRiverBedTarget(river.points, river.width);
-    for (const p of sampled) {
-      for (const side of lateralSteps) {
-        const edgeFrac = Math.abs(side);
-        const radiusScale = 0.44 + (1 - edgeFrac) * 0.28;
-        const powerScale = 0.9 + (1 - edgeFrac) * 1.55;
-        const targetOffset = 0.18 + (1 - edgeFrac) * 0.28;
-        this.editorState.terrainStamps.push({
-          mode: "river-cut",
-          x: (+p.x || 0) + nx * river.width * side * 0.62,
-          y: (+p.y || 0) + ny * river.width * side * 0.62,
-          radius: clamp(river.width * radiusScale, 52, 280),
-          power: clamp(river.width * powerScale, 80, 360),
-          target: floorBase - targetOffset,
-          sectionId,
-        });
+    const sectionWidth = this.variant === "river-build" ? Math.max(160, river.width * 1.2) : river.width;
+    const sectionLength = this.variant === "river-build" ? Math.max(320, (river.sectionLength || 264) * 1.15) : (river.sectionLength || 264);
+    let cx = +x || 0;
+    let cy = +y || 0;
+    let snappedAngle = river.sectionAngle || 0;
+    if (this.variant === "river-build") {
+      const snapRadius = Math.max(140, sectionWidth * 1.1);
+      let best = null;
+      for (const existing of this.editorState.riverCuts || []) {
+        const { start, end, angle: existingAngle } = riverCutEndpoints(existing);
+        for (const endpoint of [start, end]) {
+          const d = Math.hypot(endpoint.x - cx, endpoint.y - cy);
+          if (d > snapRadius) continue;
+          if (!best || d < best.d) {
+            best = { endpoint, angle: existingAngle, d };
+          }
+        }
+      }
+      if (best) {
+        snappedAngle = best.angle;
+        const step = Math.max(26, sectionLength * 0.31);
+        cx = best.endpoint.x + Math.cos(snappedAngle) * step;
+        cy = best.endpoint.y + Math.sin(snappedAngle) * step;
       }
     }
-    this._pushEditorAction({ type: "terrain-section", sectionId });
+    const floorBase = this.variant === "river-build"
+      ? Math.max(0.18, this._groundAt(cx, cy) - 0.02)
+      : (Number.isFinite(river.floor) ? river.floor : this._sampleRiverBedTarget(river.points, river.width));
+    this.editorState.riverCuts.push({
+      x: cx,
+      y: cy,
+      angle: snappedAngle,
+      width: sectionWidth,
+      length: sectionLength,
+      floor: this.variant === "river-build" ? floorBase : floorBase - 0.22,
+      sectionId,
+    });
+    this._pushEditorAction({ type: "river-cut-section", sectionId });
+    this.applyEditorState();
+    return true;
+  }
+
+  addEditorCurvedRiverSectionsAt(x, y, angle = 0, width = 120) {
+    if (this.variant === "river-build") return this.addEditorRiverCutSectionAt(x, y, angle, width);
+    const river = this.createEditorRiverPieceData(x, y, "straight", angle, width);
+    if (!river) return false;
+    const sectionId = this._editorNextId();
+    const sectionWidth = Math.max(130, river.width * 1.06);
+    const sectionLength = Math.max(210, (river.sectionLength || 264) * 0.9);
+    let cx = +x || 0;
+    let cy = +y || 0;
+    let placed = 0;
+    const cuts = this.editorState.riverCuts || [];
+    const snapRadius = Math.max(220, sectionWidth * 1.55);
+    let best = null;
+    for (const existing of cuts) {
+      const { start, end, angle: existingAngle } = riverCutEndpoints(existing);
+      for (const endpoint of [start, end]) {
+        const d = Math.hypot(endpoint.x - cx, endpoint.y - cy);
+        if (d > snapRadius) continue;
+        if (!best || d < best.d) best = { endpoint, angle: existingAngle, d };
+      }
+    }
+
+    const pushCut = (px, py, a) => {
+      const baseGround = this._groundAt(px, py);
+      this.editorState.riverCuts.push({
+        x: px,
+        y: py,
+        angle: a,
+        width: sectionWidth,
+        length: sectionLength,
+        floor: Math.max(0.18, baseGround - 0.022),
+        sectionId,
+      });
+      placed++;
+    };
+
+    if (!best) {
+      pushCut(cx, cy, angle || river.sectionAngle || 0);
+    } else {
+      const targetAngleRaw = Math.atan2(cy - best.endpoint.y, cx - best.endpoint.x);
+      const startAngle = best.angle || 0;
+      const targetAngle = normalizeAngleNear(Number.isFinite(targetAngleRaw) ? targetAngleRaw : (angle || startAngle), startAngle);
+      const delta = targetAngle - startAngle;
+      const bendSteps = Math.max(2, Math.ceil(Math.abs(delta) / (Math.PI / 16)));
+      const distSteps = Math.max(2, Math.ceil(best.d / Math.max(92, sectionLength * 0.56)));
+      const steps = clamp(Math.max(bendSteps, distSteps), 2, 8);
+      let anchorX = best.endpoint.x;
+      let anchorY = best.endpoint.y;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const turnT = smoothstep(0, 1, t);
+        const a = startAngle + delta * turnT;
+        const step = Math.max(42, sectionLength * 0.54);
+        const px = anchorX + Math.cos(a) * step;
+        const py = anchorY + Math.sin(a) * step;
+        pushCut(px, py, a);
+        const endpt = riverCutEndpoints(this.editorState.riverCuts[this.editorState.riverCuts.length - 1]).end;
+        anchorX = endpt.x;
+        anchorY = endpt.y;
+      }
+    }
+
+    if (!placed) return false;
+    this._pushEditorAction({ type: "river-cut-section", sectionId });
     this.applyEditorState();
     return true;
   }
@@ -1099,6 +1768,7 @@ export default class World {
     const before = JSON.stringify(this.editorState);
     this.editorState.roads = removeNearPoints(this.editorState.roads);
     this.editorState.rivers = removeNearPoints(this.editorState.rivers);
+    this.editorState.riverCuts = (this.editorState.riverCuts || []).filter((cut) => Math.hypot((cut.x || 0) - x, (cut.y || 0) - y) > r);
     this.editorState.bridges = (this.editorState.bridges || []).filter((bridge) => Math.hypot((bridge.x || 0) - x, (bridge.y || 0) - y) > r);
     this.editorState.docks = (this.editorState.docks || []).filter((dock) => Math.hypot((dock.x || 0) - x, (dock.y || 0) - y) > r);
     this.editorState.props = (this.editorState.props || []).filter((item) => Math.hypot((item.x || 0) - x, (item.y || 0) - y) > r);
@@ -1120,9 +1790,17 @@ export default class World {
       this.applyEditorState();
       return true;
     }
+    if (action.type === "river-cut-section") {
+      const before = this.editorState.riverCuts.length;
+      this.editorState.riverCuts = (this.editorState.riverCuts || []).filter((cut) => cut?.sectionId !== action.sectionId);
+      if (this.editorState.riverCuts.length === before) return false;
+      this.applyEditorState();
+      return true;
+    }
     const listMap = {
       road: "roads",
       river: "rivers",
+      "river-cut": "riverCuts",
       bridge: "bridges",
       dock: "docks",
       prop: "props",
@@ -1150,6 +1828,7 @@ export default class World {
     return {
       roads: this.editorState.roads.length,
       rivers: this.editorState.rivers.length,
+      riverCuts: this.editorState.riverCuts.length,
       bridges: this.editorState.bridges.length,
       docks: this.editorState.docks.length,
       props: this.editorState.props.length,
@@ -1466,13 +2145,15 @@ export default class World {
     if (Math.abs(x) > this.boundsHalfSize || Math.abs(y) > this.boundsHalfSize) return false;
 
     const s = this._sampleCell(x, y);
+    const authoredRiver = riverCutFieldAt(x, y, this.editorState?.riverCuts || []);
 
     if (s.bridge) return true;
 
     if (actor?.state?.sailing) {
-      return s.isWater || this._isNearDock(x, y, 34);
+      return s.isWater || authoredRiver?.frac > 0.18 || this._isNearDock(x, y, 34);
     }
 
+    if (authoredRiver?.frac > 0.34) return false;
     if (s.isWater) return false;
     if (s.isMountainWall) {
       if (this._canUseMountainPassAt(x, y, actor, 0.2)) return true;
@@ -4030,6 +4711,9 @@ export default class World {
       x = qx * 12;
       y = qy * 12;
       const ground = this._groundAt(x, y);
+      const mountain = riverBuildMountainBase(x, y);
+      const zone = mountain > 0.12 ? "mountain" : mountain > 0.05 ? "highlands" : "meadow";
+      const color = zone === "mountain" ? "#8a867a" : zone === "highlands" ? "#7b8d63" : "#6f9e5a";
       return this._rememberLimited(this._runtimeCellCache, cacheKey, {
         ground,
         river: 99,
@@ -4042,9 +4726,41 @@ export default class World {
         mountainBody: false,
         road: false,
         bridge: false,
-        zone: "meadow",
-        color: "#6f9e5a",
-        landColor: "#6f9e5a",
+        zone,
+        color,
+        landColor: color,
+      }, this._runtimeCellCacheLimit);
+    }
+    if (this.flatOverworld) {
+      const qx = Math.round(x / 12);
+      const qy = Math.round(y / 12);
+      const cacheKey = `${qx}|${qy}`;
+      const cached = this._runtimeCellCache.get(cacheKey);
+      if (cached) return cached;
+      x = qx * 12;
+      y = qy * 12;
+      const ground = this._groundAt(x, y);
+      const river = this._riverAt(x, y);
+      const edgeBandFrac = this._edgeMountainFrac(x, y);
+      const moisture = this._moistureAt(x, y);
+      const terrain = this._terrainOnlyCellStyle(ground, moisture, edgeBandFrac, river);
+      const isLake = terrain.zone === "ocean";
+      const isRiver = terrain.zone === "river";
+      return this._rememberLimited(this._runtimeCellCache, cacheKey, {
+        ground,
+        river,
+        moisture,
+        isWater: isLake || isRiver,
+        isLake,
+        isRiver,
+        isMountainWall: terrain.mountainBody,
+        mountainBase: terrain.mountainBase,
+        mountainBody: terrain.mountainBody,
+        road: false,
+        bridge: false,
+        zone: terrain.zone,
+        color: terrain.color,
+        landColor: terrain.color,
       }, this._runtimeCellCacheLimit);
     }
     const qx = Math.round(x / 12);
@@ -4056,6 +4772,7 @@ export default class World {
     y = qy * 12;
     const ground = this._groundAt(x, y);
     const river = this._riverAt(x, y);
+    const authoredRiver = riverCutFieldAt(x, y, this.editorState?.riverCuts || []);
     const road = this._roadAt(x, y);
     const bridge = this._bridgeAt(x, y);
 
@@ -4172,6 +4889,14 @@ export default class World {
   }
 
   _sampleMapCell(x, y) {
+    if (this.flatOverworld) {
+      const ground = this._groundAt(x, y);
+      const river = this._riverAt(x, y);
+      const edgeBandFrac = this._edgeMountainFrac(x, y);
+      const moisture = this._moistureAt(x, y);
+      const terrain = this._terrainOnlyCellStyle(ground, moisture, edgeBandFrac, river);
+      return { color: terrain.color, zone: terrain.zone, isWater: terrain.zone === "ocean" || terrain.zone === "river", landColor: terrain.color };
+    }
     const ground = this._groundAt(x, y);
     const river = this._riverAt(x, y);
     const sx = x - this.spawn.x;
@@ -4287,25 +5012,232 @@ export default class World {
     return `rgb(${r},${g},${b})`;
   }
 
+  _buildTerrainMacroFeatures() {
+    const ridgeRng = new RNG((this.seed ^ 0x6a09e667) >>> 0);
+    const basinRng = new RNG((this.seed ^ 0xbb67ae85) >>> 0);
+    const half = this.mapHalfSize - 1600;
+    const makePoint = (rng, bias = 1) => ({
+      x: rng.range(-half, half),
+      y: rng.range(-half, half) * bias,
+    });
+
+    this._terrainMacroRidges = [];
+    this._terrainMacroBasins = [];
+    this._terrainMacroPlains = [];
+
+    const majorRidges = [
+      { a: { x: -6400, y: -4200 }, b: { x: 4800, y: -1800 }, width: 1900, height: 0.42 },
+      { a: { x: -2200, y: 3200 }, b: { x: 5600, y: 1200 }, width: 1650, height: 0.36 },
+      { a: { x: -5200, y: 800 }, b: { x: -600, y: 5200 }, width: 1450, height: 0.31 },
+    ];
+    for (const ridge of majorRidges) this._terrainMacroRidges.push(ridge);
+    for (let i = 0; i < 7; i++) {
+      const a = makePoint(ridgeRng, 0.9);
+      const b = makePoint(ridgeRng, 0.9);
+      this._terrainMacroRidges.push({
+        a,
+        b,
+        width: ridgeRng.range(1000, 2400),
+        height: ridgeRng.range(0.12, 0.34),
+      });
+    }
+
+    const majorBasins = [
+      { x: -5200, y: -1200, radius: 3200, depth: 0.5 },
+      { x: 3100, y: 3400, radius: 3600, depth: 0.42 },
+      { x: 1800, y: -4100, radius: 3000, depth: 0.36 },
+      { x: -1200, y: 1200, radius: 2400, depth: 0.24 },
+    ];
+    for (const basin of majorBasins) this._terrainMacroBasins.push(basin);
+    for (let i = 0; i < 12; i++) {
+      this._terrainMacroBasins.push({
+        x: basinRng.range(-half, half),
+        y: basinRng.range(-half, half),
+        radius: basinRng.range(1800, 4200),
+        depth: basinRng.range(0.16, 0.42),
+      });
+    }
+
+    this._terrainMacroPlains.push(
+      { x: 900, y: -1200, radius: 3600, target: 0.35, strength: 0.98 },
+      { x: 3000, y: 1800, radius: 2500, target: 0.37, strength: 0.72 },
+      { x: 4200, y: -2600, radius: 2600, target: 0.39, strength: 0.88 },
+      { x: -3200, y: 2600, radius: 2200, target: 0.4, strength: 0.56 }
+    );
+  }
+
+  _terrainMacroDelta(x, y) {
+    let delta = 0;
+    for (const ridge of this._terrainMacroRidges || []) {
+      const d = distToSeg(x, y, ridge.a.x, ridge.a.y, ridge.b.x, ridge.b.y);
+      const t = clamp(1 - d / Math.max(1, ridge.width), 0, 1);
+      if (t <= 0) continue;
+      delta += ridge.height * Math.pow(t, 1.5);
+    }
+    for (const basin of this._terrainMacroBasins || []) {
+      const d = Math.hypot(x - basin.x, y - basin.y);
+      const t = clamp(1 - d / Math.max(1, basin.radius), 0, 1);
+      if (t <= 0) continue;
+      delta -= basin.depth * Math.pow(t, 1.8);
+    }
+    return delta;
+  }
+
+  _terrainMacroPlainInfo(x, y) {
+    let best = null;
+    for (const plain of this._terrainMacroPlains || []) {
+      const d = Math.hypot(x - plain.x, y - plain.y);
+      const t = clamp(1 - d / Math.max(1, plain.radius), 0, 1);
+      if (t <= 0) continue;
+      const mix = Math.pow(t, 1.25) * (plain.strength || 1);
+      if (!best || mix > best.mix) best = { target: plain.target, mix };
+    }
+    return best;
+  }
+
+  _terrainOnlyCellStyle(ground, moisture, edgeBandFrac = 0, river = 99) {
+    const seaLevel = 0.19;
+    const riverCut = clamp(1 - river / 2.4, 0, 1);
+    const edgeMountain = edgeBandFrac > 0.16 && ground > 0.62;
+    const mountainBody = edgeBandFrac > 0.3 && ground > 0.78;
+    const highland = clamp((ground - 0.42) / 0.38, 0, 1);
+
+    let zone = "meadow";
+    let color = "#7da85d";
+
+    if (ground <= seaLevel) {
+      zone = "ocean";
+      color = ground < -0.08 ? "#183a59" : ground < 0.04 ? "#214869" : "#3c6481";
+    } else if (riverCut > 0.5 && ground < 0.42) {
+      zone = "river";
+      color = riverCut > 0.78 ? "#29566f" : "#557a87";
+    } else if (mountainBody || ground > 0.86) {
+      zone = "mountain";
+      color = ground > 1.0 ? "#d3d8de" : "#8b949d";
+    } else if (edgeMountain || ground > 0.54) {
+      zone = "highlands";
+      color = ground > 0.7 ? "#989f8d" : "#7f896d";
+    } else if (highland > 0.45) {
+      zone = moisture > 0.52 ? "highlands" : "stone flats";
+      color = moisture > 0.52 ? "#748e63" : "#8d8b7b";
+    } else if (moisture > 0.64) {
+      zone = "greenwood";
+      color = "#668f4d";
+    } else if (moisture < 0.28) {
+      zone = "old fields";
+      color = "#94a063";
+    }
+
+    return {
+      zone,
+      color,
+      mountainBase: edgeMountain,
+      mountainBody,
+    };
+  }
+
+  _townPlatformInfos() {
+    if (this.variant === "river-build") return [];
+    const infos = [];
+    const seen = new Set();
+    const addTownPlatform = (town, isStart = false) => {
+      if (!town) return;
+      const key = `${town.id ?? town.name ?? "town"}:${Math.round((town.x || 0) / 20)}:${Math.round((town.y || 0) / 20)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      let maxReach = isStart ? 210 : 120;
+      for (const building of town.buildings || []) {
+        const dx = building.x || 0;
+        const dy = building.y || 0;
+        const halfW = (building.w || 36) * 0.7;
+        const halfH = (building.h || 36) * 0.7;
+        maxReach = Math.max(maxReach, Math.hypot(dx, dy) + Math.max(halfW, halfH) + 24);
+      }
+      const coreRadius = Math.max(isStart ? 340 : 190, Math.ceil(maxReach + (isStart ? 70 : 46)));
+      const apronRadius = Math.max(coreRadius + (isStart ? 210 : 130), Math.ceil(coreRadius * (isStart ? 1.58 : 1.46)));
+      infos.push({
+        x: town.x,
+        y: town.y,
+        coreRadius,
+        apronRadius,
+        targetGround: isStart ? 0.38 : (town.coastal ? 0.33 : 0.355),
+      });
+    };
+    addTownPlatform(this.startTown, true);
+    for (const town of this.towns || []) addTownPlatform(town, false);
+    return infos;
+  }
+
   _groundAt(x, y) {
     const rawX = x;
     const rawY = y;
-    const qx = Math.round(x / 12);
-    const qy = Math.round(y / 12);
+    const quantStep = this.variant === "river-build" ? 2 : 12;
+    const qx = Math.round(x / quantStep);
+    const qy = Math.round(y / quantStep);
     const key = `${qx}|${qy}`;
     const cached = this._groundCache.get(key);
     if (cached != null) return cached;
-    x = qx * 12;
-    y = qy * 12;
+    if (this.variant === "river-build") {
+      x = rawX;
+      y = rawY;
+    } else {
+      x = qx * quantStep;
+      y = qy * quantStep;
+    }
     let value = 0.46;
     if (this.variant !== "river-build") {
-      const base = fbm(x * 0.00042, y * 0.00042, this.seed, 5);
-      const detail = fbm(x * 0.0012, y * 0.0012, this.seed + 77, 3);
-      const d = Math.hypot(x, y);
-      const mainland = clamp(1 - d / 4200, 0, 1) * 0.14;
-      const farRidges = fbm(x * 0.00018 + 40, y * 0.00018 - 17, this.seed + 404, 3) * 0.10;
-      const wildCoast = clamp((d - 9000) / 2600, 0, 1) * 0.035;
-      value = base * 0.76 + detail * 0.17 + mainland + farRidges - wildCoast;
+      value = mainWorldFlatGround(x, y, this.mapHalfSize, this.seed);
+      value += this._terrainMacroDelta(rawX, rawY);
+      const plain = this._terrainMacroPlainInfo(rawX, rawY);
+      if (plain) value = value * (1 - plain.mix) + plain.target * plain.mix;
+    } else {
+      value = riverBuildBaseGround(rawX, rawY);
+      if (this.riverBuildSource) {
+        const dx = rawX - this.riverBuildSource.x;
+        const dy = rawY - this.riverBuildSource.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < this.riverBuildSource.radius) {
+          const t = clamp(1 - dist / this.riverBuildSource.radius, 0, 1);
+          value -= Math.pow(t, 1.7) * this.riverBuildSource.depth;
+        }
+      }
+    }
+    if (this.variant === "river-build") {
+      const cutField = this._riverBuildCutFieldAt(rawX, rawY);
+      if (cutField?.frac > 0.001) {
+        const t = clamp(cutField.frac, 0, 1);
+        const base = value;
+        const floor = Number.isFinite(cutField.floor) ? cutField.floor : 0.22;
+        const u = 1 - t;
+        const vShape = Math.pow(u, 2.8);
+        const target = floor + vShape * (base - floor);
+        value = Math.min(value, target);
+      }
+    } else {
+      const river = this._riverAt(rawX, rawY);
+      if (river < 3.4) {
+        const trench = clamp(1 - river / 3.4, 0, 1);
+        const dryFloor = Math.min(value - 0.03, 0.12 + Math.max(0, river - 0.7) * 0.03);
+        const target = dryFloor + Math.pow(1 - trench, 2.15) * (value - dryFloor);
+        value = Math.min(value - trench * 0.12, target);
+      }
+      const cutField = riverCutFieldAt(rawX, rawY, this.editorState?.riverCuts || []);
+      if (cutField?.frac > 0.001) {
+        const t = clamp(cutField.frac, 0, 1);
+        const base = value;
+        const floor = Number.isFinite(cutField.floor) ? cutField.floor : Math.max(0.18, base - 0.032);
+        const u = 1 - t;
+        const target = floor + Math.pow(u, 2.25) * (base - floor);
+        value = Math.min(value, target);
+      }
+      for (const townPlatform of this._townPlatformInfos()) {
+        const d = Math.hypot(rawX - townPlatform.x, rawY - townPlatform.y);
+        if (d >= townPlatform.apronRadius) continue;
+        const t = clamp(1 - d / townPlatform.apronRadius, 0, 1);
+        const mix = Math.pow(t, 1.28);
+        const target = townPlatform.targetGround - (1 - mix) * 0.028;
+        value = Math.max(value, value * (1 - mix) + target * mix);
+      }
     }
     for (const stamp of this.editorState?.terrainStamps || []) {
       const dx = rawX - stamp.x;
@@ -4447,7 +5379,7 @@ export default class World {
       });
     }
 
-    const tributaryCount = 10;
+    const tributaryCount = 24;
     const joinSlots = [0.28, 0.52, 0.76];
     for (let i = 0; i < tributaryCount; i++) {
       const main = bands[i % bands.length];
@@ -4475,7 +5407,7 @@ export default class World {
         ay: sourceAnchor.y,
         joinBand: main,
         joinT,
-        width: this._rng.range(0.40, 0.62),
+        width: this._rng.range(0.46, 0.72),
         bends: 24 + ((i % 3) * 5),
         amplitude: this._rng.range(90, 220),
         seed: hash2(this.seed, 401 + i * 29),
@@ -5137,8 +6069,9 @@ export default class World {
 
   _edgeMountainFrac(x, y) {
     const edgeAbs = Math.max(Math.abs(x), Math.abs(y));
-    const bandStart = this.mapHalfSize - 720;
-    return clamp((edgeAbs - bandStart) / 720, 0, 1);
+    const bandWidth = this.flatOverworld ? 2200 : 720;
+    const bandStart = this.mapHalfSize - bandWidth;
+    return clamp((edgeAbs - bandStart) / Math.max(1, bandWidth), 0, 1);
   }
 
   _mountainVisualAt(x, y, ground, isWater) {
@@ -5220,6 +6153,9 @@ export default class World {
   }
 
   _buildRoadCaches() {
+    this._groundCache.clear();
+    this._runtimeRawSampleCache.clear();
+    this._runtimeCellCache.clear();
     this._roadSegmentBuckets = new Map();
     this._roadSegmentCount = 0;
     let segId = 1;
@@ -5291,6 +6227,14 @@ export default class World {
   }
 
   _riverAt(x, y) {
+    for (const townPlatform of this._townPlatformInfos()) {
+      const d = Math.hypot(x - townPlatform.x, y - townPlatform.y);
+      if (d < townPlatform.coreRadius) return 999;
+      if (d < townPlatform.apronRadius) {
+        const ramp = clamp((d - townPlatform.coreRadius) / Math.max(1, townPlatform.apronRadius - townPlatform.coreRadius), 0, 1);
+        if (ramp < 0.8) return 999;
+      }
+    }
     let best = 999;
     const bands = this._riverBands || [];
     if (!bands.length) return best;
@@ -6077,9 +7021,7 @@ export default class World {
     const edge = this.mapHalfSize * 0.9;
     const seeds = [
       [0, edge], [0, -edge], [edge, 0], [-edge, 0],
-      [edge * 0.72, edge * 0.72], [-edge * 0.72, edge * 0.72],
-      [edge * 0.72, -edge * 0.72], [-edge * 0.72, -edge * 0.72],
-      [edge * 0.48, edge], [-edge * 0.48, edge], [edge * 0.48, -edge], [-edge * 0.48, -edge],
+      [edge * 0.72, edge * 0.72], [-edge * 0.72, -edge * 0.72],
     ];
     let id = nextId;
     for (const [x, y] of seeds) {
@@ -6095,16 +7037,101 @@ export default class World {
     const nudgeLand = (p, radius = 180) => {
       if (!p) return p;
       const bad = this._sampleCell(p.x, p.y);
-      if ((!bad.isWater && !bad.isMountainWall && !this._isNearMountainWall(p.x, p.y, 28))) return p;
+      const inRiver = this._isNearRiverChannel(p.x, p.y, 26);
+      if ((!bad.isWater && !bad.isMountainWall && !inRiver && !this._isNearMountainWall(p.x, p.y, 28))) return p;
       return this._findSafeLandPatchNear(p.x, p.y, radius) || p;
     };
-    const groups = ["camps", "waystones", "shrines", "caches", "dragonLairs", "secrets", "herbs"];
+    const isTownSiteDry = (x, y, shorelinePad = 120) => {
+      const sample = this._sampleCell(x, y);
+      if (sample.isWater || sample.isMountainWall || this._isNearMountainWall(x, y, 28)) return false;
+      if (this._isNearRiverChannel(x, y, shorelinePad)) return false;
+      const probes = [
+        [0, 0], [90, 0], [-90, 0], [0, 90], [0, -90],
+        [140, 0], [-140, 0], [0, 140], [0, -140],
+      ];
+      return probes.every(([ox, oy]) => {
+        const s = this._sampleCell(x + ox, y + oy);
+        return !s.isWater && !this._isNearRiverChannel(x + ox, y + oy, 24);
+      });
+    };
+    const townFootprintSafe = (town) => {
+      if (!town) return true;
+      const pts = [
+        { x: town.x, y: town.y, pad: 72 },
+        { x: town.x - 38, y: town.y + 42, pad: 60 },
+        { x: town.x + 46, y: town.y - 34, pad: 56 },
+      ];
+      if (!isTownSiteDry(town.x, town.y, 132)) return false;
+      for (const building of town.buildings || []) {
+        pts.push({
+          x: town.x + (building.x || 0),
+          y: town.y + (building.y || 0),
+          pad: Math.max(58, Math.max(building.w || 0, building.h || 0) * 1.05),
+        });
+      }
+      return !pts.some((p) => this._isNearRiverChannel(p.x, p.y, p.pad));
+    };
+    const shoveTownFullyOffRiver = (town, radius = 960) => {
+      if (!town || townFootprintSafe(town)) return;
+      for (let r = 160; r <= radius; r += 48) {
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 24) {
+          const px = town.x + Math.cos(a) * r;
+          const py = town.y + Math.sin(a) * r;
+          if (!isTownSiteDry(px, py, 140)) continue;
+          const safe = this._findSafeLandPatchNear(px, py, 220);
+          if (!safe) continue;
+          const oldX = town.x;
+          const oldY = town.y;
+          town.x = safe.x;
+          town.y = safe.y;
+          if (townFootprintSafe(town)) return;
+          town.x = oldX;
+          town.y = oldY;
+        }
+      }
+    };
+    const recenterTownBuildings = (town) => {
+      if (!town?.buildings?.length) return;
+      let sumX = 0;
+      let sumY = 0;
+      for (const building of town.buildings) {
+        sumX += building.x || 0;
+        sumY += building.y || 0;
+      }
+      const avgX = sumX / town.buildings.length;
+      const avgY = sumY / town.buildings.length;
+      for (const building of town.buildings) {
+        building.x = (building.x || 0) - avgX;
+        building.y = (building.y || 0) - avgY;
+      }
+    };
+    const groups = ["camps", "waystones", "shrines", "caches", "dragonLairs", "secrets", "herbs", "docks"];
     for (const key of groups) {
       for (const p of this[key] || []) {
         const safe = nudgeLand(p, key === "dragonLairs" ? 320 : 220);
         p.x = safe.x;
         p.y = safe.y;
       }
+    }
+    for (const town of this.towns || []) {
+      if (!townFootprintSafe(town)) {
+        const safe = this._findSafeLandPatchNear(town.x, town.y, 1600) || town;
+        town.x = safe.x;
+        town.y = safe.y;
+        shoveTownFullyOffRiver(town, 2600);
+        recenterTownBuildings(town);
+      }
+    }
+    if (this.startTown && !townFootprintSafe(this.startTown)) {
+      const safe = this._findSafeLandPatchNear(this.startTown.x, this.startTown.y, 2200) || this.startTown;
+      this.startTown.x = safe.x;
+      this.startTown.y = safe.y;
+      this.spawn.x = safe.x;
+      this.spawn.y = safe.y;
+      shoveTownFullyOffRiver(this.startTown, 3200);
+      recenterTownBuildings(this.startTown);
+      this.spawn.x = this.startTown.x;
+      this.spawn.y = this.startTown.y;
     }
   }
 
@@ -6113,12 +7140,41 @@ export default class World {
     this.roads = [];
     this._roadSeen = new Set();
 
+    const typeRank = {
+      spawn: 6,
+      town: 5,
+      pass: 5,
+      waystone: 4,
+      starter: 4,
+      dock: 3,
+      camp: 2,
+      dungeon: 2,
+    };
+    const isHub = (type) => type === "spawn" || type === "town" || type === "pass" || type === "waystone";
+    const isMinor = (type) => type === "dock" || type === "camp" || type === "dungeon";
+    const roadKindFor = (a, b) => {
+      if (isHub(a.type) && isHub(b.type)) return "main";
+      if (a.type === "starter" || b.type === "starter") return "main";
+      if (a.type === "dock" || b.type === "dock") return "connector";
+      return "trail";
+    };
+    const roadWidthFor = (a, b) => {
+      const kind = roadKindFor(a, b);
+      if (kind === "main") return 34;
+      if (kind === "connector") return 28;
+      return 22;
+    };
     const add = (p, type) => {
       if (p) this.roadNodes.push({ x: p.x, y: p.y, type });
     };
+    const connect = (a, b, width = null, kind = null) => {
+      if (!a || !b || a === b) return;
+      const finalKind = kind || roadKindFor(a, b);
+      const finalWidth = width || roadWidthFor(a, b);
+      this._addRoadSegment(a, b, finalWidth, true, finalKind);
+    };
 
     add(this.spawn, "spawn");
-
     for (const p of this.towns) add(p, "town");
     for (const p of this.waystones) add(p, "waystone");
     for (const p of this.camps) add(p, "camp");
@@ -6126,68 +7182,103 @@ export default class World {
     for (const p of this.dungeons) add(p, "dungeon");
     for (const p of this._getPublicPassRoadNodes()) add(p, "pass");
 
-    const starterDistances = [760];
-    const starterAngles = [Math.PI * 0.12, Math.PI * 1.12];
-    for (let dist of starterDistances) {
-      for (let ang of starterAngles) {
+    const starterDistances = [760, 1180];
+    const starterAngles = [Math.PI * 0.1, Math.PI * 0.52, Math.PI * 1.04, Math.PI * 1.52];
+    for (const dist of starterDistances) {
+      for (const ang of starterAngles) {
         const sx = this.spawn.x + Math.cos(ang) * dist;
         const sy = this.spawn.y + Math.sin(ang) * dist;
         const safe = this._findSafeLandPatchNear(sx, sy, 220);
-        if (safe) {
-          this.roadNodes.push({ x: safe.x, y: safe.y, type: "starter" });
-        }
+        if (safe) this.roadNodes.push({ x: safe.x, y: safe.y, type: "starter" });
       }
     }
 
-    const mainNodes = this.roadNodes.filter((n) => (
-      n.type === "spawn" || n.type === "town" || n.type === "waystone" ||
-      n.type === "camp" || n.type === "dock" || n.type === "dungeon" || n.type === "starter"
-    ));
-    const spawnNode = mainNodes.find((n) => n.type === "spawn");
-    const starters = mainNodes.filter((n) => n.type === "starter");
-    const remaining = mainNodes
-      .filter((n) => n !== spawnNode && n.type !== "starter")
-      .sort((a, b) => Math.hypot(a.x - spawnNode.x, a.y - spawnNode.y) - Math.hypot(b.x - spawnNode.x, b.y - spawnNode.y));
-
-    const connected = [spawnNode];
-
-    for (const next of starters) {
-        this._addRoadSegment(spawnNode, next, 24, true);
-      connected.push(next);
+    const deduped = [];
+    const nodeSeen = new Set();
+    for (const node of this.roadNodes) {
+      const bucket = `${node.type}:${Math.round(node.x / 110)}|${Math.round(node.y / 110)}`;
+      if (nodeSeen.has(bucket)) continue;
+      nodeSeen.add(bucket);
+      deduped.push(node);
     }
+    this.roadNodes = deduped.sort((a, b) => (typeRank[b.type] || 0) - (typeRank[a.type] || 0));
 
-    for (const next of remaining) {
-      let best = spawnNode;
+    const spawnNode = this.roadNodes.find((n) => n.type === "spawn");
+    if (!spawnNode) return;
+
+    const hubNodes = this.roadNodes
+      .filter((n) => isHub(n.type) || n.type === "starter")
+      .sort((a, b) => Math.hypot(a.x - spawnNode.x, a.y - spawnNode.y) - Math.hypot(b.x - spawnNode.x, b.y - spawnNode.y));
+    const mainConnected = [spawnNode];
+
+    for (const node of hubNodes) {
+      if (node === spawnNode) continue;
+      let best = null;
       let bestScore = Infinity;
-      for (const candidate of connected) {
-        const dist = Math.hypot(next.x - candidate.x, next.y - candidate.y);
-        const fromSpawn = Math.hypot(candidate.x - spawnNode.x, candidate.y - spawnNode.y);
-        const score = dist + fromSpawn * 0.16;
+      for (const candidate of mainConnected) {
+        const dist = Math.hypot(node.x - candidate.x, node.y - candidate.y);
+        if (dist < 180 || dist > 5600) continue;
+        const radial = Math.abs(
+          Math.hypot(node.x - spawnNode.x, node.y - spawnNode.y) -
+          Math.hypot(candidate.x - spawnNode.x, candidate.y - spawnNode.y)
+        );
+        const score = dist + radial * 0.22 + (candidate.type === "starter" ? 180 : 0);
         if (score < bestScore) {
           bestScore = score;
           best = candidate;
         }
       }
-
-        this._addRoadSegment(best, next, next.type === "dock" || next.type === "dungeon" ? 24 : 26, true);
-      connected.push(next);
+      if (!best) best = spawnNode;
+      connect(best, node, node.type === "starter" ? 30 : null, "main");
+      mainConnected.push(node);
     }
 
-    const loopNodes = mainNodes.filter((n) => n.type !== "starter" && n.type !== "spawn");
-    for (const node of loopNodes) {
-      const neighbors = loopNodes
+    const trunkLoopNodes = hubNodes.filter((n) => n !== spawnNode && n.type !== "starter");
+    for (const node of trunkLoopNodes) {
+      const neighbors = trunkLoopNodes
         .filter((other) => other !== node)
         .map((other) => ({
           other,
           dist: Math.hypot(other.x - node.x, other.y - node.y),
         }))
-        .filter((entry) => entry.dist >= 700 && entry.dist <= 3000)
+        .filter((entry) => entry.dist >= 1200 && entry.dist <= 4200)
         .sort((a, b) => a.dist - b.dist)
-        .slice(0, node.type === "pass" || node.type === "dock" ? 2 : 1);
-      for (const entry of neighbors) {
-        const width = node.type === "dock" || entry.other.type === "dock" ? 24 : 22;
-        this._addRoadSegment(node, entry.other, width, true);
+        .slice(0, node.type === "pass" ? 3 : 2);
+      for (const entry of neighbors) connect(node, entry.other, 30, "main");
+    }
+
+    const minorNodes = this.roadNodes.filter((n) => isMinor(n.type));
+    const anchors = this.roadNodes.filter((n) => isHub(n.type) || n.type === "starter" || n.type === "dock");
+    for (const node of minorNodes) {
+      let best = null;
+      let bestScore = Infinity;
+      for (const candidate of anchors) {
+        if (candidate === node) continue;
+        const dist = Math.hypot(node.x - candidate.x, node.y - candidate.y);
+        if (dist < 160 || dist > 3200) continue;
+        const score = dist + (candidate.type === "dock" && node.type !== "dock" ? 120 : 0);
+        if (score < bestScore) {
+          bestScore = score;
+          best = candidate;
+        }
       }
+      if (best) connect(best, node);
+    }
+
+    const localLinks = this.roadNodes.filter((n) => n.type !== "spawn");
+    for (const node of localLinks) {
+      const wants = node.type === "dock" ? 2 : node.type === "camp" ? 1 : 0;
+      if (!wants) continue;
+      const neighbors = localLinks
+        .filter((other) => other !== node && other.type !== "starter")
+        .map((other) => ({
+          other,
+          dist: Math.hypot(other.x - node.x, other.y - node.y),
+        }))
+        .filter((entry) => entry.dist >= 600 && entry.dist <= 2400)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, wants);
+      for (const entry of neighbors) connect(node, entry.other, node.type === "dock" ? 26 : 22, node.type === "dock" ? "connector" : "trail");
     }
 
     this._mapDirty = true;
@@ -6225,17 +7316,17 @@ export default class World {
     this._roadPath = path;
   }
 
-  _addRoadSegment(a, b, width = 24, visible = true) {
+  _addRoadSegment(a, b, width = 24, visible = true, kind = "trail") {
     const keyA = `${a.x | 0},${a.y | 0}:${b.x | 0},${b.y | 0}`;
     const keyB = `${b.x | 0},${b.y | 0}:${a.x | 0},${a.y | 0}`;
 
     if (this._roadSeen.has(keyA) || this._roadSeen.has(keyB)) return;
     this._roadSeen.add(keyA);
 
-    this._addRoad(a.x, a.y, b.x, b.y, width, visible);
+    this._addRoad(a.x, a.y, b.x, b.y, width, visible, kind);
   }
 
-  _addRoad(ax, ay, bx, by, width = 24, visible = true) {
+  _addRoad(ax, ay, bx, by, width = 24, visible = true, kind = "trail") {
     const midX = (ax + bx) * 0.5;
     const midY = (ay + by) * 0.5;
     const dx = bx - ax;
@@ -6245,7 +7336,8 @@ export default class World {
     const nx = -dy / len;
     const ny = dx / len;
 
-    const bend = (fbm(midX * 0.0006, midY * 0.0006, hash2(ax | 0, ay | 0, this.seed), 2) - 0.5) * Math.min(90, len * 0.08);
+    const bendBias = kind === "main" ? 0.42 : kind === "connector" ? 0.7 : 1;
+    const bend = (fbm(midX * 0.0006, midY * 0.0006, hash2(ax | 0, ay | 0, this.seed), 2) - 0.5) * Math.min(90, len * 0.08) * bendBias;
     let cx = midX + nx * bend;
     let cy = midY + ny * bend;
 
@@ -6265,11 +7357,19 @@ export default class World {
     }
 
     const points = [];
-    const steps = Math.max(14, Math.ceil(len / 42));
+    const steps = Math.max(14, Math.ceil(len / (kind === "main" ? 36 : 42)));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      points.push(quadPoint(ax, ay, cx, cy, bx, by, t));
+      const p = quadPoint(ax, ay, cx, cy, bx, by, t);
+      if (!p) continue;
+      const sway = Math.sin(t * Math.PI) * Math.sin((t * 2.35 + 0.18) * Math.PI) * Math.min(kind === "main" ? 20 : 34, len * 0.024) * bendBias;
+      points.push({
+        x: p.x + nx * sway,
+        y: p.y + ny * sway,
+      });
     }
+
+    this._stabilizeRoadPoints(points, width, kind);
 
     let minX = Infinity;
     let minY = Infinity;
@@ -6297,7 +7397,72 @@ export default class World {
       maxX,
       maxY,
       points,
+      kind,
     });
+  }
+
+  _roadTravelPenalty(x, y) {
+    const raw = this._sampleCellRaw(x, y);
+    if (raw.isMountain || this._isNearMountainWall(x, y, 30)) return 1200;
+    let penalty = 0;
+    if (raw.isWater) penalty += 1600;
+    if (this._isNearRiverChannel(x, y, 24)) penalty += 420;
+    const ground = raw.ground ?? this._groundAt(x, y);
+    if (ground < 0.27) penalty += (0.27 - ground) * 4200;
+    if (ground > 0.82) penalty += (ground - 0.82) * 1800;
+    return penalty;
+  }
+
+  _stabilizeRoadPoints(points, width = 24, kind = "trail") {
+    if (!Array.isArray(points) || points.length < 3) return;
+    const searchRadius = kind === "main" ? 220 : kind === "connector" ? 180 : 150;
+    const directStep = Math.max(24, Math.min(54, (width || 24) * 1.2));
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const point = points[i];
+      const next = points[i + 1];
+      if (!prev || !point || !next) continue;
+
+      const raw = this._sampleCellRaw(point.x, point.y);
+      const badHere =
+        raw.isWater ||
+        raw.isMountain ||
+        this._isNearMountainWall(point.x, point.y, 24) ||
+        this._isNearRiverChannel(point.x, point.y, 20);
+      if (!badHere) continue;
+
+      const dx = next.x - prev.x;
+      const dy = next.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      let best = null;
+      const directSamples = [
+        { x: (prev.x + next.x) * 0.5, y: (prev.y + next.y) * 0.5 },
+        { x: point.x + nx * directStep, y: point.y + ny * directStep },
+        { x: point.x - nx * directStep, y: point.y - ny * directStep },
+      ];
+
+      for (const candidate of directSamples) {
+        const s = this._sampleCellRaw(candidate.x, candidate.y);
+        if (s.isWater || s.isMountain) continue;
+        if (this._isNearMountainWall(candidate.x, candidate.y, 22)) continue;
+        if (this._isNearRiverChannel(candidate.x, candidate.y, 18)) continue;
+        best = candidate;
+        break;
+      }
+
+      if (!best) best = this._findSafeLandPatchNear(point.x, point.y, searchRadius);
+      if (!best) continue;
+
+      point.x = point.x * 0.35 + best.x * 0.65;
+      point.y = point.y * 0.35 + best.y * 0.65;
+    }
+
+    points[0] = { x: points[0].x, y: points[0].y };
+    points[points.length - 1] = { x: points[points.length - 1].x, y: points[points.length - 1].y };
   }
 
   _roadAt(x, y) {
@@ -6321,7 +7486,7 @@ export default class World {
     return false;
   }
 
-  _makeRoadPiece(points, width, visible = true) {
+  _makeRoadPiece(points, width, visible = true, kind = "trail") {
     if (!points || points.length < 2) return null;
     const first = points[0];
     const last = points[points.length - 1];
@@ -6351,6 +7516,7 @@ export default class World {
       maxX,
       maxY,
       points,
+      kind,
     };
   }
 
@@ -6397,7 +7563,7 @@ export default class World {
           if (shouldCreatePassage) {
             this._ensureRoadsidePassage(enterShore, exitShore);
             const beforePts = pts.slice(sliceStart, Math.max(sliceStart, enterIndex));
-            const beforeRoad = this._makeRoadPiece(beforePts, road.width, road.visible);
+            const beforeRoad = this._makeRoadPiece(beforePts, road.width, road.visible, road.kind || "trail");
             if (beforeRoad) rebuiltRoads.push(beforeRoad);
             sliceStart = exitIndex;
             splitRoad = true;
@@ -6443,17 +7609,18 @@ export default class World {
 
       if (splitRoad) {
         const tailPts = pts.slice(sliceStart);
-        const tailRoad = this._makeRoadPiece(tailPts, road.width, road.visible);
+        const tailRoad = this._makeRoadPiece(tailPts, road.width, road.visible, road.kind || "trail");
         if (tailRoad) rebuiltRoads.push(tailRoad);
       } else {
         rebuiltRoads.push(road);
       }
     }
 
-    this.roads = this._appendManualRoadCrossings(rebuiltRoads);
+    this.roads = this._appendManualRoadCrossings(this._trimRoadsOffWater(rebuiltRoads));
     const repaired = this._repairMissingBridges(candidates);
     this._rebuildRoadPath();
-    const merged = this._dedupeBridgeClusters(this._mergeBridgeCandidates(repaired));
+    const merged = this._dedupeBridgeClusters(this._mergeBridgeCandidates(repaired))
+      .filter((bridge) => this._isValidBridgeCandidate(bridge));
     this.bridges = this._appendManualBridges(merged);
     this._ensureEndpointDockAccess();
     this._cleanupBridgeDockConflicts();
@@ -6748,12 +7915,12 @@ export default class World {
       out.push(this._makeRoadPiece([
         { x: start.x - dirX * stub, y: start.y - dirY * stub },
         { x: start.x, y: start.y },
-      ], Math.max(28, seed.width || 40), true));
+      ], Math.max(28, seed.width || 40), true, "main"));
 
       out.push(this._makeRoadPiece([
         { x: end.x, y: end.y },
         { x: end.x + dirX * stub, y: end.y + dirY * stub },
-      ], Math.max(28, seed.width || 40), true));
+      ], Math.max(28, seed.width || 40), true, "main"));
     }
 
     return out.filter(Boolean);
@@ -7100,7 +8267,89 @@ export default class World {
   }
 
   _ensureSpawnSafety() {
+    const safeSpawn = this._findSafeLandPatchNear(this.spawn.x, this.spawn.y, 2800);
+    if (safeSpawn) {
+      this.spawn.x = safeSpawn.x;
+      this.spawn.y = safeSpawn.y;
+      if (this.startTown) {
+        this.startTown.x = safeSpawn.x;
+        this.startTown.y = safeSpawn.y;
+      }
+    }
+    this._sanitizePoiPlacements();
     this._finalizeBridges();
+  }
+
+  _trimRoadsOffWater(roads) {
+    const out = [];
+    for (const road of roads || []) {
+      const pts = road?.points || [];
+      if (pts.length < 2) continue;
+
+      let chunk = [];
+      const flush = () => {
+        if (chunk.length >= 2) {
+          const piece = this._makeRoadPiece(chunk, road.width, road.visible, road.kind || "trail");
+          if (piece) out.push(piece);
+        }
+        chunk = [];
+      };
+
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const steps = Math.max(2, Math.ceil(Math.hypot(dx, dy) / 42));
+        let lastDry = null;
+
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          const x = a.x + dx * t;
+          const y = a.y + dy * t;
+          const dry = !this._sampleCellRaw(x, y).isWater || !!this.getBridgeAt(x, y);
+          if (dry) {
+            const point = { x, y };
+            if (!chunk.length) chunk.push(point);
+            else {
+              const prev = chunk[chunk.length - 1];
+              if (Math.hypot(prev.x - x, prev.y - y) > 8) chunk.push(point);
+            }
+            lastDry = point;
+          } else if (chunk.length) {
+            if (lastDry) {
+              const prev = chunk[chunk.length - 1];
+              if (Math.hypot(prev.x - lastDry.x, prev.y - lastDry.y) > 8) chunk.push(lastDry);
+            }
+            flush();
+          }
+        }
+      }
+
+      flush();
+    }
+    return out;
+  }
+
+  _isValidBridgeCandidate(bridge) {
+    if (!bridge?.path || bridge.path.length < 2) return false;
+    const start = bridge.start || bridge.path[0];
+    const end = bridge.end || bridge.path[bridge.path.length - 1];
+    if (!start || !end) return false;
+
+    const startSample = this._sampleCellRaw(start.x, start.y);
+    const endSample = this._sampleCellRaw(end.x, end.y);
+    if (startSample.isWater || endSample.isWater) return false;
+
+    let waterHits = 0;
+    const checks = 16;
+    for (let i = 1; i < checks; i++) {
+      const t = i / checks;
+      const x = start.x + (end.x - start.x) * t;
+      const y = start.y + (end.y - start.y) * t;
+      if (this._sampleCellRaw(x, y).isWater) waterHits++;
+    }
+    return waterHits >= 3;
   }
 
   _sampleCellRaw(x, y) {
@@ -7163,7 +8412,7 @@ export default class World {
         const px = x + Math.cos(a) * r;
         const py = y + Math.sin(a) * r;
         const s = this._sampleCellRaw(px, py);
-        if (!s.isWater && !s.isMountain && !this._isNearMountainWall(px, py, 26)) return { x: px, y: py };
+        if (!s.isWater && !s.isMountain && !this._isNearMountainWall(px, py, 26) && !this._isNearRiverChannel(px, py, 30)) return { x: px, y: py };
       }
     }
     return null;
@@ -7245,6 +8494,12 @@ export default class World {
   }
 
   _queueWarmupTasks() {
+    if (this.flatOverworld) {
+      this._warmupTasks = [
+        () => this._buildMapPreviewWarmupChunk(),
+      ];
+      return;
+    }
     this._warmupTasks = [
       () => this._buildMapPreviewWarmupChunk(),
       () => this._generateTreesChunk(),
@@ -7391,7 +8646,7 @@ export default class World {
         colorRow.push(s.color);
         tileRow.push(s.color);
         zoneRow.push(s.zone || "");
-        revRow.push(false);
+        revRow.push(!!this.flatOverworld);
 
         if (state.ctx) {
           state.ctx.fillStyle = s.color;
@@ -7467,7 +8722,7 @@ export default class World {
         colorRow.push(s.color);
         tileRow.push(s.color);
         zoneRow.push(s.zone || "");
-        revRow.push(false);
+        revRow.push(!!this.flatOverworld);
 
         if (ctx) {
           ctx.fillStyle = s.color;
@@ -7640,7 +8895,7 @@ export default class World {
       const tx = point.x;
       const ty = point.y;
       const s = this._sampleCell(tx, ty);
-      if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain" || s.zone === "old fields") && !s.isWater && !s.bridge && !s.road) {
+      if ((s.zone === "stone flats" || s.zone === "highlands" || s.zone === "mountain" || s.zone === "old fields") && !s.isWater && !s.bridge && !s.road && !this._isNearRiverChannel(tx, ty, 18)) {
         this._addRock({
           x: tx,
           y: ty,
@@ -7649,9 +8904,12 @@ export default class World {
           zone: s.zone,
         });
         if (this._rng.next() < 0.34) {
+          const rx = tx + this._rng.range(-34, 34);
+          const ry = ty + this._rng.range(-28, 28);
+          if (this._isNearRiverChannel(rx, ry, 16)) continue;
           this._addRock({
-            x: tx + this._rng.range(-34, 34),
-            y: ty + this._rng.range(-28, 28),
+            x: rx,
+            y: ry,
             seed: (this.seed + state.index * 367 + 59) >>> 0,
             scale: 0.42 + this._rng.next() * 0.26,
             zone: s.zone,
@@ -7706,7 +8964,7 @@ export default class World {
       const tx = point.x;
       const ty = point.y;
       const s = this._sampleCell(tx, ty);
-      if (s.isWater || s.isMountainWall || s.bridge || s.road || this._isNearBridgeDeck(tx, ty, 24)) continue;
+      if (s.isWater || s.isMountainWall || s.bridge || s.road || this._isNearBridgeDeck(tx, ty, 24) || this._isNearRiverChannel(tx, ty, 20)) continue;
 
       let type = null;
       if (s.zone === "forest" || s.zone === "greenwood" || s.zone === "deep wilds") {
@@ -7730,9 +8988,12 @@ export default class World {
       });
 
       if ((s.zone === "forest" || s.zone === "greenwood" || s.zone === "deep wilds") && this._rng.next() < 0.52) {
+        const cx = tx + this._rng.range(-38, 38);
+        const cy = ty + this._rng.range(-34, 34);
+        if (this._isNearRiverChannel(cx, cy, 18)) continue;
         this._addClutter({
-          x: tx + this._rng.range(-38, 38),
-          y: ty + this._rng.range(-34, 34),
+          x: cx,
+          y: cy,
           seed: (this.seed + state.index * 521 + 47) >>> 0,
           scale: 0.42 + this._rng.next() * 0.22,
           type: "bush",
@@ -7943,7 +9204,11 @@ export default class World {
 
   _isNearRiverChannel(x, y, pad = 18) {
     const river = this._riverAt(x, y);
-    return river < this._riverWaterLimit + pad / 42;
+    if (river < this._riverWaterLimit + pad / 42) return true;
+    const authoredRiver = riverCutFieldAt(x, y, this.editorState?.riverCuts || []);
+    if (!authoredRiver) return false;
+    const width = Math.max(48, authoredRiver.width || 120);
+    return authoredRiver.frac > Math.max(0.06, 0.28 - pad / Math.max(120, width));
   }
 
   _drawRock(ctx, x, y, seed, scale, zone = "stone flats") {

@@ -74,20 +74,10 @@ function wait(ms) {
 }
 
 function getLaunchMode() {
-  const params = new URLSearchParams(window.location.search);
-  const queryMode = params.get("mode");
-  if (queryMode === "build" || queryMode === "play" || queryMode === "river-build") return queryMode;
-  try {
-    const saved = localStorage.getItem("broke-knight-launch-mode");
-    if (saved === "build" || saved === "play" || saved === "river-build") return saved;
-  } catch {}
-  return "river-build";
+  return "play";
 }
 
 function setLaunchMode(mode) {
-  try {
-    localStorage.setItem("broke-knight-launch-mode", mode);
-  } catch {}
   bootModePlay?.classList.toggle("is-active", mode === "play");
   bootModeBuild?.classList.toggle("is-active", mode === "build");
   bootModeRiverBuild?.classList.toggle("is-active", mode === "river-build");
@@ -96,16 +86,7 @@ function setLaunchMode(mode) {
 function waitForModeChoice() {
   let mode = getLaunchMode();
   setLaunchMode(mode);
-  return new Promise((resolve) => {
-    const choose = (nextMode) => {
-      mode = nextMode;
-      setLaunchMode(mode);
-      resolve(mode);
-    };
-    bootModePlay?.addEventListener("click", () => choose("play"), { once: true });
-    bootModeBuild?.addEventListener("click", () => choose("build"), { once: true });
-    bootModeRiverBuild?.addEventListener("click", () => choose("river-build"), { once: true });
-  });
+  return Promise.resolve(mode);
 }
 
 function nextPaint() {
@@ -138,7 +119,7 @@ window.addEventListener("unhandledrejection", (event) => {
 showBootLoading("Preparing startup...");
 
 async function bootBrokeKnight3D() {
-  setBootLoadingStatus("Choose mode...");
+  setBootLoadingStatus("Opening play mode...");
   setBootLoadingPercent(0.01);
   const launchMode = await waitForModeChoice();
   setBootLoadingStatus(
@@ -153,7 +134,7 @@ async function bootBrokeKnight3D() {
   setBootLoadingStatus("Loading 3D engine...");
   setBootLoadingPercent(0.03);
   await nextPaint();
-  const { default: World3DApp } = await import("./render3d/world3d.js?v=20260524s");
+  const { default: World3DApp } = await import("./render3d/world3d.js?v=20260529g");
   setBootLoadingStatus("Starting renderer...");
   setBootLoadingPercent(0.07);
   await nextPaint();

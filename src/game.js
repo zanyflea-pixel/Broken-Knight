@@ -17,7 +17,7 @@ import UI from "./ui.js";
 import Save from "./save.js";
 
 const DEV_RESET_CONFIRM_MS = 2500;
-const DEV_TOOL_ACTION_COUNT = 11;
+const DEV_TOOL_ACTION_COUNT = 12;
 const SHOP_ACTION_COUNT = 4;
 const TOWN_ACTION_COUNT = 9;
 const EQUIPMENT_SLOTS = ["weapon", "armor", "helm", "boots", "ring", "trinket"];
@@ -92,7 +92,7 @@ export default class Game {
 
     this.input = new Input(window);
     this.ui = new UI(canvas);
-    this.save = new Save("broke-knight-save-v106");
+    this.save = new Save("broke-knight-save-v108");
     this._bootSaveData = this.save.load?.() || this.save.read?.() || this.save.get?.() || null;
     this._hadBootSave = !!this._bootSaveData;
     if (Number.isFinite(+this._bootSaveData?.seed)) this.seed = this._bootSaveData.seed | 0;
@@ -303,6 +303,7 @@ export default class Game {
       godMode: false,
       showProfiler: false,
       showSpikeMonitor: false,
+      speedBoost: false,
     };
     this.editor = {
       tool: "road",
@@ -1291,17 +1292,16 @@ export default class Game {
               this.editor.riverAngle || 0,
               Math.max(56, this.editor.strokeWidth * 0.95),
             )
-          : this.world?.addEditorRiverPieceAt?.(
+          : this.world?.addEditorCurvedRiverSectionsAt?.(
               x,
               y,
-              "straight",
               this.editor.riverAngle || 0,
               Math.max(56, this.editor.strokeWidth * 0.95),
             );
         if (ok) {
-          this.editor.lastStatus = this.worldVariant === "river-build" ? "Placed river trench cut" : "Placed straight river section";
+          this.editor.lastStatus = this.worldVariant === "river-build" ? "Placed river trench cut" : "Placed curved river chain";
           this._notifyEditorWorldChanged();
-          this._msg(this.worldVariant === "river-build" ? "Editor: river trench placed" : "Editor: straight river placed", 0.8);
+          this._msg(this.worldVariant === "river-build" ? "Editor: river trench placed" : "Editor: curved river placed", 0.8);
         }
       } catch (err) {
         console.error("Editor river placement failed", err);
@@ -1595,6 +1595,7 @@ export default class Game {
       if (keys[i] && this.input.wasPressed(keys[i])) this._runDevToolAction(i + 1);
     }
     if (this.input.wasPressed("h") || this.input.wasPressed("H")) this._runDevToolAction(11);
+    if (this.input.wasPressed("y") || this.input.wasPressed("Y")) this._runDevToolAction(12);
   }
 
   _handleDevToolsMouse() {
@@ -1671,6 +1672,10 @@ export default class Game {
     if (action === 11) {
       this._toggleSpikeMonitor();
     }
+    if (action === 12) {
+      this.dev.speedBoost = !this.dev.speedBoost;
+      this._msg(this.dev.speedBoost ? "Dev: speed boost ON" : "Dev: speed boost OFF", 1.0);
+    }
   }
 
   _toggleProfiler() {
@@ -1697,6 +1702,7 @@ export default class Game {
       this._isDevResetConfirmLive() ? "9 reset to a new game (press again now)" : "9 reset to a new game (confirm)",
       `0 profiler ${this.dev?.showProfiler ? "ON" : "OFF"} (F2 quick toggle)`,
       `H hitch monitor ${this.dev?.showSpikeMonitor ? "ON" : "OFF"} (F1 quick toggle)`,
+      `Y speed boost ${this.dev?.speedBoost ? "ON" : "OFF"}`,
       `FPS ${Math.round(perf.fps || 0)} | Frame ${(perf.frameMs || 0).toFixed(1)}ms | Jank ${(perf.frameJank || 0).toFixed(1)}ms`,
       `Explored cells: ${this.world?.exportDiscovery?.()?.length || 0}`,
       `World span: ${((this.world?.mapHalfSize || 0) * 2).toLocaleString()} units`,
@@ -2086,6 +2092,7 @@ export default class Game {
     let speed = 150 + st.move * 160;
     if ((this.hero.state?.dashT || 0) > 0) speed *= 1.45;
     if (this.hero.state?.sailing) speed *= 1.18;
+    if (this.dev?.speedBoost) speed *= 2.2;
     speed *= this._heroTerrainSample?.moveModifier || 1;
     return speed;
   }
@@ -2631,9 +2638,9 @@ export default class Game {
     if (this.worldVariant === "river-build") {
       return [
         `River Build  ${this._editorToolName()}${this.editor.dragging ? " (placing)" : ""}${riverPiece}`,
-        `Flat sandbox. Click to stamp V-shaped trench cuts. Rotate the trench and judge the shape only.`,
-        `Cuts ${snap.terrainStamps || 0}  ${status}`,
-        `Brush ${Math.round(this.editor.brushSize)}  Width ${Math.round(this.editor.strokeWidth)}  Pow ${Math.round(this.editor.terrainPower)}`,
+        `Flat sandbox. Click River Seg to stamp a V trench. Judge the cut only.`,
+        `Cuts ${snap.riverCuts || 0}  ${status}`,
+        `Width ${Math.round(this.editor.strokeWidth)}  Pow ${Math.round(this.editor.terrainPower)}  Rot ${Math.round((((this.editor.riverAngle || 0) * 180) / Math.PI) % 360)}deg`,
         `Mouse ${Math.round(this.mouse.worldX || 0)}, ${Math.round(this.mouse.worldY || 0)}`,
       ];
     }
@@ -2705,20 +2712,7 @@ export default class Game {
       cursorY += Math.ceil(group.tools.length / cols) * (toolH + toolGap) + sectionGap;
     }
 
-    if (this.worldVariant === "river-build") {
-      buttons.push({
-        action: "tool:river",
-        label: "River Seg",
-        hotkey: "2",
-        x: leftX,
-        y: cursorY,
-        w: 284,
-        h: 36,
-        kind: "tool",
-        active: this.editor.tool === "river",
-      });
-      cursorY += 46;
-    } else {
+    if (this.worldVariant !== "river-build") {
       buttons.push({ action: "label:River Pieces", label: "River Pieces", x: leftX, y: cursorY, w: 160, h: groupTitleH, kind: "label" });
       cursorY += groupTitleH + 8;
       const riverPieceButtons = [
@@ -2733,20 +2727,28 @@ export default class Game {
       }
       cursorY += 46;
     }
-    buttons.push({ action: "river-rot-left", label: "Rotate L", x: leftX, y: cursorY, w: 138, h: 24, kind: "control" });
-    buttons.push({ action: "river-rot-right", label: "Rotate R", x: leftX + 146, y: cursorY, w: 138, h: 24, kind: "control" });
+    if (this.worldVariant !== "river-build") {
+      buttons.push({ action: "river-rot-left", label: "Rotate L", x: leftX, y: cursorY, w: 138, h: 24, kind: "control" });
+      buttons.push({ action: "river-rot-right", label: "Rotate R", x: leftX + 146, y: cursorY, w: 138, h: 24, kind: "control" });
+    }
 
     const controlY = y + 58;
     const controlX = x + w - 156;
     const miniW = 24;
     const bigW = 68;
     const controlH = 22;
-    const controlRows = [
-      { label: "Brush", value: `${Math.round(this.editor.brushSize)}`, down: "brush-down", up: "brush-up" },
-      { label: "Width", value: `${Math.round(this.editor.strokeWidth)}`, down: "width-down", up: "width-up" },
-      { label: "Power", value: `${Math.round(this.editor.terrainPower)}`, down: "power-down", up: "power-up" },
-      { label: "Scale", value: `${this.editor.propScale.toFixed(1)}`, down: "scale-down", up: "scale-up" },
-    ];
+    const controlRows = this.worldVariant === "river-build"
+      ? [
+          { label: "Width", value: `${Math.round(this.editor.strokeWidth)}`, down: "width-down", up: "width-up" },
+          { label: "Power", value: `${Math.round(this.editor.terrainPower)}`, down: "power-down", up: "power-up" },
+          { label: "Rotate", value: `${Math.round((((this.editor.riverAngle || 0) * 180) / Math.PI) % 360)}deg`, down: "river-rot-left", up: "river-rot-right" },
+        ]
+      : [
+          { label: "Brush", value: `${Math.round(this.editor.brushSize)}`, down: "brush-down", up: "brush-up" },
+          { label: "Width", value: `${Math.round(this.editor.strokeWidth)}`, down: "width-down", up: "width-up" },
+          { label: "Power", value: `${Math.round(this.editor.terrainPower)}`, down: "power-down", up: "power-up" },
+          { label: "Scale", value: `${this.editor.propScale.toFixed(1)}`, down: "scale-down", up: "scale-up" },
+        ];
     for (let i = 0; i < controlRows.length; i++) {
       const rowY = controlY + 16 + i * 28;
       const row = controlRows[i];
@@ -2772,9 +2774,6 @@ export default class Game {
           { action: "undo", label: "Undo", kind: "action" },
           { action: "revert-base", label: "Revert", kind: "action-danger" },
           { action: "clear", label: "Clear", kind: "action-danger" },
-          { action: "save", label: "Save", kind: "action" },
-          { action: "export", label: "Export", kind: "action" },
-          { action: "import", label: "Import", kind: "action" },
         ]
       : [
         { action: "undo", label: "Undo", kind: "action" },
@@ -3644,6 +3643,7 @@ export default class Game {
   }
 
   _spawnInitialEnemies() {
+    if (this.world?.flatOverworld) return;
     const camps = (this.world.camps || [])
       .map((camp) => ({ camp, d: dist2(this.hero.x, this.hero.y, camp.x, camp.y) }))
       .filter((v) => v.d > 560 * 560)
@@ -3704,6 +3704,7 @@ export default class Game {
   }
 
   _spawnWorldEnemies(dt) {
+    if (this.world?.flatOverworld) return;
     this._spawnTimer -= dt;
     if (this._spawnTimer > 0) return;
     this._spawnTimer = 1.25;
@@ -3732,6 +3733,7 @@ export default class Game {
   }
 
   _respawnCampEnemies(dt) {
+    if (this.world?.flatOverworld) return;
     this._campRespawnT -= dt;
     if (this._campRespawnT > 0) return;
     this._campRespawnT = 5.5;
@@ -4283,6 +4285,7 @@ export default class Game {
     const check = (arr, r, predicate = null) => {
       const r2 = r * r;
       for (const p of arr || []) {
+        if (!p) continue;
         if (predicate && !predicate(p)) continue;
         if (dist2(this.hero.x, this.hero.y, p.x, p.y) <= r2) return p;
       }
@@ -6773,6 +6776,7 @@ export default class Game {
   }
 
   _saveGame() {
+    if (this.world?.flatOverworld) return;
     try {
       this.save.save({
         seed: this.seed,
@@ -6836,6 +6840,10 @@ export default class Game {
   }
 
   _loadGame() {
+    if (this.world?.flatOverworld) {
+      this._bootSaveData = null;
+      return;
+    }
     try {
       const data = this._bootSaveData || this.save.load?.() || this.save.read?.() || this.save.get?.();
       this._bootSaveData = null;

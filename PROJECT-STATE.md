@@ -5,7 +5,7 @@ This file is the local source of truth for future Codex chats and automations.
 ## Canonical Entry
 
 - Root URL: `http://127.0.0.1:8000/`
-- Canonical 3D URL: `http://127.0.0.1:8000/index-3d.html?cb=20260524s`
+- Canonical 3D URL: `http://127.0.0.1:8000/index-3d.html?cb=20260529g`
 - Root should forward to the canonical 3D URL.
 
 ## Canonical Run Flow
