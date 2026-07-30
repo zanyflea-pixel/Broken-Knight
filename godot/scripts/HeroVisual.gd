@@ -1,6 +1,6 @@
 extends Node3D
 
-const IMPORTED_HERO_SCENE := preload("res://assets/hero/hero_equipped_shoulders_test.glb")
+const IMPORTED_HERO_SCENE := preload("res://assets/hero/hero_base_body.glb")
 const AXE_SCENE:=preload("res://assets/items/axe_v2.glb")
 const PICKAXE_SCENE:=preload("res://assets/items/pickaxe.glb")
 const FISHING_POLE_SCENE:=preload("res://assets/items/fishing_pole.glb")
