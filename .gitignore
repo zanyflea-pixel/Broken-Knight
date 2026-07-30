@@ -31,7 +31,6 @@ all-project.txt
 ~$*
 
 # Local Godot editor
-tools/godot-4.7/
 
 # Python cache
 __pycache__/
