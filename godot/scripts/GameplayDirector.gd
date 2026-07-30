@@ -191,16 +191,7 @@ func _process(delta: float) -> void:
     if not (player.has_method("is_warrior") and player.is_warrior()):
         player.mana = minf(player.max_mana, player.mana + 2.2 * delta)
     for i in range(4): cooldowns[i] = maxf(0.0, cooldowns[i] - delta)
-    if player.has_method("is_warrior") and player.is_warrior():
-        if Input.is_key_pressed(KEY_1): _warrior_sword_slash()
-        if Input.is_key_pressed(KEY_2): _warrior_shield_bash()
-        if Input.is_key_pressed(KEY_3): _warrior_charge()
-        if Input.is_key_pressed(KEY_4): _warrior_war_cry()
-    else:
-        if Input.is_key_pressed(KEY_1): _cast_spark()
-        if Input.is_key_pressed(KEY_2): _cast_nova()
-        if Input.is_key_pressed(KEY_3): _cast_blink()
-        if Input.is_key_pressed(KEY_4): _cast_orb()
+
     if Input.is_key_pressed(KEY_5): player.use_health_potion()
     if Input.is_key_pressed(KEY_6): player.use_mana_potion()
     _tick_projectiles(delta)
@@ -229,6 +220,26 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
     if not (event is InputEventKey and event.pressed and not event.echo): return
+
+    if event.keycode >= KEY_1 and event.keycode <= KEY_4:
+        if not is_instance_valid(player):
+            return
+
+        if player.has_method("is_warrior") and player.is_warrior():
+            match event.keycode:
+                KEY_1: _warrior_sword_slash()
+                KEY_2: _warrior_shield_bash()
+                KEY_3: _warrior_charge()
+                KEY_4: _warrior_war_cry()
+        else:
+            match event.keycode:
+                KEY_1: _cast_spark()
+                KEY_2: _cast_nova()
+                KEY_3: _cast_blink()
+                KEY_4: _cast_orb()
+
+        get_viewport().set_input_as_handled()
+        return
     if event.keycode == KEY_F3: for i in range(5): _spawn_minion(16.0 + i * 5.0, float(i))
     elif event.keycode == KEY_F4: _clear_minions()
     elif event.keycode == KEY_F5: player.hp = player.max_hp; player.mana = player.max_mana

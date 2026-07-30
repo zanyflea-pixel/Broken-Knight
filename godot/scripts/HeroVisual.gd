@@ -1,6 +1,6 @@
 extends Node3D
 
-const IMPORTED_HERO_SCENE := preload("res://assets/hero/hero_base_body.glb")
+const IMPORTED_HERO_SCENE := preload("res://assets/hero/hero_equipped_shoulders_test.glb")
 const AXE_SCENE:=preload("res://assets/items/axe_v2.glb")
 const PICKAXE_SCENE:=preload("res://assets/items/pickaxe.glb")
 const FISHING_POLE_SCENE:=preload("res://assets/items/fishing_pole.glb")
@@ -80,6 +80,8 @@ var _warrior_equipped := false
 var _imported_animation_player: AnimationPlayer
 var _imported_skeleton: Skeleton3D
 var _sword_forearm_bone := -1
+var _sword_forearm_base_rotation := Quaternion.IDENTITY
+var _sword_forearm_base_ready := false
 var _current_imported_animation: StringName = &""
 var _air_animation_state: StringName = &""
 var _action_animation_state: StringName = &""
@@ -274,6 +276,10 @@ func play_action(kind: String) -> void:
 		# animation player updates the skeleton each frame.
 		_action_animation_state=&""
 		_sword_action_grip_ready=false
+		_sword_forearm_base_ready=false
+		if is_instance_valid(_imported_skeleton) and _sword_forearm_bone>=0:
+			_sword_forearm_base_rotation=_imported_skeleton.get_bone_pose_rotation(_sword_forearm_bone)
+			_sword_forearm_base_ready=true
 		_action_time=.70
 		return
 	var action_names := {
@@ -597,25 +603,33 @@ func _update_warrior_weapon_action()->void:
 		death_phase=clampf(_imported_animation_player.current_animation_position/maxf(.01,_imported_animation_player.get_animation(&"Death").length),0.0,1.0)
 	var body_spin:=phase*TAU if rolling else -death_phase*1.38
 	if _action_kind=="sword" and _action_time>0.0 and is_instance_valid(_imported_skeleton) and _sword_forearm_bone>=0:
-		var animated_elbow:=_imported_skeleton.get_bone_pose_rotation(_sword_forearm_bone)
+		if not _sword_forearm_base_ready:
+			_sword_forearm_base_rotation=_imported_skeleton.get_bone_pose_rotation(_sword_forearm_bone)
+			_sword_forearm_base_ready=true
 		var elbow_extension:=sin(phase*PI)*deg_to_rad(52.0)
-		_imported_skeleton.set_bone_pose_rotation(_sword_forearm_bone,animated_elbow*Quaternion(Vector3.RIGHT,elbow_extension))
+		_imported_skeleton.set_bone_pose_rotation(
+			_sword_forearm_bone,
+			_sword_forearm_base_rotation*Quaternion(Vector3.RIGHT,elbow_extension)
+		)
 		_imported_skeleton.force_update_all_bone_transforms()
+	elif _sword_forearm_base_ready and is_instance_valid(_imported_skeleton) and _sword_forearm_bone>=0:
+		_imported_skeleton.set_bone_pose_rotation(
+			_sword_forearm_bone,
+			_sword_forearm_base_rotation
+		)
+		_imported_skeleton.force_update_all_bone_transforms()
+		_sword_forearm_base_ready=false
 	if is_instance_valid(_sword_root):
 		if is_instance_valid(_sword_attachment):
 			# The blade is permanently rolled 90 degrees in the grip. During
 			# the attack it makes one clean forward chop angled across the
 			# body instead of following a perfectly vertical swing plane.
 			if _action_kind=="sword" and _action_time>0.0:
-				if not _sword_action_grip_ready:
-					var default_grip_basis:=Basis(Vector3.UP,global_rotation.y)*Basis.from_euler(Vector3(-.12,.05,-.12))*Basis(Vector3.UP,PI*.5)
-					_sword_action_grip_basis=_sword_attachment.global_basis.orthonormalized().inverse()*default_grip_basis
-					_sword_action_grip_ready=true
-				var angled_chop_axis:=(global_basis.x*.90-global_basis.z*.42).normalized()
-				var chop_axis:=(_sword_attachment.global_basis.orthonormalized().inverse()*angled_chop_axis).normalized()
-				var chop_angle:=sin(phase*PI)*PI*.78
-				_sword_root.position=SWORD_GRIP_LOCAL_POSITION
-				_sword_root.basis=Basis(chop_axis,chop_angle)*_sword_action_grip_basis
+				# Keep the sword attached to the animated hand.
+				# The arm moves the weapon; the weapon no longer rotates independently.
+				var local_grip_basis:=Basis.from_euler(Vector3(-.12,.05,-.12))*Basis(Vector3.UP,PI*.5)
+				var local_grip:=Transform3D(local_grip_basis,SWORD_GRIP_LOCAL_POSITION)
+				_sword_root.global_transform=_sword_attachment.global_transform*local_grip
 			else:
 				_sword_action_grip_ready=false
 				_sword_root.global_position=_sword_attachment.to_global(SWORD_GRIP_LOCAL_POSITION)
