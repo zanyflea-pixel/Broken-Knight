@@ -1,86 +1,51 @@
-# Broke Knight Project State
+# Broken Knight Project State
 
-This file is the local source of truth for future Codex chats and automations.
+## Canonical build
 
-## Canonical Entry
+The canonical game is the Godot project at `godot/project.godot`. The old
+JavaScript/browser prototype is retired and is not a recovery or runtime
+dependency.
 
-- Root URL: `http://127.0.0.1:8000/`
-- Canonical 3D URL: `http://127.0.0.1:8000/index-3d.html?cb=20260529g`
-- Root should forward to the canonical 3D URL.
+## Runtime
 
-## Canonical Run Flow
+- Engine: Godot 4.7 stable
+- Main scene: `res://scenes/Main.tscn`
+- Game launcher: `play-godot-world.bat`
+- Editor launcher: `start-godot.ps1`
+- Window title/project identity: Broken Knight
 
-Start the project with:
+## Authoring
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-broke-knight-server.ps1
-```
+- World/game source: `godot/`
+- Current hero source: `blender/hero_restart_rigged.blend`
+- Current hero export script: `blender/scripts/export_rigged_hero.py`
+- Current hero runtime asset: `godot/assets/hero/hero_base_body.glb`
+- Other Blender source files without checkpoint-style names are retained as
+  regeneration sources for enemies, weapons, and armor.
 
-Stop it with:
+## Generated content
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\stop-broke-knight-server.ps1
-```
+These locations are disposable and ignored:
 
-The startup script should print:
+- `godot/.godot/`
+- `godot/artifacts/`
+- `blender/preview/`
+- `blender/previews/`
+- `tmp/`
+- `*.blend1`
+- runtime logs and capture output
 
-- root URL
-- canonical 3D URL
-- current branch
-- current commit
+Deleting `godot/.godot/` causes one slower import pass on the next launch, but
+does not remove game source.
 
-## Health Checks
+Godot `.import` sidecars are not disposable. They preserve per-asset import
+settings such as the hero animation post-import hook and must remain beside
+their source assets.
 
-Run the full project check:
+## Change rules
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\check-broke-knight.ps1 -BaseUrl http://127.0.0.1:8000
-```
-
-Run the dedicated 3D entry check:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\check-3d-entry.ps1 -BaseUrl http://127.0.0.1:8000
-```
-
-The 3D entry check verifies:
-
-- root still forwards to the 3D entry
-- the 3D page still has the boot loader
-- the 3D page still has both canvases
-- the live server is serving the expected 3D bootstrap
-
-## Known Recovery Sources
-
-- Automation memory:
-  - `C:\Users\Jimmy\.codex\automations\3d-update\memory.md`
-- Automation worktree:
-  - `C:\Users\Jimmy\.codex\worktrees\2463\Broke Knight`
-- Local recovery copy:
-  - `C:\Users\Jimmy\Desktop\Broke Knight Recover`
-
-## Operational Rules
-
-- Treat `index-3d.html` as the real 3D entrypoint.
-- Do not let `index.html` drift into a separate shell again.
-- Prefer one active branch and commit milestone often.
-- Before broad 3D UI changes, keep a backup or commit point.
-- If the page feels wrong, verify the canonical URL first before debugging deeper systems.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+1. Make gameplay changes only in `godot/`.
+2. Export 3D assets from canonical Blender source into `godot/assets/`.
+3. Keep generated reviews and caches out of the project root.
+4. Run targeted scripts from `godot/tools/verification/` after changes.
+5. Never treat a timestamped checkpoint as a canonical source file.

@@ -1,0 +1,37 @@
+{
+  "valid": true,
+  "checks": {
+    "single_connected_surface": true,
+    "no_boundary_edges": true,
+    "manifold": true,
+    "single_material": true,
+    "sufficient_resolution": true,
+    "sane_width": true,
+    "sane_depth": true,
+    "sane_height": true
+  },
+  "metrics": {
+    "vertices": 38944,
+    "faces": 38942,
+    "components": 1,
+    "boundary_edges": 0,
+    "non_manifold_edges": 0,
+    "material_slots": 1,
+    "bounds": {
+      "x": [
+        -0.11793102324008942,
+        0.11793099343776703
+      ],
+      "y": [
+        -0.15190079808235168,
+        0.09894407540559769
+      ],
+      "z": [
+        0.7669999003410339,
+        1.1355922222137451
+      ]
+    }
+  },
+  "blend_path": "C:\\Users\\Jimmy\\Desktop\\Broken Knight\\blender\\hero_head_test.blend",
+  "source_script": "C:\\Users\\Jimmy\\Desktop\\Broken Knight\\blender\\scripts\\build_hero_base.py"
+}

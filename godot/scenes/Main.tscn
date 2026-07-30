@@ -1,0 +1,252 @@
+[gd_scene load_steps=13 format=3 uid="uid://broken_knight_main"]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/HeroController.gd" id="2_hero"]
+[ext_resource type="Script" path="res://scripts/HeroVisual.gd" id="3_visual"]
+[ext_resource type="Script" path="res://scripts/WorldMap.gd" id="4_map"]
+[ext_resource type="Script" path="res://scripts/OldHud.gd" id="5_hud"]
+[ext_resource type="Script" path="res://scripts/Minimap.gd" id="6_minimap"]
+[ext_resource type="Script" path="res://scripts/GameplayDirector.gd" id="7_gameplay"]
+[ext_resource type="Script" path="res://scripts/AdminMenu.gd" id="8_adminmenu"]
+[ext_resource type="Script" path="res://scripts/HeroMenu.gd" id="9_heromenu"]
+[ext_resource type="Script" path="res://scripts/CollectionMenu.gd" id="10_collection"]
+[ext_resource type="Script" path="res://scripts/VendorMenu.gd" id="11_vendor"]
+[ext_resource type="Script" path="res://scripts/CraftingMenu.gd" id="12_crafting"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.55
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.38
+mid_height = 0.9
+radial_segments = 12
+rings = 6
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldRoot" type="Node3D" parent="."]
+
+[node name="TerrainRoot" type="Node3D" parent="WorldRoot"]
+
+[node name="RiverRoot" type="Node3D" parent="WorldRoot"]
+
+[node name="RoadRoot" type="Node3D" parent="WorldRoot"]
+
+[node name="BridgeRoot" type="Node3D" parent="WorldRoot"]
+
+[node name="TownRoot" type="Node3D" parent="WorldRoot"]
+
+[node name="PropsRoot" type="Node3D" parent="WorldRoot"]
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.819152, -0.538986, 0.196175, 0, 0.34202, 0.939693, -0.573576, -0.769751, 0.280166, 0, 90, 0)
+light_energy = 1.7
+shadow_enabled = true
+directional_shadow_max_distance = 420.0
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+
+[node name="AdminCamera" type="Camera3D" parent="."]
+position = Vector3(0, 5200, 0)
+rotation = Vector3(-1.5708, 0, 0)
+projection = 1
+size = 7600.0
+far = 12000.0
+
+[node name="Player" type="CharacterBody3D" parent="."]
+script = ExtResource("2_hero")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+position = Vector3(0, 1.4, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="Visual" type="Node3D" parent="Player"]
+script = ExtResource("3_visual")
+position = Vector3(0, 0.62, 0)
+
+[node name="CameraPivot" type="Node3D" parent="Player"]
+position = Vector3(0, 1.9, 0)
+
+[node name="SpringArm3D" type="SpringArm3D" parent="Player/CameraPivot"]
+spring_length = 5.6
+collision_mask = 1
+rotation = Vector3(0, 0, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Player/CameraPivot/SpringArm3D"]
+current = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+fov = 56.0
+far = 1000.0
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="GameplayDirector" type="Node3D" parent="."]
+script = ExtResource("7_gameplay")
+
+[node name="OldHud" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("5_hud")
+
+[node name="Minimap" type="Control" parent="UI"]
+clip_contents = true
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -238.0
+offset_top = 14.0
+offset_right = -18.0
+offset_bottom = 234.0
+grow_horizontal = 0
+mouse_filter = 2
+script = ExtResource("6_minimap")
+
+[node name="WorldMap" type="Control" parent="UI"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("4_map")
+
+[node name="VendorMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("11_vendor")
+
+[node name="CraftingMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("12_crafting")
+
+[node name="AdminHint" type="Label" parent="UI"]
+visible = false
+offset_left = 24.0
+offset_top = 22.0
+offset_right = 420.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(1, 0.88, 0.48, 1)
+theme_override_font_sizes/font_size = 20
+text = "ADMIN OVERVIEW  •  F2 return to player"
+
+[node name="PauseMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="AdminMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("8_adminmenu")
+
+[node name="HeroMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("9_heromenu")
+
+[node name="BagMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("10_collection")
+
+[node name="SkillsMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("10_collection")
+mode = "skills"
+
+[node name="QuestMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("10_collection")
+mode = "quests"
+
+[node name="Dimmer" type="ColorRect" parent="UI/PauseMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.52)
+
+[node name="MenuPanel" type="Panel" parent="UI/PauseMenu"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -190.0
+offset_top = -120.0
+offset_right = 190.0
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuTitle" type="Label" parent="UI/PauseMenu/MenuPanel"]
+offset_left = 28.0
+offset_top = 24.0
+offset_right = 352.0
+offset_bottom = 54.0
+theme_override_font_sizes/font_size = 28
+text = "Paused"
+
+[node name="MenuButtons" type="VBoxContainer" parent="UI/PauseMenu/MenuPanel"]
+offset_left = 28.0
+offset_top = 72.0
+offset_right = 352.0
+offset_bottom = 196.0
+theme_override_constants/separation = 14
+
+[node name="ResumeButton" type="Button" parent="UI/PauseMenu/MenuPanel/MenuButtons"]
+custom_minimum_size = Vector2(0, 42)
+text = "Resume"
+
+[node name="CloseGameButton" type="Button" parent="UI/PauseMenu/MenuPanel/MenuButtons"]
+custom_minimum_size = Vector2(0, 42)
+text = "Close Game"

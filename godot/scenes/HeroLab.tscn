@@ -1,0 +1,148 @@
+[gd_scene load_steps=8 format=3 uid="uid://broken_knight_hero_lab"]
+
+[ext_resource type="Script" path="res://scripts/HeroLab.gd" id="1_lab"]
+[ext_resource type="Script" path="res://scripts/HeroController.gd" id="2_hero"]
+[ext_resource type="Script" path="res://scripts/HeroVisual.gd" id="3_visual"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.55
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_floor"]
+albedo_color = Color(0.37, 0.43, 0.41, 1)
+roughness = 0.96
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.58, 0.66, 0.76, 1)
+roughness = 0.98
+
+[sub_resource type="BoxMesh" id="BoxMesh_stage"]
+size = Vector3(20, 0.2, 20)
+
+[node name="HeroLab" type="Node3D"]
+script = ExtResource("1_lab")
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+
+[node name="KeyLight" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.789352, -0.543042, 0.286842, 0, 0.46793, 0.883765, -0.613941, -0.697618, 0.369402, 0, 7.2618, 0)
+
+[node name="FillLight" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.848048, 0.275637, -0.453154, 0, 0.854912, 0.518773, 0.529919, -0.439385, 0.724444, 0, 5.68789, 0)
+
+[node name="RimLight" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.829038, 0.258819, -0.495722, 0, 0.88641, 0.462902, 0.559193, 0.383022, -0.735024, 0, 6.76228, 0)
+
+[node name="Stage" type="Node3D" parent="."]
+
+[node name="Floor" type="MeshInstance3D" parent="Stage"]
+mesh = SubResource("BoxMesh_stage")
+material_override = SubResource("StandardMaterial3D_floor")
+
+[node name="BackdropWall" type="MeshInstance3D" parent="Stage"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.5, -7.2)
+mesh = SubResource("BoxMesh_stage")
+material_override = SubResource("StandardMaterial3D_wall")
+scale = Vector3(1, 0.45, 0.06)
+
+[node name="Player" type="CharacterBody3D" parent="."]
+script = ExtResource("2_hero")
+walk_speed = 5.2
+sprint_speed = 8.5
+camera_zoom_min = 1.4
+camera_zoom_max = 6.0
+camera_zoom_step = 0.25
+hero_gold = 219
+hero_title = "Frontline Adventurer"
+max_hp = 228.0
+hp = 228.0
+max_mana = 109.0
+mana = 109.0
+relic_shards = 3
+relic_target = 7
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+position = Vector3(0, 1.4, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="Visual" type="Node3D" parent="Player"]
+script = ExtResource("3_visual")
+position = Vector3(0, 0.95, 0)
+
+[node name="CameraPivot" type="Node3D" parent="Player"]
+position = Vector3(0, 1.9, 0)
+
+[node name="SpringArm3D" type="SpringArm3D" parent="Player/CameraPivot"]
+spring_length = 3.1
+collision_mask = 1
+rotation = Vector3(0, 0, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Player/CameraPivot/SpringArm3D"]
+current = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
+fov = 44.0
+far = 200.0
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="BuildLabel" type="Label" parent="UI"]
+offset_left = 18.0
+offset_top = 14.0
+offset_right = 360.0
+offset_bottom = 40.0
+theme_override_font_sizes/font_size = 18
+text = "build"
+
+[node name="PauseMenu" type="Control" parent="UI"]
+visible = false
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="Dimmer" type="ColorRect" parent="UI/PauseMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.52)
+
+[node name="MenuPanel" type="Panel" parent="UI/PauseMenu"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -190.0
+offset_top = -120.0
+offset_right = 190.0
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuTitle" type="Label" parent="UI/PauseMenu/MenuPanel"]
+offset_left = 28.0
+offset_top = 24.0
+offset_right = 352.0
+offset_bottom = 54.0
+theme_override_font_sizes/font_size = 28
+text = "Hero Lab"
+
+[node name="MenuButtons" type="VBoxContainer" parent="UI/PauseMenu/MenuPanel"]
+offset_left = 28.0
+offset_top = 72.0
+offset_right = 352.0
+offset_bottom = 196.0
+theme_override_constants/separation = 14
+
+[node name="ResumeButton" type="Button" parent="UI/PauseMenu/MenuPanel/MenuButtons"]
+custom_minimum_size = Vector2(0, 42)
+text = "Resume"
+
+[node name="CloseGameButton" type="Button" parent="UI/PauseMenu/MenuPanel/MenuButtons"]
+custom_minimum_size = Vector2(0, 42)
+text = "Close Game"

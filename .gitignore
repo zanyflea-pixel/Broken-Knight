@@ -1,4 +1,34 @@
-.broke-knight-server.json
-server-out.log
-server-err.log
-Broke Knight Backup*
+# Runtime state
+.broken-knight-server.json
+*.log
+*_stdout.txt
+*_stderr.txt
+
+# Godot generated cache and QA output
+.godot-user/
+.godot-user-local/
+godot/.godot/
+godot/artifacts/
+
+# Godot's per-asset .import sidecars are source metadata. Keep them: custom
+# post-import scripts, animation loops, compression, and other settings live there.
+
+# Blender generated output
+*.blend1
+blender/backups/
+blender/preview/
+blender/previews/
+blender/snapshots/
+
+# Local scratch and generated reviews
+tmp/
+tmp-map-check/
+visual_reviews/
+_downloads/
+all-project.txt
+
+# Office lock files
+~$*
+
+# Local Godot editor
+tools/godot-4.7/
