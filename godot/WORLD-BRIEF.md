@@ -53,9 +53,8 @@ For each main road:
 
 ## Current Build Inputs
 
-The active world data lives in:
-
-- `C:\Users\Jimmy\Desktop\Broken Knight\godot\data\world_profile.json`
+The active world data lives in `data/world/profile.json`. Start with the
+project-root `WORLD-BUILD-START-HERE.md` before changing it.
 
 That file currently drives:
 

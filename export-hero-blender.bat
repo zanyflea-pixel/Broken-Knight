@@ -2,7 +2,7 @@
 setlocal
 set "ROOT=%~dp0"
 set "BLENDER=C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"
-set "BLEND=%ROOT%blender\hero_restart_rigged.blend"
+set "BLEND=%ROOT%blender\BrokenKnight_Hero_Master.blend"
 set "SCRIPT=%ROOT%blender\scripts\export_rigged_hero.py"
 
 if not exist "%BLENDER%" (

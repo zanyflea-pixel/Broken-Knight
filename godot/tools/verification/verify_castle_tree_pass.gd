@@ -178,7 +178,10 @@ func _run()->void:
         var species:String=tree.get("species","")
         if species_counts.has(species):
             species_counts[species]+=1
-        if species!="" and tree.get("batched_parts",[]).size()==3:
+        # Trunk, branches and detailed leaves are required. A fourth cheap
+        # canopy LOD may also be registered so chopping removes the distant
+        # silhouette together with the detailed tree.
+        if species!="" and tree.get("batched_parts",[]).size()>=3:
             realistic_tree_found=true
         var tree_position:Vector3=tree.get("position",Vector3.ZERO)
         if builder.call("_tree_overlaps_authored_site",Vector2(tree_position.x,tree_position.z),profile,7.5):
@@ -190,7 +193,18 @@ func _run()->void:
     if site_overlap_count>0:
         failures.append("%d trees overlap town, camp, or spawn structures"%site_overlap_count)
 
-    print("CASTLE_TREE_PASS|highway_gate=%s|gate_clear=%s|exterior_ramps=%d|ladders=%d|leaf_vertices=%d|species=%s|site_overlaps=%d|choppable=%s|failures=%d"%[
+    var deadwood_count:=int(props.get_meta("deadwood_cluster_count",0))
+    var woodland_flower_count:=int(props.get_meta("woodland_flower_patch_count",0))
+    var forest_clearing_count:=int(props.get_meta("forest_clearing_count",0))
+    var deadwood_collision_count:=0
+    for prop in props.get_meta("collision_prop_registry",[]):
+        if str(prop.get("kind",""))=="deadwood":deadwood_collision_count+=1
+    if deadwood_count<70:failures.append("forest deadwood composition is too sparse")
+    if woodland_flower_count<220:failures.append("woodland glades lack flower clusters")
+    if forest_clearing_count<int(profile.get("forest_regions",[]).size()):failures.append("authored forest clearings are missing")
+    if deadwood_collision_count!=deadwood_count:failures.append("deadwood collision does not match visible clusters")
+
+    print("CASTLE_TREE_PASS|highway_gate=%s|gate_clear=%s|exterior_ramps=%d|ladders=%d|leaf_vertices=%d|species=%s|site_overlaps=%d|choppable=%s|clearings=%d|deadwood=%d|flowers=%d|failures=%d"%[
         highway_points.size()>=2 and Vector2(highway_points[-2]).distance_to(gate)<=.01,
         gate_hit.is_empty(),
         main.find_children("CastleGalleryRamp","MeshInstance3D",true,false).size(),
@@ -199,6 +213,9 @@ func _run()->void:
         str(species_counts),
         site_overlap_count,
         realistic_tree_found,
+        forest_clearing_count,
+        deadwood_count,
+        woodland_flower_count,
         failures.size(),
     ])
     for failure in failures:push_error("CASTLE_TREE_FAILURE|%s"%failure)

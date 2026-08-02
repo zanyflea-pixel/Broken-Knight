@@ -17,7 +17,10 @@ dependency.
 ## Authoring
 
 - World/game source: `godot/`
-- Current hero source: `blender/hero_restart_rigged.blend`
+- World layout profile: `godot/data/world/profile.json`
+- World Blender source: `blender/world/`
+- Editable story/lore: `docs/story/LORE-AND-WORLD.md`
+- Current hero source: `blender/BrokenKnight_Hero_Master.blend`
 - Current hero export script: `blender/scripts/export_rigged_hero.py`
 - Current hero runtime asset: `godot/assets/hero/hero_base_body.glb`
 - Other Blender source files without checkpoint-style names are retained as
@@ -47,5 +50,5 @@ their source assets.
 1. Make gameplay changes only in `godot/`.
 2. Export 3D assets from canonical Blender source into `godot/assets/`.
 3. Keep generated reviews and caches out of the project root.
-4. Run targeted scripts from `godot/tools/verification/` after changes.
+4. Run `world.bat check` after World Build changes.
 5. Never treat a timestamped checkpoint as a canonical source file.

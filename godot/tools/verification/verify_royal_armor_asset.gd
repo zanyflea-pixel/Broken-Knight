@@ -2,9 +2,10 @@ extends SceneTree
 
 const HERO_SCENE:PackedScene=preload("res://assets/hero/hero_base_body.glb")
 const REQUIRED_SLOTS:=["head","chest","shoulders","hands","feet","pants"]
+const REQUIRED_SLOT_MINIMUMS:={"head":1,"chest":8,"shoulders":12,"hands":6,"feet":10,"pants":5}
 const REQUIRED_ACTIONS:=["Idle","Walk","Jump","Roll"]
-const REQUIRED_CLOSED_PARTS:=["RoyalArmor_head_ApexUnifiedHelmetShell","RoyalArmor_chest_ApexClosedGorget","RoyalArmor_chest_ApexClavicleFoundation","RoyalArmor_shoulders_ApexLateralShoulderBridgeL","RoyalArmor_shoulders_ApexLateralShoulderBridgeR","RoyalArmor_shoulders_ApexUnifiedShoulderSkirtL","RoyalArmor_shoulders_ApexUnifiedShoulderSkirtR","RoyalArmor_chest_ApexUnifiedFrontTassetL","RoyalArmor_chest_ApexUnifiedFrontTassetR","RoyalArmor_chest_ApexUnifiedRearCulet"]
-const FORBIDDEN_FLOATING_PARTS:=["ApexContinuousVisor","ApexContinuousBevor","ApexVisorBrowRail","ApexHingedTemple","ApexChin","ApexUpperGorget","ApexFrontShoulderBridge","ApexRearShoulderBridge","ApexBreastFlute","ApexBackFlute","ApexBackSpine","ApexTapulKeel","ApexGorgetLame","ApexTassetL","ApexTassetR","ApexCuletL","ApexCuletR","ApexSpaulderLame","ApexBackhand","ApexKnuckle","ApexVambraceRidge","ApexCuisseFlute","ApexShinKeel","ApexPoleynWing"]
+const REQUIRED_CLOSED_PARTS:=["RoyalArmor_head_ApexUnifiedConnectedHelmet","RoyalArmor_chest_ApexWaistedCuirass","RoyalArmor_chest_ApexIntegralPlackartOverlay","RoyalArmor_chest_ApexIntegralRearPlackartOverlay","RoyalArmor_chest_ApexUnifiedGorgetMantle","RoyalArmor_chest_ApexArticulatedFauld","RoyalArmor_chest_ApexUnifiedFrontCodpiece","RoyalArmor_shoulders_ApexGrandPauldronL","RoyalArmor_shoulders_ApexGrandPauldronR","RoyalArmor_shoulders_ApexRerebraceL","RoyalArmor_shoulders_ApexRerebraceR","RoyalArmor_pants_ApexCuisseL","RoyalArmor_pants_ApexCuisseR","RoyalArmor_chest_ApexTassetL0","RoyalArmor_chest_ApexTassetR0","RoyalArmor_chest_ApexUnifiedRearCulet"]
+const FORBIDDEN_FLOATING_PARTS:=["ApexContinuousVisor","ApexContinuousBevor","ApexVisorBrowRail","ApexHingedTemple","ApexChin","ApexUpperGorget","ApexFrontShoulderBridge","ApexRearShoulderBridge","ApexBreastFlute","ApexBackFlute","ApexBackSpine","ApexTapulKeel","ApexGorgetLame","ApexCrownEmblem","ApexCrownRuby","ApexTassetRivet","ApexSpaulderLame","ApexBackhand","ApexKnuckle","ApexElbowBoss","ApexVambraceRidge","ApexCuisseFlute","ApexCuisseTopRoll","ApexGreaveRivet","ApexPoleynBoss","ApexSabatonGilt","ApexShinKeel","ApexPoleynWing"]
 
 func find_animation_player(node:Node)->AnimationPlayer:
     if node is AnimationPlayer:return node as AnimationPlayer
@@ -58,10 +59,10 @@ func _initialize()->void:
             missing_actions.append(action)
     var slots_ok:=true
     for slot in REQUIRED_SLOTS:
-        var minimum_pieces:=6 if slot=="chest" else 8
+        var minimum_pieces:int=int(REQUIRED_SLOT_MINIMUMS[slot])
         if int(state.slots.get(slot,0))<minimum_pieces:slots_ok=false
     var closed_ok:bool=int(state.closed_parts.size())==REQUIRED_CLOSED_PARTS.size()
-    var passed:bool=int(state.total)>=85 and slots_ok and closed_ok and Array(state.floating_parts).is_empty() and int(state.skeletons)==1 and int(state.bones)>=20 and bool(state.textured) and missing_actions.is_empty()
+    var passed:bool=int(state.total)>=50 and slots_ok and closed_ok and Array(state.floating_parts).is_empty() and int(state.skeletons)==1 and int(state.bones)>=20 and bool(state.textured) and missing_actions.is_empty()
     print("ROYAL_ARMOR_ASSET|pieces=%d|slots=%s|closed=%d/%d|floating=%s|skeletons=%d|bones=%d|textured=%s|missing_actions=%s"%[state.total,state.slots,state.closed_parts.size(),REQUIRED_CLOSED_PARTS.size(),state.floating_parts,state.skeletons,state.bones,state.textured,missing_actions])
     print("ROYAL_ARMOR_ASSET_VERIFY|%s"%("PASS" if passed else "FAIL"))
     hero.queue_free()

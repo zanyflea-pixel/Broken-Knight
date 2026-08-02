@@ -4,8 +4,20 @@ import os
 import bpy
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-OUT = os.path.join(ROOT, "godot", "assets", "hero", "hero_base_body.glb")
+OUT = os.path.abspath(
+    os.environ.get(
+        "BK_HERO_EXPORT_PATH",
+        os.path.join(ROOT, "godot", "assets", "hero", "hero_base_body.glb"),
+    )
+)
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
+
+# Keep experiments available in the editable master without silently shipping
+# them as runtime animations. Removing them here only affects this unsaved,
+# background export session.
+for action in list(bpy.data.actions):
+    if action.get("bk_status") == "Reference only; not part of the verified runtime set":
+        bpy.data.actions.remove(action, do_unlink=True)
 
 flat_colors = {
     "Skin": (0.48, 0.29, 0.20, 1),

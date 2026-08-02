@@ -282,6 +282,21 @@ func get_world_interaction_markers()->Array[Dictionary]:
         result.append({"position":interaction.get("position",Vector3.ZERO),"action":interaction.get("action","")})
     return result
 
+
+func get_map_service_markers()->Array[Dictionary]:
+    # The royal survey is intentionally complete: services are mapped whether
+    # or not the player has visited their town yet.
+    var result:Array[Dictionary]=[]
+    for vendor in _vendors:
+        if not is_instance_valid(vendor) or not vendor.has_meta("vendor_data"):continue
+        var data:Dictionary=vendor.get_meta("vendor_data")
+        result.append({
+            "kind":"vendor",
+            "name":"%s — %s"%[str(data.get("name","Merchant")),str(data.get("type_name","Vendor"))],
+            "position":vendor.global_position,
+        })
+    return result
+
 func get_cooldowns() -> Array: return cooldowns
 
 func get_gameplay_state() -> Dictionary:
@@ -307,6 +322,8 @@ func _warrior_sword_slash()->void:
     if not _require_warrior_weapons() or cooldowns[0]>0.0 or player.stamina<12.0:return
     player.stamina-=12.0
     cooldowns[0]=.80;_hero_action("sword")
+    await get_tree().create_timer(.23).timeout
+    if not is_instance_valid(player):return
     _damage_cone(4.2,1.15,28.0+float(player.get_equipment_state().get("power",0))*.55,6.0)
 
 func _warrior_shield_bash()->void:

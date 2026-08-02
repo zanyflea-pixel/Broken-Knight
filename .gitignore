@@ -16,6 +16,7 @@ godot/artifacts/
 # Blender generated output
 *.blend1
 blender/backups/
+blender/_archive/
 blender/preview/
 blender/previews/
 blender/snapshots/
@@ -26,6 +27,14 @@ tmp-map-check/
 visual_reviews/
 _downloads/
 all-project.txt
+captures/
+Powershell output/
+.idea/
+.vs/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tmp
 
 # Office lock files
 ~$*

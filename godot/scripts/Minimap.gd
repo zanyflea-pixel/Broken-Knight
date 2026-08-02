@@ -37,7 +37,7 @@ func _process(delta: float) -> void:
         # terrain queries on each refresh frame.
         _advance_terrain_refresh(1)
     _redraw_accumulator += delta
-    if _redraw_accumulator < 0.10:
+    if _redraw_accumulator < 0.125:
         return
     _redraw_accumulator = 0.0
     if _pending_row<0 and is_instance_valid(_player) and not _inside_dungeon():
@@ -78,10 +78,12 @@ func _finish_terrain_refresh()->void:
             var right := _pending_heights[y * TERRAIN_RESOLUTION + mini(TERRAIN_RESOLUTION - 1, x + 1)]
             var up := _pending_heights[maxi(0, y - 1) * TERRAIN_RESOLUTION + x]
             var down := _pending_heights[mini(TERRAIN_RESOLUTION - 1, y + 1) * TERRAIN_RESOLUTION + x]
-            var shade := clampf(0.96 + (left - right) * 0.025 + (up - down) * 0.018, 0.68, 1.20)
+            var slope_light:=(left-right)*.020+(up-down)*.017
+            var slope_strength:=minf(1.0,(absf(left-right)+absf(up-down))*.055)
+            var shade:=clampf(.98+slope_light-slope_strength*.08,.64,1.22)
             var color := _terrain_color(h, _pending_center + uv * view_radius)
-            if floorf(h / 15.0) != floorf(right / 15.0) or floorf(h / 15.0) != floorf(down / 15.0):
-                shade *= 0.80
+            if floorf(h / 24.0) != floorf(right / 24.0) or floorf(h / 24.0) != floorf(down / 24.0):
+                shade *= 0.93
             image.set_pixel(x, y, Color(color.r * shade, color.g * shade, color.b * shade, 0.97))
     _terrain_texture = ImageTexture.create_from_image(image)
     _terrain_center=_pending_center
@@ -91,18 +93,27 @@ func _finish_terrain_refresh()->void:
 
 func _terrain_color(height: float, world_point: Vector2) -> Color:
     var world_size: float = _profile.get("world_size",7200.0)
-    var color := Color(.41,.53,.27)
+    var fine:=sin(world_point.x*.021)*sin(world_point.y*.017)
+    var broad:=sin(world_point.x*.0031+world_point.y*.0022)*sin(world_point.y*.0043-world_point.x*.0015)
+    var variation:=fine*.012+broad*.020
+    var color:=Color(.36,.48,.25)
     if world_point.x > world_size*.16:
-        color=Color(.48,.48,.25)
+        color=Color(.56,.48,.24)
     elif world_point.x < -world_size*.20:
-        color=Color(.33,.46,.26)
+        color=Color(.25,.40,.25)
     if world_point.y > world_size*.18:
-        color=color.lerp(Color(.28,.45,.38),.36)
+        color=color.lerp(Color(.27,.43,.38),.30)
     elif world_point.y < -world_size*.18:
-        color=color.lerp(Color(.56,.42,.24),.42)
-    if height>45.0:
-        color=color.lerp(Color(.47,.45,.39),clampf((height-45.0)/85.0,0.0,.86))
-    return color
+        color=color.lerp(Color(.58,.39,.21),.34)
+    var forest_influence:=0.0
+    for forest in _profile.get("forest_regions",[]):
+        var forest_center:Vector2=forest.get("center",Vector2.ZERO)
+        var forest_radius:float=maxf(1.0,float(forest.get("radius",300.0)))
+        forest_influence=maxf(forest_influence,1.0-smoothstep(forest_radius*.66,forest_radius*1.06,world_point.distance_to(forest_center)))
+    color=color.lerp(Color(.105,.275,.17),forest_influence*.52)
+    if height>34.0:color=color.lerp(Color(.43,.39,.29),clampf((height-34.0)/92.0,0.0,.68))
+    if height>82.0:color=color.lerp(Color(.39,.38,.34),clampf((height-82.0)/70.0,0.0,.68))
+    return Color(color.r+variation,color.g+variation,color.b+variation)
 
 
 func _draw() -> void:
@@ -240,7 +251,19 @@ func _corridors(corridors: Array, center: Vector2, radius: float, kind: String) 
                 draw_line(a, b, Color(0.19, 0.10, 0.035, 0.96), pixels + 2.5, true)
                 draw_line(a, b, Color(0.88, 0.61, 0.25, 1.0), pixels, true)
             else:
-                draw_line(a, b, Color(0.31, 0.20, 0.08, 0.92), pixels, true)
+                _draw_dashed_segment(a,b,Color(.24,.15,.065,.88),pixels,4.0,3.0)
+
+
+func _draw_dashed_segment(a:Vector2,b:Vector2,color:Color,width:float,dash_length:float,gap_length:float)->void:
+    var segment:=b-a
+    var length:=segment.length()
+    if length<=.01:return
+    var direction:=segment/length
+    var cursor:=0.0
+    while cursor<length:
+        var dash_end:=minf(cursor+dash_length,length)
+        draw_line(a+direction*cursor,a+direction*dash_end,color,width,true)
+        cursor+=dash_length+gap_length
 
 
 func _clip_segment_to_circle(a: Vector2, b: Vector2, center: Vector2, radius: float) -> Array[Vector2]:
@@ -258,14 +281,19 @@ func _clip_segment_to_circle(a: Vector2, b: Vector2, center: Vector2, radius: fl
 
 
 func _draw_local_forests(center: Vector2, radius: float) -> void:
-    for region in _profile.get("forest_regions", []):
+    for region_index in range(_profile.get("forest_regions",[]).size()):
+        var region:Dictionary=_profile.get("forest_regions",[])[region_index]
         var region_center: Vector2 = region.get("center", Vector2.ZERO)
         var region_radius: float = region.get("radius", 300.0)
-        for i in range(8):
-            var angle := i * 2.399
-            var p := _local_point(region_center + Vector2(cos(angle), sin(angle)) * region_radius * 0.48, center, radius)
+        for i in range(28):
+            var angle:=float(i)*2.399963+float(region_index)*.43
+            var r:=region_radius*sqrt((float(i)+.4)/29.0)*(.78+sin(float(i)*1.71)*.13)
+            var p:=_local_point(region_center+Vector2(cos(angle),sin(angle))*r,center,radius)
             if p.distance_to(center) < radius - 4:
-                draw_colored_polygon(PackedVector2Array([p + Vector2(0, -4), p + Vector2(-3, 3), p + Vector2(3, 3)]), Color(0.10, 0.29, 0.13, 0.82))
+                var s:=1.7+float(i%4)*.35
+                draw_circle(p+Vector2(.7,.9),s*1.05,Color(.025,.065,.025,.35))
+                draw_circle(p,s,Color(.07+.015*float(i%3),.24+.027*float(i%4),.095,.90))
+                draw_circle(p-Vector2(.4,.5),s*.45,Color(.25,.40,.16,.52))
 
 
 func _draw_water_sites(center: Vector2, radius: float) -> void:
@@ -348,18 +376,61 @@ func _draw_settlements(center: Vector2, radius: float) -> void:
         var distance := p.distance_to(center)
         if distance < radius - 10:
             var footprint:=maxf(3.0,float(site.get("radius",75.0))/view_radius*radius)
-            draw_circle(p,footprint,Color(.69,.50,.27,.24))
-            draw_arc(p,footprint,0,TAU,24,Color(.25,.13,.04,.42),1.0)
-            draw_circle(p, 7.5 if site.get("capital", false) else 6.0, Color(0.22, 0.11, 0.035))
             if site.get("capital", false):
-                draw_colored_polygon(PackedVector2Array([p + Vector2(0, -6), p + Vector2(-6, 5), p + Vector2(6, 5)]), Color(0.76, 0.18, 0.08))
+                if distance<radius-footprint-5.0:
+                    _draw_local_crownspire(site.get("position",Vector2.ZERO),center,radius)
+                else:
+                    draw_rect(Rect2(p-Vector2(5,4),Vector2(10,8)),Color(.58,.15,.08,.96),true)
             else:
+                draw_circle(p,footprint,Color(.69,.50,.27,.20))
+                draw_arc(p,footprint,0,TAU,32,Color(.25,.13,.04,.48),1.0)
+                for i in range(10):
+                    var angle:=float(i)*TAU/10.0+.27
+                    var house:=p+Vector2(cos(angle),sin(angle))*footprint*.60
+                    draw_rect(Rect2(house-Vector2(1.8,1.3),Vector2(3.6,2.6)),Color(.53,.24,.08,.94),true)
                 draw_rect(Rect2(p - Vector2(3.5, 3), Vector2(7, 6)), Color(0.78, 0.25, 0.09), true)
             if distance > 30.0 and distance < radius * 0.76:
                 _small_label(site.get("name", "Town"), p + Vector2(7, 3))
         else:
             var edge := center + (p - center).normalized() * (radius - 10)
             draw_colored_polygon(PackedVector2Array([edge + Vector2(0, -5), edge + Vector2(-4, 4), edge + Vector2(4, 4)]), Color(0.78, 0.25, 0.09))
+
+
+func _draw_local_crownspire(capital_center:Vector2,center:Vector2,radius:float)->void:
+    var scale:=radius/view_radius
+    var city:=_local_point(capital_center,center,radius)
+    var wall:=Color(.69,.67,.57,.96)
+    var paving:=Color(.75,.69,.55,.74)
+    var half:=190.0*scale
+    var gate:=16.0*scale
+    draw_line(city+Vector2(-half,-half),city+Vector2(half,-half),wall,2.2,true)
+    draw_line(city+Vector2(-half,-half),city+Vector2(-half,half),wall,2.2,true)
+    draw_line(city+Vector2(half,-half),city+Vector2(half,half),wall,2.2,true)
+    draw_line(city+Vector2(-half,half),city+Vector2(-gate,half),wall,2.2,true)
+    draw_line(city+Vector2(gate,half),city+Vector2(half,half),wall,2.2,true)
+    for corner in [Vector2(-half,-half),Vector2(half,-half),Vector2(-half,half),Vector2(half,half)]:
+        draw_rect(Rect2(city+corner-Vector2.ONE*2.3,Vector2.ONE*4.6),Color(.34,.31,.27,.98),true)
+    draw_line(city+Vector2(0,-32.0*scale),city+Vector2(0,260.0*scale),paving,3.4,true)
+    draw_line(city+Vector2(-125.0*scale,28.0*scale),city+Vector2(125.0*scale,28.0*scale),paving,2.8,true)
+    draw_circle(city+Vector2(0,38.0*scale),maxf(3.2,7.0*scale),Color(.70,.60,.40,.86))
+    var plots:Array=[Vector2(-118,-15),Vector2(-82,-20),Vector2(-120,48),Vector2(-80,66),Vector2(82,-18),Vector2(122,-8),Vector2(82,55),Vector2(124,72),Vector2(-132,118),Vector2(-88,132),Vector2(-45,115),Vector2(46,118),Vector2(88,136),Vector2(132,116),Vector2(-145,-88),Vector2(-110,-118),Vector2(112,-112),Vector2(148,-82)]
+    for i in range(plots.size()):
+        var plot:Vector2=plots[i]
+        var house:Vector2=city+plot*scale
+        var house_size:=Vector2(maxf(2.5,(12.0+float(i%4)*2.2)*scale),maxf(2.0,(9.5+float(i%3))*scale))
+        draw_rect(Rect2(house-house_size*.5,house_size),Color(.46+.035*float(i%3),.18,.065,.96),true)
+    var castle:=city+Vector2(0,-92)*scale
+    var bailey_size:=Vector2(142,118)*scale
+    draw_rect(Rect2(castle-bailey_size*.5,bailey_size),Color(.65,.63,.56,.38),true)
+    draw_rect(Rect2(castle-bailey_size*.5,bailey_size),wall,false,1.6)
+    for corner_value in [Vector2(-71,-59),Vector2(71,-59),Vector2(-71,59),Vector2(71,59)]:
+        var corner:Vector2=corner_value
+        var tower:Vector2=castle+corner*scale
+        draw_rect(Rect2(tower-Vector2.ONE*2.2,Vector2.ONE*4.4),Color(.28,.26,.23,.98),true)
+    var keep:=castle+Vector2(0,-8)*scale
+    var keep_size:=Vector2(maxf(7.0,58.0*scale),maxf(5.5,44.0*scale))
+    draw_rect(Rect2(keep-keep_size*.5,keep_size),Color(.48,.075,.055,.98),true)
+    draw_rect(Rect2(keep-keep_size*.5,keep_size),Color(.18,.10,.045,.98),false,1.0)
 
 
 func _draw_enemies(center: Vector2, radius: float) -> void:
@@ -388,11 +459,20 @@ func _draw_interactions(center:Vector2,radius:float)->void:
 
 func _draw_player(center: Vector2) -> void:
     var facing := _player_map_heading()
-    draw_circle(center, 13, Color(1.0, 0.85, 0.30, 0.92))
-    draw_circle(center, 10, Color(0.15, 0.075, 0.025, 0.96))
-    var arrow := PackedVector2Array([center + Vector2(0, -12).rotated(facing), center + Vector2(-7, 8).rotated(facing), center, center + Vector2(7, 8).rotated(facing)])
-    draw_colored_polygon(arrow, Color(0.90, 0.11, 0.045))
-    draw_polyline(arrow, Color.WHITE, 1.6, true)
+    var silhouette:=PackedVector2Array([
+        center+Vector2(0,-14).rotated(facing),center+Vector2(-3.8,-4).rotated(facing),
+        center+Vector2(-6,2).rotated(facing),center+Vector2(-4,8).rotated(facing),
+        center+Vector2(0,5).rotated(facing),center+Vector2(4,8).rotated(facing),
+        center+Vector2(6,2).rotated(facing),center+Vector2(3.8,-4).rotated(facing)
+    ])
+    draw_colored_polygon(silhouette,Color(.16,.105,.035,.98))
+    draw_polyline(silhouette,Color(.84,.61,.18,.98),2.0,true)
+    var visor:=PackedVector2Array([
+        center+Vector2(0,-10.5).rotated(facing),center+Vector2(-3,-2.5).rotated(facing),
+        center+Vector2(0,3).rotated(facing),center+Vector2(3,-2.5).rotated(facing)
+    ])
+    draw_colored_polygon(visor,Color(.86,.90,.88,.98))
+    draw_polyline(visor,Color(.24,.29,.30,.96),1.0,true)
 
 
 func _local_point(point: Vector2, center: Vector2, radius: float) -> Vector2:

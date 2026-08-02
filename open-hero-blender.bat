@@ -2,7 +2,7 @@
 setlocal
 set "ROOT=%~dp0"
 set "BLENDER=C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"
-set "BLEND=%ROOT%blender\hero_restart_rigged.blend"
+set "BLEND=%ROOT%blender\BrokenKnight_Hero_Master.blend"
 
 if not exist "%BLENDER%" (
   echo Blender executable not found:

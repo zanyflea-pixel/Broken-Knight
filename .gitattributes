@@ -1,1 +1,35 @@
+# Stable text handling across Windows and GitHub.
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.editorconfig text eol=lf
+*.gd text eol=lf
+*.tscn text eol=lf
+*.tres text eol=lf
+*.godot text eol=lf
+*.import text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Binary art must never produce unreadable text diffs or merge attempts.
+*.blend binary
+*.blend1 binary
+*.glb binary
+*.gltf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.avi binary
+*.zip binary
+*.exe binary
+
+# Large, frequently updated canonical assets use Git LFS from this point on.
 tools/godot-4.7/*.exe filter=lfs diff=lfs merge=lfs -text
+blender/BrokenKnight_Hero_Master.blend filter=lfs diff=lfs merge=lfs -text
+godot/assets/hero/hero_base_body.glb filter=lfs diff=lfs merge=lfs -text

@@ -48,10 +48,10 @@ func _initialize() -> void:
 	print("HERO_IMPORT|skeletons=%d|bones=%d|meshes=%d|armor_meshes=%d|skinned_armor=%d|pants_meshes=%d|staff_meshes=%d|animations=%s" % [skeletons.size(), bone_count, meshes.size(), armor_names.size(), skinned_armor, pants_names.size(), staff_names.size(), names])
 	var required := ["Idle", "Walk", "TorchIdle", "TorchWalk", "StaffIdle", "StaffWalk", "Jump", "Land", "Roll", "Spark", "Nova", "Blink", "Orb", "StaffSpark", "StaffNova", "StaffBlink", "StaffOrb", "WarriorIdle", "WarriorWalk", "SwordSlash", "ShieldBash", "FishCast", "Death"]
 	var missing: Array = required.filter(func(name): return not names.has(name))
-	# The rebuilt Gothic harness uses fewer, larger fitted shells than the old
-	# block-built set. Keep a high full-set floor while validating its 22-piece
-	# cuisse/hose assembly instead of the rejected fantasy mesh count.
-	if skeletons.size() != 1 or bone_count < 20 or not missing.is_empty() or armor_names.size() < 80 or skinned_armor != armor_names.size() or pants_names.size()<6 or staff_names.size()<60:
+	# The consolidated harness deliberately replaces dozens of floating accent
+	# meshes with fewer connected shells. Validate complete slot coverage and
+	# skinning instead of rewarding a large detached-object count.
+	if skeletons.size() != 1 or bone_count < 20 or not missing.is_empty() or armor_names.size() < 50 or skinned_armor != armor_names.size() or pants_names.size()<5 or staff_names.size()<60:
 		push_error("HERO_VERIFY|missing_required_rig_or_animation")
 		quit(3)
 		return

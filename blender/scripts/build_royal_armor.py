@@ -8,7 +8,7 @@ from mathutils import Vector
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-RIGGED = os.path.join(ROOT, "blender", "hero_restart_rigged.blend")
+RIGGED = os.path.join(ROOT, "blender", "BrokenKnight_Hero_Master.blend")
 PREFIX = "RoyalArmor_"
 
 

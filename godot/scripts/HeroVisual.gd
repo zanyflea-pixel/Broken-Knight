@@ -82,6 +82,8 @@ var _imported_skeleton: Skeleton3D
 var _sword_forearm_bone := -1
 var _sword_forearm_base_rotation := Quaternion.IDENTITY
 var _sword_forearm_base_ready := false
+var _sword_pose_base: Dictionary = {}
+var _sword_pose_ready := false
 var _current_imported_animation: StringName = &""
 var _air_animation_state: StringName = &""
 var _action_animation_state: StringName = &""
@@ -270,17 +272,15 @@ func reset_death() -> void:
 
 func play_action(kind: String) -> void:
 	_action_kind = kind
-	if kind.to_lower()=="sword" and is_instance_valid(_imported_animation_player):
-		# Keep the current warrior idle/walk pose. The only character motion
-		# for this attack is the procedural elbow extension applied after the
-		# animation player updates the skeleton each frame.
+	if kind.to_lower()=="sword":
+		# Keep the working colored hero model and create the whole slash
+		# directly on its skeleton. No Blender or GLB export is needed.
 		_action_animation_state=&""
 		_sword_action_grip_ready=false
 		_sword_forearm_base_ready=false
-		if is_instance_valid(_imported_skeleton) and _sword_forearm_bone>=0:
-			_sword_forearm_base_rotation=_imported_skeleton.get_bone_pose_rotation(_sword_forearm_bone)
-			_sword_forearm_base_ready=true
-		_action_time=.70
+		_sword_pose_base.clear()
+		_sword_pose_ready=false
+		_action_time=.62
 		return
 	var action_names := {
 		"spark": &"Spark",
@@ -300,17 +300,154 @@ func play_action(kind: String) -> void:
 		_action_animation_state = target
 		_current_imported_animation = target
 		_imported_animation_player.speed_scale = 1.0
-		var blend_time:=0.0 if kind.to_lower()=="sword" else 0.08
-		_imported_animation_player.play(target,blend_time)
-		if kind.to_lower()=="sword" and is_instance_valid(_sword_attachment):
-			# Let the next animation update establish the calibration from the
-			# actual first slash pose. Reading the attachment here still returns
-			# the previous idle pose because Skeleton3D has not evaluated yet.
-			_sword_action_grip_ready=false
+		_imported_animation_player.play(target,0.08)
 		_action_time = _imported_animation_player.get_animation(target).length
 	else:
 		_action_time = 0.32 if kind != "orb" else 0.48
 
+
+func _sword_pose_ease(value: float) -> float:
+	var t:=clampf(value,0.0,1.0)
+	return t*t*(3.0-2.0*t)
+
+
+func _sword_pose_rotation(
+	phase: float,
+	outboard: Vector3,
+	guard: Vector3,
+	chop: Vector3,
+	finish: Vector3
+) -> Quaternion:
+	var ready:=Quaternion(0.0,0.0,0.0,1.0)
+	var outboard_q:=Basis.from_euler(outboard).get_rotation_quaternion()
+	var guard_q:=Basis.from_euler(guard).get_rotation_quaternion()
+	var chop_q:=Basis.from_euler(chop).get_rotation_quaternion()
+	var finish_q:=Basis.from_euler(finish).get_rotation_quaternion()
+
+	if phase<.08:
+		return ready.slerp(outboard_q,_sword_pose_ease(phase/.08))
+	if phase<.24:
+		return outboard_q.slerp(guard_q,_sword_pose_ease((phase-.08)/.16))
+	if phase<.29:
+		return guard_q
+	if phase<.44:
+		var strike_t:=_sword_pose_ease((phase-.29)/.15)
+		strike_t=pow(strike_t,2.2)
+		return guard_q.slerp(chop_q,strike_t)
+	if phase<.47:
+		return chop_q
+	if phase<.61:
+		var inward_t:=_sword_pose_ease((phase-.47)/.14)
+		return chop_q.slerp(finish_q,inward_t)
+	if phase<.66:
+		return finish_q
+
+	# Return directly from the low finish to idle. Do not lift back through
+	# the high outside guard, which looked like a second upward swing.
+	return finish_q.slerp(ready,_sword_pose_ease((phase-.66)/.34))
+
+func _capture_sword_pose() -> void:
+	_sword_pose_base.clear()
+	if not is_instance_valid(_imported_skeleton):
+		return
+	for bone_name in ["chest","clavicle.L","upper_arm.L","forearm.L","hand.L"]:
+		var bone:=_imported_skeleton.find_bone(bone_name)
+		if bone>=0:
+			_sword_pose_base[bone_name]=_imported_skeleton.get_bone_pose_rotation(bone)
+	_sword_pose_ready=not _sword_pose_base.is_empty()
+
+
+func _set_sword_pose_bone(bone_name: String, offset: Quaternion) -> void:
+	if not is_instance_valid(_imported_skeleton) or not _sword_pose_base.has(bone_name):
+		return
+	var bone:=_imported_skeleton.find_bone(bone_name)
+	if bone>=0:
+		var base:Quaternion=_sword_pose_base[bone_name]
+		_imported_skeleton.set_bone_pose_rotation(bone,base*offset)
+
+
+func _apply_procedural_sword_swing(phase: float) -> void:
+	if not _sword_pose_ready:
+		_capture_sword_pose()
+	if not _sword_pose_ready:
+		return
+
+	_set_sword_pose_bone(
+		"chest",
+		_sword_pose_rotation(
+			phase,
+			Vector3.ZERO,
+			Vector3.ZERO,
+			Vector3.ZERO,
+			Vector3.ZERO
+		)
+	)
+
+	# Keep the proven outward shoulder path during the high wind-up.
+	# The shoulder comes inward only during the low finishing portion.
+	_set_sword_pose_bone(
+		"clavicle.L",
+		_sword_pose_rotation(
+			phase,
+			Vector3(0.0,0.0,deg_to_rad(-8.0)),
+			Vector3(0.0,0.0,deg_to_rad(-14.0)),
+			Vector3(0.0,0.0,deg_to_rad(-6.0)),
+			Vector3(0.0,0.0,deg_to_rad(12.0))
+		)
+	)
+
+	# Wind up high and outside, descend outside the head, then drive the
+	# low finish inward toward the center without crossing the torso.
+	_set_sword_pose_bone(
+		"upper_arm.L",
+		_sword_pose_rotation(
+			phase,
+			Vector3(deg_to_rad(-32.0),0.0,deg_to_rad(-68.0)),
+			Vector3(deg_to_rad(-72.0),0.0,deg_to_rad(-82.0)),
+			Vector3(deg_to_rad(16.0),0.0,deg_to_rad(-46.0)),
+			Vector3(deg_to_rad(30.0),0.0,deg_to_rad(18.0))
+		)
+	)
+
+	# Keep the blade rolled away from the face while high. Relax that roll
+	# only after the sword is low so the edge can travel inward.
+	_set_sword_pose_bone(
+		"forearm.L",
+		_sword_pose_rotation(
+			phase,
+			Vector3(deg_to_rad(48.0),deg_to_rad(46.0),0.0),
+			Vector3(deg_to_rad(78.0),deg_to_rad(64.0),0.0),
+			Vector3(deg_to_rad(42.0),deg_to_rad(30.0),deg_to_rad(3.0)),
+			Vector3(deg_to_rad(22.0),deg_to_rad(2.0),deg_to_rad(6.0))
+		)
+	)
+
+	_set_sword_pose_bone(
+		"hand.L",
+		_sword_pose_rotation(
+			phase,
+			Vector3(0.0,deg_to_rad(5.0),deg_to_rad(-4.0)),
+			Vector3(0.0,deg_to_rad(8.0),deg_to_rad(-6.0)),
+			Vector3(0.0,deg_to_rad(2.0),deg_to_rad(2.0)),
+			Vector3(0.0,deg_to_rad(-3.0),deg_to_rad(4.0))
+		)
+	)
+
+	_imported_skeleton.force_update_all_bone_transforms()
+
+func _restore_procedural_sword_swing() -> void:
+	if not _sword_pose_ready or not is_instance_valid(_imported_skeleton):
+		_sword_pose_base.clear()
+		_sword_pose_ready=false
+		return
+	for bone_name in _sword_pose_base:
+		var bone:=_imported_skeleton.find_bone(String(bone_name))
+		if bone>=0:
+			var base:Quaternion=_sword_pose_base[bone_name]
+			_imported_skeleton.set_bone_pose_rotation(bone,base)
+	_imported_skeleton.force_update_all_bone_transforms()
+	_sword_pose_base.clear()
+	_sword_pose_ready=false
 
 func _build_materials() -> void:
 	_skin_mat = _make_lit_material(Color(0.77, 0.63, 0.52, 1.0), 0.95, 0.0)
@@ -356,7 +493,7 @@ func _build_visuals() -> void:
 	_imported_animation_player = _find_animation_player(_imported_hero)
 	_imported_skeleton = _find_skeleton(_imported_hero)
 	if is_instance_valid(_imported_skeleton):
-		_sword_forearm_bone=_imported_skeleton.find_bone("forearm.R")
+		_sword_forearm_bone=_imported_skeleton.find_bone("forearm.L")
 	_current_imported_animation = &""
 	_air_animation_state = &""
 	_action_animation_state = &""
@@ -413,7 +550,7 @@ func _build_warrior_weapons()->void:
 	if skeleton.find_bone("hand.R")>=0:
 		_sword_attachment=BoneAttachment3D.new()
 		_sword_attachment.name="RoyalSwordGrip"
-		_sword_attachment.bone_name="hand.R"
+		_sword_attachment.bone_name="hand.L"
 		skeleton.add_child(_sword_attachment)
 		_sword_root=ROYAL_SWORD_SCENE.instantiate() as Node3D
 		_sword_root.name="RoyalVanguardSword"
@@ -428,7 +565,7 @@ func _build_warrior_weapons()->void:
 		# glTF coordinates.  The marker follows the hand and animated rod.
 		_fishing_pole_tip=Node3D.new();_fishing_pole_tip.name="FishingPoleTip";_fishing_pole_tip.position=Vector3(.08,-.18,-2.10);_fishing_pole_root.add_child(_fishing_pole_tip)
 	if skeleton.find_bone("hand.L")>=0:
-		_shield_attachment=BoneAttachment3D.new();_shield_attachment.name="RoyalShieldGrip";_shield_attachment.bone_name="hand.L";skeleton.add_child(_shield_attachment)
+		_shield_attachment=BoneAttachment3D.new();_shield_attachment.name="RoyalShieldGrip";_shield_attachment.bone_name="hand.R";skeleton.add_child(_shield_attachment)
 		_shield_root=ROYAL_SHIELD_SCENE.instantiate() as Node3D
 		_shield_root.name="RoyalVanguardShield"
 		_shield_attachment.add_child(_shield_root)
@@ -592,7 +729,7 @@ func _update_imported_animation(force: bool = false) -> void:
 
 func _update_warrior_weapon_action()->void:
 	if not _warrior_equipped and not is_instance_valid(_axe_root) and not is_instance_valid(_pickaxe_root) and not is_instance_valid(_fishing_pole_root):return
-	var action_duration:=.70
+	var action_duration:=.62
 	if _action_kind!="sword" and is_instance_valid(_imported_animation_player) and _action_animation_state!=&"" and _imported_animation_player.has_animation(_action_animation_state):
 		action_duration=maxf(.20,_imported_animation_player.get_animation(_action_animation_state).length)
 	var phase:=1.0-clampf(_action_time/action_duration,0.0,1.0)
@@ -602,23 +739,10 @@ func _update_warrior_weapon_action()->void:
 	if _death_active and is_instance_valid(_imported_animation_player) and _imported_animation_player.has_animation(&"Death"):
 		death_phase=clampf(_imported_animation_player.current_animation_position/maxf(.01,_imported_animation_player.get_animation(&"Death").length),0.0,1.0)
 	var body_spin:=phase*TAU if rolling else -death_phase*1.38
-	if _action_kind=="sword" and _action_time>0.0 and is_instance_valid(_imported_skeleton) and _sword_forearm_bone>=0:
-		if not _sword_forearm_base_ready:
-			_sword_forearm_base_rotation=_imported_skeleton.get_bone_pose_rotation(_sword_forearm_bone)
-			_sword_forearm_base_ready=true
-		var elbow_extension:=sin(phase*PI)*deg_to_rad(52.0)
-		_imported_skeleton.set_bone_pose_rotation(
-			_sword_forearm_bone,
-			_sword_forearm_base_rotation*Quaternion(Vector3.RIGHT,elbow_extension)
-		)
-		_imported_skeleton.force_update_all_bone_transforms()
-	elif _sword_forearm_base_ready and is_instance_valid(_imported_skeleton) and _sword_forearm_bone>=0:
-		_imported_skeleton.set_bone_pose_rotation(
-			_sword_forearm_bone,
-			_sword_forearm_base_rotation
-		)
-		_imported_skeleton.force_update_all_bone_transforms()
-		_sword_forearm_base_ready=false
+	if _action_kind=="sword" and _action_time>0.0:
+		_apply_procedural_sword_swing(phase)
+	elif _sword_pose_ready:
+		_restore_procedural_sword_swing()
 	if is_instance_valid(_sword_root):
 		if is_instance_valid(_sword_attachment):
 			# The blade is permanently rolled 90 degrees in the grip. During

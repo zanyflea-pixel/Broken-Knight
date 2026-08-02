@@ -1,5 +1,6 @@
 param(
-    [switch]$IncludeLegacy
+    [switch]$IncludeLegacy,
+    [switch]$RebuildGodotCache
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,13 +57,12 @@ $generatedDirectories = @(
     ".godot-user",
     ".godot-user-local",
     "_downloads",
-    "backups",
+    "captures",
+    "Powershell output",
     "tmp",
     "tmp-map-check",
     "visual_reviews",
-    "godot\.godot",
     "godot\artifacts",
-    "blender\backups",
     "blender\preview",
     "blender\previews",
     "blender\snapshots",
@@ -72,6 +72,20 @@ $generatedDirectories = @(
 foreach ($relativePath in $generatedDirectories) {
     Remove-ProjectPath $relativePath
 }
+
+if ($RebuildGodotCache) {
+    Remove-ProjectPath "godot\.godot"
+}
+
+Get-ChildItem -LiteralPath $projectRoot -Recurse -File -Filter "*.blend1" -Force -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-ProjectFile $_ }
+
+Get-ChildItem -LiteralPath $projectRoot -Recurse -Directory -Filter "__pycache__" -Force -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    ForEach-Object {
+        $relativePath = $_.FullName.Substring($projectPrefix.Length)
+        Remove-ProjectPath $relativePath
+    }
 
 Get-ChildItem -LiteralPath $projectRoot -File -Force |
     Where-Object {

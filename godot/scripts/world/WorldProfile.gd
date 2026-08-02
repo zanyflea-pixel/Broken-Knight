@@ -1,6 +1,6 @@
 extends RefCounted
 
-const PROFILE_PATH := "res://data/world_profile.json"
+const PROFILE_PATH := "res://data/world/profile.json"
 
 
 func make_old_world_profile() -> Dictionary:
@@ -54,13 +54,13 @@ func _transform_zone(profile:Dictionary,angle:float,mirror_x:bool)->void:
         var p:=Vector2(-point.x,point.y) if mirror_x else point
         return p.rotated(angle)
     profile.spawn_site.position=transform_point.call(profile.spawn_site.position)
-    for key in ["town_sites","camp_sites","pond_sites","waterfall_sites","ford_sites"]:
+    for key in ["town_sites","camp_sites","pond_sites","waterfall_sites","ford_sites","landmark_sites","ecology_sites","map_sites"]:
         for site in profile.get(key,[]):site.position=transform_point.call(site.position)
-    for key in ["flat_regions","forest_regions","mountain_chains","ocean_basins"]:
+    for key in ["flat_regions","forest_regions","mountain_chains","ocean_basins","landform_regions","terrain_palette_regions"]:
         for region in profile.get(key,[]):
             region.center=transform_point.call(region.center)
             if region.has("angle"):region.angle=float(region.angle)*(-1.0 if mirror_x else 1.0)+angle
-    for key in ["river_corridors","road_corridors","trail_corridors"]:
+    for key in ["river_corridors","road_corridors","trail_corridors","field_boundaries"]:
         for corridor in profile.get(key,[]):
             var transformed:Array=[]
             for point in corridor.get("points",[]):transformed.append(transform_point.call(point))
@@ -75,10 +75,15 @@ func _normalize_profile(raw: Dictionary) -> Dictionary:
     profile["pond_sites"] = _normalize_sites(profile.get("pond_sites", []))
     profile["waterfall_sites"] = _normalize_sites(profile.get("waterfall_sites", []))
     profile["ford_sites"] = _normalize_sites(profile.get("ford_sites", []))
+    profile["landmark_sites"] = _normalize_sites(profile.get("landmark_sites", []))
+    profile["ecology_sites"] = _normalize_sites(profile.get("ecology_sites", []))
+    profile["map_sites"] = _normalize_sites(profile.get("map_sites", []))
     profile["flat_regions"] = _normalize_regions(profile.get("flat_regions", []))
     profile["forest_regions"] = _normalize_regions(profile.get("forest_regions", []))
     profile["mountain_chains"] = _normalize_centered_entries(profile.get("mountain_chains", []))
     profile["ocean_basins"] = _normalize_centered_entries(profile.get("ocean_basins", []))
+    profile["landform_regions"] = _normalize_centered_entries(profile.get("landform_regions", []))
+    profile["terrain_palette_regions"] = _normalize_centered_entries(profile.get("terrain_palette_regions", []))
     profile["river_corridors"] = _normalize_corridors(profile.get("river_corridors", []))
     for river in profile["river_corridors"]:
         # Keep the terrain query path compact. Visible water and banks add their
@@ -87,6 +92,7 @@ func _normalize_profile(raw: Dictionary) -> Dictionary:
         river["points"] = _catmull_rom_points(river.get("points", []), 6)
     profile["road_corridors"] = _normalize_corridors(profile.get("road_corridors", []))
     profile["trail_corridors"] = _normalize_corridors(profile.get("trail_corridors", []))
+    profile["field_boundaries"] = _normalize_corridors(profile.get("field_boundaries", []))
     _apply_layout_scale(profile, float(profile.get("layout_scale", 1.0)))
     return profile
 
@@ -102,6 +108,12 @@ func _apply_layout_scale(profile: Dictionary, scale: float) -> void:
     for site in profile.get("town_sites", []):
         _scale_site(site, scale, physical_scale)
     for site in profile.get("camp_sites", []):
+        _scale_site(site, scale, physical_scale)
+    for site in profile.get("landmark_sites", []):
+        _scale_site(site, scale, physical_scale)
+    for site in profile.get("ecology_sites", []):
+        _scale_site(site, scale, physical_scale)
+    for site in profile.get("map_sites", []):
         _scale_site(site, scale, physical_scale)
     for site in profile.get("ford_sites", []):
         _scale_site(site, scale, physical_scale)
@@ -119,7 +131,16 @@ func _apply_layout_scale(profile: Dictionary, scale: float) -> void:
         basin["center"] = basin.get("center", Vector2.ZERO) * scale
         basin["inner"] = float(basin.get("inner", 0.0)) * scale
         basin["outer"] = float(basin.get("outer", 0.0)) * scale
-    for corridor_key in ["river_corridors", "road_corridors", "trail_corridors"]:
+    for landform in profile.get("landform_regions", []):
+        landform["center"] = landform.get("center", Vector2.ZERO) * scale
+        landform["radius"] = float(landform.get("radius", 0.0)) * scale
+        landform["length"] = float(landform.get("length", 0.0)) * scale
+        landform["width"] = float(landform.get("width", 0.0)) * scale
+        landform["wavelength"] = float(landform.get("wavelength", 0.0)) * scale
+    for palette_region in profile.get("terrain_palette_regions", []):
+        palette_region["center"] = palette_region.get("center", Vector2.ZERO) * scale
+        palette_region["radius"] = float(palette_region.get("radius", 0.0)) * scale
+    for corridor_key in ["river_corridors", "road_corridors", "trail_corridors", "field_boundaries"]:
         for corridor in profile.get(corridor_key, []):
             var scaled_points: Array = []
             for point in corridor.get("points", []):

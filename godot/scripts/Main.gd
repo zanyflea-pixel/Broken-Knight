@@ -142,7 +142,7 @@ func _process(delta: float) -> void:
     if _admin_view and is_instance_valid(_admin_marker):
         _admin_marker.position = Vector3($Player.global_position.x, 180.0, $Player.global_position.z)
     _sky_rotation_accumulator+=delta
-    if _sky_rotation_accumulator>=.066 and $Environment.environment:
+    if _sky_rotation_accumulator>=.125 and $Environment.environment:
         var sky_rotation: Vector3 = $Environment.environment.sky_rotation
         sky_rotation.y = fmod(sky_rotation.y + _sky_rotation_accumulator * 0.0026, TAU)
         $Environment.environment.sky_rotation = sky_rotation
