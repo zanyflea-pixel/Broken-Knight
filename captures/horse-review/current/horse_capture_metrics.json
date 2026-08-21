@@ -26,7 +26,7 @@
 	"bounds": {
 		"height_y": 2.07635188102722,
 		"length_z": 3.38731956481934,
-		"width_x": 1.25822913646698
+		"width_x": 1.26169216632843
 	},
 	"capture_count": 30,
 	"capture_failures": [],
@@ -63,18 +63,18 @@
 		"closeup_rump_tail_b"
 	],
 	"materials": [
-		"Riverwatch V14 Warm Bay",
-		"Riverwatch V14 Dark Points",
-		"Riverwatch V14 Hoof",
-		"Riverwatch V14 Muzzle",
-		"Riverwatch V14 Eye",
-		"Riverwatch V14 Pupil",
-		"Riverwatch V14 Eye Glint",
-		"Riverwatch V14 Mane Tail"
+		"Riverwatch V15 Warm Bay",
+		"Riverwatch V15 Dark Points",
+		"Riverwatch V15 Hoof",
+		"Riverwatch V15 Muzzle",
+		"Riverwatch V15 Eye",
+		"Riverwatch V15 Pupil",
+		"Riverwatch V15 Eye Glint",
+		"Riverwatch V15 Mane Tail"
 	],
 	"mesh_nodes": 1,
 	"source": "res://assets/animals/riverwatch_horse_awesome.bkglb",
 	"surfaces": 8,
-	"triangles_approx": 9636,
-	"vertices_approx": 5313
+	"triangles_approx": 10356,
+	"vertices_approx": 5681
 }

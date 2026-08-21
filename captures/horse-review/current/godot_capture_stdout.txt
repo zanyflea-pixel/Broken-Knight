@@ -4,7 +4,7 @@ OpenGL API 3.3.0 NVIDIA 610.74 - Compatibility - Using Device: NVIDIA - NVIDIA G
 HORSE_CAPTURE|START
 HORSE_CAPTURE|OUTPUT=C:\Users\Jimmy\Desktop\Broken Knight\captures\horse-review\current
 HORSE_CAPTURE|SOURCE=res://assets/animals/riverwatch_horse_awesome.bkglb
-HORSE_CAPTURE|AABB=[P: (-0.629115, 0.015844, -1.889687), S: (1.258229, 2.076352, 3.38732)]
+HORSE_CAPTURE|AABB=[P: (-0.630846, 0.015844, -1.889687), S: (1.261692, 2.076352, 3.38732)]
 HORSE_CAPTURE|CENTER=(0.0, 1.05402, -0.196028)
 HORSE_CAPTURE|MAX_DIMENSION=3.38731956481934
 HORSE_CAPTURE|SAVED|C:\Users\Jimmy\Desktop\Broken Knight\captures\horse-review\current/orbit_000.png

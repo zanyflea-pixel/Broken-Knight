@@ -4843,7 +4843,7 @@ def build_horse_model_v13_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v14_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V14
     #
@@ -5891,6 +5891,1149 @@ def build_horse_model(arm):
     arm[
         "broken_knight_horse_v14_goal"
     ] = "recognizable_horse_anatomy"
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V15
+    #
+    # COMPLETE HIND-LEG REBUILD
+    #
+    # V14's hind legs are NOT modified.
+    #
+    # They are deleted completely.
+    #
+    # V15 builds new hind legs from fresh geometry with a
+    # deliberately horse-like side silhouette:
+    #
+    # croup attachment
+    # muscular thigh
+    # forward stifle
+    # rear-sweeping gaskin
+    # projecting hock
+    # straight cannon
+    # fetlock
+    # sloped pastern
+    # forward hoof
+    #
+    # No inherited V12/V13/V14 leg deformation remains.
+    # ========================================================
+
+    build_horse_model_v14_base(
+        arm
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def find_material(
+        exact_name,
+        contains_text
+    ):
+
+        mat = bpy.data.materials.get(
+            exact_name
+        )
+
+        if mat is not None:
+            return mat
+
+        for candidate in bpy.data.materials:
+
+            if contains_text in candidate.name:
+                return candidate
+
+        return None
+
+    coat = find_material(
+        "Riverwatch V14 Warm Bay",
+        "Warm Bay"
+    )
+
+    dark_points = find_material(
+        "Riverwatch V14 Dark Points",
+        "Dark Points"
+    )
+
+    hoof_mat = find_material(
+        "Riverwatch V14 Hoof",
+        "Hoof"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "V15 could not find horse coat material"
+        )
+
+    if dark_points is None:
+        dark_points = coat
+
+    if hoof_mat is None:
+        hoof_mat = dark_points
+
+    def delete_object(
+        name
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    def smooth_object(
+        obj
+    ):
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def apply_subdivision(
+        obj,
+        levels=1
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V15 Anatomy Smooth",
+            "SUBSURF"
+        )
+
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = levels
+        modifier.render_levels = levels
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def bind_armature(
+        obj
+    ):
+
+        obj.parent = arm
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    # ========================================================
+    # DELETE THE BAD V14 HIND LEGS
+    # ========================================================
+
+    for old_name in (
+        "RiverwatchV14HindLeftLeg",
+        "RiverwatchV14HindRightLeg",
+        "RiverwatchV14HindLeftHoof",
+        "RiverwatchV14HindRightHoof",
+    ):
+
+        delete_object(
+            old_name
+        )
+
+    # ========================================================
+    # FRESH HIND LEG
+    #
+    # IMPORTANT:
+    #
+    # Horse faces toward negative Y.
+    #
+    # Therefore:
+    #
+    # smaller Y = forward
+    # larger Y = backward
+    #
+    # The key silhouette is:
+    #
+    # HIP
+    #   \
+    #    STIFLE   <-- forward
+    #       \
+    #        \
+    #         HOCK --> backward
+    #          |
+    #          |
+    #       FETLOCK
+    #          \
+    #           HOOF --> forward
+    # ========================================================
+
+    def build_hind_leg(
+        name,
+        side,
+        prefix
+    ):
+
+        x = (
+            side * 0.305
+        )
+
+        # ----------------------------------------------------
+        # FRESH ANATOMICAL CENTERS
+        #
+        # Each entry:
+        #
+        # x, y, z, side radius, depth radius
+        # ----------------------------------------------------
+
+        sections = [
+            # Deep thigh root buried into croup.
+            (
+                x,
+                0.545,
+                1.245,
+                0.190,
+                0.185
+            ),
+
+            # Upper thigh.
+            (
+                x,
+                0.500,
+                1.125,
+                0.180,
+                0.170
+            ),
+
+            # Lower thigh starts moving FORWARD.
+            (
+                x,
+                0.410,
+                1.010,
+                0.158,
+                0.150
+            ),
+
+            # STIFLE - clearly forward.
+            (
+                x,
+                0.305,
+                0.915,
+                0.138,
+                0.132
+            ),
+
+            # Upper gaskin sweeps back.
+            (
+                x,
+                0.355,
+                0.815,
+                0.120,
+                0.118
+            ),
+
+            # Mid gaskin.
+            (
+                x,
+                0.445,
+                0.720,
+                0.108,
+                0.110
+            ),
+
+            # Upper hock moving strongly backward.
+            (
+                x,
+                0.565,
+                0.635,
+                0.112,
+                0.120
+            ),
+
+            # HOCK - rear-most articulation.
+            (
+                x,
+                0.645,
+                0.565,
+                0.125,
+                0.135
+            ),
+
+            # Hock point / transition.
+            (
+                x,
+                0.625,
+                0.505,
+                0.105,
+                0.108
+            ),
+
+            # Upper cannon comes back beneath body.
+            (
+                x,
+                0.585,
+                0.425,
+                0.072,
+                0.068
+            ),
+
+            # Mid cannon.
+            (
+                x,
+                0.555,
+                0.335,
+                0.067,
+                0.062
+            ),
+
+            # Lower cannon.
+            (
+                x,
+                0.525,
+                0.250,
+                0.068,
+                0.063
+            ),
+
+            # FETLOCK.
+            (
+                x,
+                0.500,
+                0.190,
+                0.090,
+                0.086
+            ),
+
+            # PASTERN slopes forward.
+            (
+                x,
+                0.455,
+                0.125,
+                0.075,
+                0.070
+            ),
+        ]
+
+        centers = [
+            Vector(
+                (
+                    section[0],
+                    section[1],
+                    section[2]
+                )
+            )
+            for section in sections
+        ]
+
+        ring_count = 10
+
+        verts = []
+        faces = []
+
+        # ----------------------------------------------------
+        # TRUE 3D LOCAL FRAMES
+        # ----------------------------------------------------
+
+        def frame_at(
+            index
+        ):
+
+            if index == 0:
+
+                tangent = (
+                    centers[1]
+                    - centers[0]
+                )
+
+            elif index == len(centers) - 1:
+
+                tangent = (
+                    centers[-1]
+                    - centers[-2]
+                )
+
+            else:
+
+                tangent = (
+                    centers[index + 1]
+                    - centers[index - 1]
+                )
+
+            if tangent.length < 0.00001:
+
+                tangent = Vector(
+                    (
+                        0.0,
+                        0.0,
+                        -1.0
+                    )
+                )
+
+            tangent.normalize()
+
+            lateral = Vector(
+                (
+                    1.0,
+                    0.0,
+                    0.0
+                )
+            )
+
+            lateral = (
+                lateral
+                - tangent
+                * lateral.dot(
+                    tangent
+                )
+            )
+
+            if lateral.length < 0.00001:
+
+                lateral = Vector(
+                    (
+                        0.0,
+                        1.0,
+                        0.0
+                    )
+                )
+
+            lateral.normalize()
+
+            depth = tangent.cross(
+                lateral
+            )
+
+            if depth.length < 0.00001:
+
+                depth = Vector(
+                    (
+                        0.0,
+                        1.0,
+                        0.0
+                    )
+                )
+
+            depth.normalize()
+
+            return (
+                lateral,
+                depth
+            )
+
+        # ----------------------------------------------------
+        # CREATE THE LEG
+        # ----------------------------------------------------
+
+        for index, section in enumerate(
+            sections
+        ):
+
+            center = centers[
+                index
+            ]
+
+            lateral, depth = frame_at(
+                index
+            )
+
+            side_radius = section[3]
+            depth_radius = section[4]
+
+            for ring_index in range(
+                ring_count
+            ):
+
+                angle = (
+                    math.tau
+                    * float(ring_index)
+                    / float(ring_count)
+                )
+
+                # Slight shaping:
+                #
+                # thigh sections are fuller toward rear,
+                # hock is angular,
+                # cannon stays narrow.
+
+                lateral_amount = (
+                    math.cos(angle)
+                    * side_radius
+                )
+
+                depth_amount = (
+                    math.sin(angle)
+                    * depth_radius
+                )
+
+                point = (
+                    center
+                    + lateral
+                    * lateral_amount
+                    + depth
+                    * depth_amount
+                )
+
+                verts.append(
+                    tuple(point)
+                )
+
+        # ----------------------------------------------------
+        # CONNECT RINGS
+        # ----------------------------------------------------
+
+        for section_index in range(
+            len(sections) - 1
+        ):
+
+            first = (
+                section_index
+                * ring_count
+            )
+
+            second = (
+                section_index + 1
+            ) * ring_count
+
+            for ring_index in range(
+                ring_count
+            ):
+
+                next_ring = (
+                    ring_index + 1
+                ) % ring_count
+
+                faces.append(
+                    (
+                        first + ring_index,
+                        second + ring_index,
+                        second + next_ring,
+                        first + next_ring
+                    )
+                )
+
+        # ----------------------------------------------------
+        # CAPS
+        # ----------------------------------------------------
+
+        root_center_index = len(
+            verts
+        )
+
+        verts.append(
+            tuple(
+                centers[0]
+            )
+        )
+
+        lower_center_index = len(
+            verts
+        )
+
+        verts.append(
+            tuple(
+                centers[-1]
+            )
+        )
+
+        for ring_index in range(
+            ring_count
+        ):
+
+            next_ring = (
+                ring_index + 1
+            ) % ring_count
+
+            faces.append(
+                (
+                    root_center_index,
+                    next_ring,
+                    ring_index
+                )
+            )
+
+            final_start = (
+                len(sections) - 1
+            ) * ring_count
+
+            faces.append(
+                (
+                    lower_center_index,
+                    final_start + ring_index,
+                    final_start + next_ring
+                )
+            )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            coat
+        )
+
+        obj.data.materials.append(
+            dark_points
+        )
+
+        # ----------------------------------------------------
+        # DARK LOWER LEG
+        # ----------------------------------------------------
+
+        for polygon in obj.data.polygons:
+
+            average_z = (
+                sum(
+                    obj.data.vertices[
+                        vertex_index
+                    ].co.z
+                    for vertex_index
+                    in polygon.vertices
+                )
+                / float(
+                    len(
+                        polygon.vertices
+                    )
+                )
+            )
+
+            if average_z < 0.42:
+
+                polygon.material_index = 1
+
+        # ----------------------------------------------------
+        # WEIGHT GROUPS
+        # ----------------------------------------------------
+
+        upper_group = obj.vertex_groups.new(
+            name=prefix + ".upper"
+        )
+
+        lower_group = obj.vertex_groups.new(
+            name=prefix + ".lower"
+        )
+
+        hoof_group = obj.vertex_groups.new(
+            name=prefix + ".hoof"
+        )
+
+        for section_index in range(
+            len(sections)
+        ):
+
+            ids = list(
+                range(
+                    section_index * ring_count,
+                    section_index * ring_count
+                    + ring_count
+                )
+            )
+
+            if section_index <= 5:
+
+                upper_group.add(
+                    ids,
+                    1.0,
+                    "REPLACE"
+                )
+
+            elif section_index == 6:
+
+                upper_group.add(
+                    ids,
+                    0.65,
+                    "REPLACE"
+                )
+
+                lower_group.add(
+                    ids,
+                    0.35,
+                    "REPLACE"
+                )
+
+            elif section_index <= 11:
+
+                lower_group.add(
+                    ids,
+                    1.0,
+                    "REPLACE"
+                )
+
+            elif section_index == 12:
+
+                lower_group.add(
+                    ids,
+                    0.60,
+                    "REPLACE"
+                )
+
+                hoof_group.add(
+                    ids,
+                    0.40,
+                    "REPLACE"
+                )
+
+            else:
+
+                hoof_group.add(
+                    ids,
+                    1.0,
+                    "REPLACE"
+                )
+
+        upper_group.add(
+            [root_center_index],
+            1.0,
+            "REPLACE"
+        )
+
+        hoof_group.add(
+            [lower_center_index],
+            1.0,
+            "REPLACE"
+        )
+
+        apply_subdivision(
+            obj,
+            1
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # NEW HIND HOOF
+    # ========================================================
+
+    def build_hind_hoof(
+        name,
+        side,
+        bone_name
+    ):
+
+        x = (
+            side * 0.305
+        )
+
+        # The hoof points FORWARD, toward negative Y.
+        #
+        # Each slice:
+        #
+        # y, top_z, bottom_z, half_width
+
+        slices = [
+            # Narrow heel / pastern connection.
+            (
+                0.490,
+                0.145,
+                0.070,
+                0.075
+            ),
+
+            # Heel body.
+            (
+                0.455,
+                0.128,
+                0.043,
+                0.095
+            ),
+
+            # Main hoof.
+            (
+                0.390,
+                0.110,
+                0.028,
+                0.120
+            ),
+
+            # Broad toe.
+            (
+                0.315,
+                0.095,
+                0.024,
+                0.133
+            ),
+
+            # Rounded front tip.
+            (
+                0.255,
+                0.078,
+                0.030,
+                0.112
+            ),
+        ]
+
+        verts = []
+        faces = []
+
+        # Four vertices per slice:
+        #
+        # top left
+        # top right
+        # bottom right
+        # bottom left
+
+        for (
+            y,
+            top_z,
+            bottom_z,
+            half_width
+        ) in slices:
+
+            verts.extend(
+                [
+                    (
+                        x - half_width,
+                        y,
+                        top_z
+                    ),
+
+                    (
+                        x + half_width,
+                        y,
+                        top_z
+                    ),
+
+                    (
+                        x + half_width,
+                        y,
+                        bottom_z
+                    ),
+
+                    (
+                        x - half_width,
+                        y,
+                        bottom_z
+                    ),
+                ]
+            )
+
+        for index in range(
+            len(slices) - 1
+        ):
+
+            first = (
+                index * 4
+            )
+
+            second = (
+                index + 1
+            ) * 4
+
+            # Top.
+            faces.append(
+                (
+                    first,
+                    first + 1,
+                    second + 1,
+                    second
+                )
+            )
+
+            # Right.
+            faces.append(
+                (
+                    first + 1,
+                    first + 2,
+                    second + 2,
+                    second + 1
+                )
+            )
+
+            # Bottom.
+            faces.append(
+                (
+                    first + 2,
+                    first + 3,
+                    second + 3,
+                    second + 2
+                )
+            )
+
+            # Left.
+            faces.append(
+                (
+                    first + 3,
+                    first,
+                    second,
+                    second + 3
+                )
+            )
+
+        # Heel.
+        faces.append(
+            (
+                0,
+                3,
+                2,
+                1
+            )
+        )
+
+        final = (
+            len(slices) - 1
+        ) * 4
+
+        # Toe.
+        faces.append(
+            (
+                final,
+                final + 1,
+                final + 2,
+                final + 3
+            )
+        )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            hoof_mat
+        )
+
+        group = obj.vertex_groups.new(
+            name=bone_name
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        # Bevel rather than large subdivision,
+        # preserving a recognizable hoof profile.
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V15 Hoof Edge",
+            "BEVEL"
+        )
+
+        modifier.width = 0.014
+        modifier.segments = 3
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # BUILD BOTH FRESH LEGS
+    # ========================================================
+
+    build_hind_leg(
+        "RiverwatchV15HindLeftLeg",
+        -1,
+        "hind.L"
+    )
+
+    build_hind_leg(
+        "RiverwatchV15HindRightLeg",
+        1,
+        "hind.R"
+    )
+
+    build_hind_hoof(
+        "RiverwatchV15HindLeftHoof",
+        -1,
+        "hind.L.hoof"
+    )
+
+    build_hind_hoof(
+        "RiverwatchV15HindRightHoof",
+        1,
+        "hind.R.hoof"
+    )
+
+    # ========================================================
+    # CROUP / LEG CONNECTION
+    #
+    # Very small change only.
+    #
+    # Do not globally distort the V14 body.
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV14AnatomyControlCage"
+    )
+
+    if core is not None:
+
+        for vertex in core.data.vertices:
+
+            y = vertex.co.y
+            z = vertex.co.z
+
+            if (
+                y > 0.38
+                and y < 0.70
+                and z > 1.08
+                and z < 1.42
+            ):
+
+                # Add enough quarter mass that the new thigh
+                # appears to emerge from the horse rather than
+                # hang from underneath it.
+
+                vertex.co.x *= 1.018
+
+                vertex.co.z -= 0.006
+
+    # ========================================================
+    # VERSION MATERIAL NAMES
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name.startswith(
+            "Riverwatch V14"
+        ):
+
+            mat.name = mat.name.replace(
+                "Riverwatch V14",
+                "Riverwatch V15",
+                1
+            )
+
+    # ========================================================
+    # RENAME OTHER V14 HORSE OBJECTS
+    # ========================================================
+
+    for obj in bpy.context.scene.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV14"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV14",
+                "RiverwatchV15",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "hind_leg_rebuild_v15"
+
+    arm[
+        "broken_knight_horse_v15_hind_leg"
+    ] = "fresh_zero_based_geometry"
+
+    arm[
+        "broken_knight_horse_v15_thigh"
+    ] = "deep_muscular_croup_attachment"
+
+    arm[
+        "broken_knight_horse_v15_stifle"
+    ] = "forward_projecting"
+
+    arm[
+        "broken_knight_horse_v15_gaskin"
+    ] = "rear_sweeping"
+
+    arm[
+        "broken_knight_horse_v15_hock"
+    ] = "large_rear_articulation"
+
+    arm[
+        "broken_knight_horse_v15_cannon"
+    ] = "straight_narrow"
+
+    arm[
+        "broken_knight_horse_v15_fetlock"
+    ] = "defined"
+
+    arm[
+        "broken_knight_horse_v15_pastern"
+    ] = "forward_sloped"
+
+    arm[
+        "broken_knight_horse_v15_hoof"
+    ] = "forward_wedge_narrow_heel_broad_toe"
+
+    arm[
+        "broken_knight_horse_v15_goal"
+    ] = "fix_terrible_back_legs"
 
 def reset_pose(arm):
     for bone in arm.pose.bones:
