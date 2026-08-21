@@ -13707,7 +13707,7 @@ def build_horse_model_v20_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v21_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V21
     #
@@ -15055,6 +15055,1292 @@ def build_horse_model(arm):
     arm[
         "broken_knight_horse_v21_legs"
     ] = "preserved_from_v20"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_for_current_anatomy_review"
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V22
+    #
+    # SILHOUETTE POLISH
+    #
+    # Visual review of V21:
+    #
+    # IMPROVED:
+    #
+    # - head is clearly better
+    # - head length is closer
+    # - ears finally read correctly
+    # - front half reads more like a horse
+    # - leg placement is good enough to preserve
+    #
+    # STILL NEEDS WORK:
+    #
+    # - muzzle still slightly chunky
+    # - jaw still slightly heavy
+    # - mane is too weak / nearly invisible
+    # - croup patch still reads as separate geometry
+    # - front hooves remain block-like
+    # - hind hooves could taper more
+    #
+    # V22:
+    #
+    # - preserve ALL FOUR LEGS
+    # - preserve basic V21 proportions
+    # - only subtle head refinement
+    # - rebuild fuller crest mane
+    # - rebuild forelock
+    # - union croup patch into body if possible
+    # - fallback safely if boolean union fails
+    # - reduce hoof width/length
+    # - add natural hoof slope
+    #
+    # ========================================================
+
+    build_horse_model_v21_base(
+        arm
+    )
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    def find_material(
+        contains_text
+    ):
+
+        for candidate in bpy.data.materials:
+
+            if contains_text.lower() in candidate.name.lower():
+                return candidate
+
+        return None
+
+    coat = find_material(
+        "Warm Bay"
+    )
+
+    dark_points = find_material(
+        "Dark Points"
+    )
+
+    mane_tail_mat = find_material(
+        "Mane Tail"
+    )
+
+    if coat is None:
+
+        raise RuntimeError(
+            "V22 could not find Warm Bay material"
+        )
+
+    if dark_points is None:
+        dark_points = coat
+
+    if mane_tail_mat is None:
+        mane_tail_mat = dark_points
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def smooth_object(
+        obj
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_armature(
+        obj
+    ):
+
+        obj.parent = arm
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def apply_subdivision(
+        obj,
+        levels=1
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V22 Smooth",
+            "SUBSURF"
+        )
+
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = levels
+        modifier.render_levels = levels
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    # ========================================================
+    # FIND MAIN HORSE BODY
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV21AnatomyControlCage"
+    )
+
+    if core is None:
+
+        for candidate in bpy.data.objects:
+
+            if (
+                candidate.name.startswith(
+                    "RiverwatchV21"
+                )
+                and "AnatomyControlCage" in candidate.name
+            ):
+
+                core = candidate
+                break
+
+    if core is None:
+
+        raise RuntimeError(
+            "V22 could not locate V21 anatomy cage"
+        )
+
+    # ========================================================
+    # SUBTLE HEAD POLISH
+    #
+    # Do NOT repeat the large V21 change.
+    #
+    # V21 head is close enough now.
+    #
+    # V22:
+    #
+    # - shorten only another ~4.5 percent
+    # - slightly narrow muzzle
+    # - reduce lower jaw
+    # - very small upward lift
+    #
+    # ========================================================
+
+    HEAD_PIVOT_Y = -1.035
+    HEAD_PIVOT_Z = 1.815
+
+    def refine_head_point(
+        x,
+        y,
+        z
+    ):
+
+        if y >= HEAD_PIVOT_Y:
+
+            return (
+                x,
+                y,
+                z
+            )
+
+        # Mild additional shortening.
+        new_y = (
+            HEAD_PIVOT_Y
+            + (
+                y
+                - HEAD_PIVOT_Y
+            )
+            * 0.955
+        )
+
+        distance = max(
+            0.0,
+            min(
+                1.0,
+                (
+                    -new_y
+                    - 1.080
+                )
+                / 0.430
+            )
+        )
+
+        new_x = (
+            x
+            * (
+                1.0
+                - 0.025
+                * distance
+            )
+        )
+
+        new_z = z
+
+        # -----------------------------------------------
+        # MUZZLE
+        # -----------------------------------------------
+
+        muzzle_amount = max(
+            0.0,
+            min(
+                1.0,
+                (
+                    -new_y
+                    - 1.285
+                )
+                / 0.250
+            )
+        )
+
+        new_x *= (
+            1.0
+            - 0.060
+            * muzzle_amount
+        )
+
+        # Lift underside slightly to reduce heavy jaw.
+        if (
+            new_y < -1.170
+            and new_z < 1.700
+        ):
+
+            jaw_amount = max(
+                0.0,
+                min(
+                    1.0,
+                    (
+                        -new_y
+                        - 1.170
+                    )
+                    / 0.280
+                )
+            )
+
+            new_z += (
+                0.014
+                * jaw_amount
+            )
+
+        # Slight upward head carriage.
+        new_z += (
+            0.010
+            * distance
+        )
+
+        return (
+            new_x,
+            new_y,
+            new_z
+        )
+
+    for vertex in core.data.vertices:
+
+        if vertex.co.y < HEAD_PIVOT_Y:
+
+            (
+                vertex.co.x,
+                vertex.co.y,
+                vertex.co.z
+            ) = refine_head_point(
+                vertex.co.x,
+                vertex.co.y,
+                vertex.co.z
+            )
+
+    # ========================================================
+    # FACIAL DETAILS FOLLOW HEAD
+    # ========================================================
+
+    face_tokens = (
+        "Eye",
+        "Pupil",
+        "EyeGlint",
+        "Nostril",
+        "MuzzlePatch",
+        "Blaze",
+    )
+
+    for obj in list(
+        bpy.context.scene.objects
+    ):
+
+        if not obj.name.startswith(
+            "RiverwatchV21"
+        ):
+
+            continue
+
+        if not any(
+            token in obj.name
+            for token in face_tokens
+        ):
+
+            continue
+
+        (
+            obj.location.x,
+            obj.location.y,
+            obj.location.z
+        ) = refine_head_point(
+            obj.location.x,
+            obj.location.y,
+            obj.location.z
+        )
+
+        if "MuzzlePatch" in obj.name:
+
+            obj.scale.x *= 0.88
+            obj.scale.y *= 0.93
+            obj.scale.z *= 0.90
+
+    # ========================================================
+    # OLD MANE / FORELOCK
+    # ========================================================
+
+    for name in (
+        "RiverwatchV21Mane",
+        "RiverwatchV21Forelock",
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    # ========================================================
+    # V22 MANE
+    #
+    # V21 mane is technically there but visually too weak.
+    #
+    # V22 creates a thicker, more visible mane that:
+    #
+    # - follows crest
+    # - hangs to one side
+    # - has real volume
+    # - has irregular lower edge
+    # - does NOT become a black neck scarf
+    #
+    # Six vertices per station:
+    #
+    # root left/right
+    # middle left/right
+    # tip left/right
+    #
+    # ========================================================
+
+    def build_mane():
+
+        name = "RiverwatchV22Mane"
+
+        # y, root_z, mid_x, mid_z, tip_x, tip_z
+        stations = [
+
+            (
+                -1.035,
+                2.040,
+                -0.045,
+                1.980,
+                -0.080,
+                1.920
+            ),
+
+            (
+                -0.985,
+                2.055,
+                -0.060,
+                1.985,
+                -0.100,
+                1.895
+            ),
+
+            (
+                -0.930,
+                2.058,
+                -0.075,
+                1.980,
+                -0.125,
+                1.855
+            ),
+
+            (
+                -0.870,
+                2.045,
+                -0.090,
+                1.950,
+                -0.145,
+                1.815
+            ),
+
+            (
+                -0.810,
+                2.020,
+                -0.100,
+                1.915,
+                -0.160,
+                1.770
+            ),
+
+            (
+                -0.750,
+                1.990,
+                -0.110,
+                1.875,
+                -0.172,
+                1.725
+            ),
+
+            (
+                -0.695,
+                1.955,
+                -0.110,
+                1.835,
+                -0.168,
+                1.690
+            ),
+
+            (
+                -0.645,
+                1.915,
+                -0.105,
+                1.795,
+                -0.158,
+                1.660
+            ),
+
+            (
+                -0.600,
+                1.870,
+                -0.090,
+                1.755,
+                -0.138,
+                1.640
+            ),
+
+            (
+                -0.565,
+                1.835,
+                -0.075,
+                1.725,
+                -0.115,
+                1.630
+            ),
+        ]
+
+        root_width = 0.026
+        mid_width = 0.035
+        tip_width = 0.030
+
+        verts = []
+        faces = []
+
+        for (
+            y,
+            root_z,
+            mid_x,
+            mid_z,
+            tip_x,
+            tip_z
+        ) in stations:
+
+            verts.extend(
+                [
+                    # Root left.
+                    (
+                        -root_width,
+                        y,
+                        root_z
+                    ),
+
+                    # Root right.
+                    (
+                        root_width,
+                        y,
+                        root_z
+                    ),
+
+                    # Middle left.
+                    (
+                        mid_x - mid_width,
+                        y + 0.010,
+                        mid_z
+                    ),
+
+                    # Middle right.
+                    (
+                        mid_x + mid_width,
+                        y + 0.010,
+                        mid_z
+                    ),
+
+                    # Tip left.
+                    (
+                        tip_x - tip_width,
+                        y + 0.020,
+                        tip_z
+                    ),
+
+                    # Tip right.
+                    (
+                        tip_x + tip_width,
+                        y + 0.020,
+                        tip_z
+                    ),
+                ]
+            )
+
+        for index in range(
+            len(stations) - 1
+        ):
+
+            a = index * 6
+
+            b = (
+                index + 1
+            ) * 6
+
+            # Root-to-middle left face.
+            faces.append(
+                (
+                    a,
+                    b,
+                    b + 2,
+                    a + 2
+                )
+            )
+
+            # Root-to-middle right face.
+            faces.append(
+                (
+                    a + 1,
+                    a + 3,
+                    b + 3,
+                    b + 1
+                )
+            )
+
+            # Middle-to-tip left.
+            faces.append(
+                (
+                    a + 2,
+                    b + 2,
+                    b + 4,
+                    a + 4
+                )
+            )
+
+            # Middle-to-tip right.
+            faces.append(
+                (
+                    a + 3,
+                    a + 5,
+                    b + 5,
+                    b + 3
+                )
+            )
+
+            # Crest thickness.
+            faces.append(
+                (
+                    a,
+                    a + 1,
+                    b + 1,
+                    b
+                )
+            )
+
+            # Middle thickness.
+            faces.append(
+                (
+                    a + 2,
+                    a + 3,
+                    b + 3,
+                    b + 2
+                )
+            )
+
+            # Tip thickness.
+            faces.append(
+                (
+                    a + 4,
+                    b + 4,
+                    b + 5,
+                    a + 5
+                )
+            )
+
+        # Front cap.
+        faces.append(
+            (
+                0,
+                2,
+                4,
+                5,
+                3,
+                1
+            )
+        )
+
+        final = (
+            len(stations) - 1
+        ) * 6
+
+        # Rear cap.
+        faces.append(
+            (
+                final,
+                final + 1,
+                final + 3,
+                final + 5,
+                final + 4,
+                final + 2
+            )
+        )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            mane_tail_mat
+        )
+
+        group = obj.vertex_groups.new(
+            name="neck"
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        apply_subdivision(
+            obj,
+            1
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    build_mane()
+
+    # ========================================================
+    # V22 FORELOCK
+    # ========================================================
+
+    def build_forelock():
+
+        name = "RiverwatchV22Forelock"
+
+        verts = [
+
+            (
+                -0.045,
+                -1.055,
+                2.030
+            ),
+
+            (
+                0.045,
+                -1.055,
+                2.030
+            ),
+
+            (
+                -0.040,
+                -1.095,
+                1.970
+            ),
+
+            (
+                0.030,
+                -1.100,
+                1.970
+            ),
+
+            (
+                -0.022,
+                -1.130,
+                1.910
+            ),
+
+            (
+                0.018,
+                -1.135,
+                1.910
+            ),
+
+            (
+                -0.006,
+                -1.150,
+                1.870
+            ),
+
+            (
+                0.008,
+                -1.150,
+                1.870
+            ),
+        ]
+
+        faces = [
+
+            (
+                0,
+                1,
+                3,
+                2
+            ),
+
+            (
+                2,
+                3,
+                5,
+                4
+            ),
+
+            (
+                4,
+                5,
+                7,
+                6
+            ),
+        ]
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            mane_tail_mat
+        )
+
+        group = obj.vertex_groups.new(
+            name="head"
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        solidify = obj.modifiers.new(
+            "V22 Forelock Thickness",
+            "SOLIDIFY"
+        )
+
+        solidify.thickness = 0.010
+
+        bpy.ops.object.modifier_apply(
+            modifier=solidify.name
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    build_forelock()
+
+    # ========================================================
+    # CROUP PATCH INTEGRATION
+    #
+    # V20/V21 solved the giant socket but created a visible
+    # separate coat-colored plate.
+    #
+    # V22 attempts to BOOLEAN UNION that patch into the body.
+    #
+    # This is the first attempt to make the correction actual
+    # contiguous body geometry instead of another overlay.
+    #
+    # If Blender boolean fails, V22 does NOT abort.
+    # It falls back to sinking/shrinking the patch farther.
+    # ========================================================
+
+    croup_patch = bpy.data.objects.get(
+        "RiverwatchV21CroupBlendPatch"
+    )
+
+    croup_union_success = False
+
+    if croup_patch is not None:
+
+        # Push patch a little deeper first so the two meshes
+        # definitely intersect for boolean union.
+        for vertex in croup_patch.data.vertices:
+
+            vertex.co.y -= 0.020
+
+        try:
+
+            bpy.ops.object.select_all(
+                action="DESELECT"
+            )
+
+            core.select_set(
+                True
+            )
+
+            bpy.context.view_layer.objects.active = core
+
+            boolean_modifier = core.modifiers.new(
+                "V22 Croup Seam Union",
+                "BOOLEAN"
+            )
+
+            boolean_modifier.operation = "UNION"
+            boolean_modifier.solver = "EXACT"
+            boolean_modifier.object = croup_patch
+
+            bpy.ops.object.modifier_apply(
+                modifier=boolean_modifier.name
+            )
+
+            if croup_patch.name in bpy.data.objects:
+
+                bpy.data.objects.remove(
+                    croup_patch,
+                    do_unlink=True
+                )
+
+            smooth_object(
+                core
+            )
+
+            croup_union_success = True
+
+        except Exception as boolean_error:
+
+            print(
+                "V22_CROUP_BOOLEAN_WARNING",
+                str(
+                    boolean_error
+                )
+            )
+
+            # Remove failed boolean modifier if it still exists.
+            failed_modifier = core.modifiers.get(
+                "V22 Croup Seam Union"
+            )
+
+            if failed_modifier is not None:
+
+                core.modifiers.remove(
+                    failed_modifier
+                )
+
+            # Fallback:
+            # make overlay smaller and deeper.
+            if (
+                croup_patch is not None
+                and croup_patch.name in bpy.data.objects
+            ):
+
+                center_z = 1.355
+
+                for vertex in croup_patch.data.vertices:
+
+                    vertex.co.x *= 0.900
+
+                    vertex.co.z = (
+                        center_z
+                        + (
+                            vertex.co.z
+                            - center_z
+                        )
+                        * 0.900
+                    )
+
+                    vertex.co.y -= 0.030
+
+    # ========================================================
+    # TAIL ROOT / FLOW
+    #
+    # Tail itself is much better than old versions.
+    #
+    # Make upper root a little narrower and add a subtle
+    # sideways flow lower down.
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV21Tail"
+    )
+
+    if tail is not None:
+
+        for vertex in tail.data.vertices:
+
+            z = vertex.co.z
+
+            if z > 1.220:
+
+                # Root is narrow.
+                vertex.co.x *= 0.880
+
+            elif z > 0.800:
+
+                # Preserve moderate body.
+                vertex.co.x *= 0.960
+
+            elif z < 0.650:
+
+                # Stronger lower taper.
+                vertex.co.x *= 0.900
+
+            flow = max(
+                0.0,
+                min(
+                    1.0,
+                    (
+                        1.20 - z
+                    )
+                    / 0.80
+                )
+            )
+
+            vertex.co.x += (
+                0.018
+                * flow
+            )
+
+    # ========================================================
+    # HOOF POLISH
+    #
+    # No leg rebuild.
+    #
+    # Reduce blocky appearance by:
+    #
+    # - narrowing width
+    # - shortening front/back length
+    # - lifting heel slightly
+    # - keeping toe lower
+    #
+    # Horse faces negative Y.
+    # ========================================================
+
+    def polish_hoof(
+        name,
+        width_scale,
+        length_scale
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        if len(
+            obj.data.vertices
+        ) == 0:
+            return
+
+        center_x = sum(
+            vertex.co.x
+            for vertex in obj.data.vertices
+        ) / float(
+            len(
+                obj.data.vertices
+            )
+        )
+
+        center_y = sum(
+            vertex.co.y
+            for vertex in obj.data.vertices
+        ) / float(
+            len(
+                obj.data.vertices
+            )
+        )
+
+        max_distance_y = max(
+            abs(
+                vertex.co.y
+                - center_y
+            )
+            for vertex in obj.data.vertices
+        )
+
+        if max_distance_y < 0.0001:
+            max_distance_y = 1.0
+
+        for vertex in obj.data.vertices:
+
+            old_local_y = (
+                vertex.co.y
+                - center_y
+            )
+
+            vertex.co.x = (
+                center_x
+                + (
+                    vertex.co.x
+                    - center_x
+                )
+                * width_scale
+            )
+
+            vertex.co.y = (
+                center_y
+                + old_local_y
+                * length_scale
+            )
+
+            # Positive local Y = rear / heel.
+            heel_amount = max(
+                0.0,
+                old_local_y
+                / max_distance_y
+            )
+
+            # Negative local Y = front / toe.
+            toe_amount = max(
+                0.0,
+                -old_local_y
+                / max_distance_y
+            )
+
+            # Heel slightly higher.
+            vertex.co.z += (
+                0.012
+                * heel_amount
+            )
+
+            # Toe very slightly lower.
+            vertex.co.z -= (
+                0.003
+                * toe_amount
+            )
+
+    polish_hoof(
+        "RiverwatchV21FrontLeftHoof",
+        0.88,
+        0.91
+    )
+
+    polish_hoof(
+        "RiverwatchV21FrontRightHoof",
+        0.88,
+        0.91
+    )
+
+    polish_hoof(
+        "RiverwatchV21HindLeftHoof",
+        0.93,
+        0.94
+    )
+
+    polish_hoof(
+        "RiverwatchV21HindRightHoof",
+        0.93,
+        0.94
+    )
+
+    # ========================================================
+    # EAR POLISH
+    #
+    # V21 ears are already much better.
+    #
+    # Only tiny adjustment:
+    # slightly taller and farther apart.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV21LeftEar",
+        "RiverwatchV21RightEar",
+    ):
+
+        ear = bpy.data.objects.get(
+            name
+        )
+
+        if ear is None:
+            continue
+
+        side_sign = (
+            -1.0
+            if "Left" in name
+            else 1.0
+        )
+
+        for vertex in ear.data.vertices:
+
+            if vertex.co.z > 2.035:
+
+                vertex.co.z += 0.018
+
+            vertex.co.x += (
+                side_sign
+                * 0.006
+            )
+
+    # ========================================================
+    # RENAME V21 -> V22
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name.startswith(
+            "Riverwatch V21"
+        ):
+
+            mat.name = mat.name.replace(
+                "Riverwatch V21",
+                "Riverwatch V22",
+                1
+            )
+
+    for obj in bpy.context.scene.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV21"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV21",
+                "RiverwatchV22",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "silhouette_polish_v22"
+
+    arm[
+        "broken_knight_horse_v22_basis"
+    ] = "direct_visual_v21_contact_sheet"
+
+    arm[
+        "broken_knight_horse_v22_head"
+    ] = "subtle_shorter_tapered_muzzle"
+
+    arm[
+        "broken_knight_horse_v22_mane"
+    ] = "fuller_visible_three_stage_crest_mane"
+
+    arm[
+        "broken_knight_horse_v22_forelock"
+    ] = "fuller_tapered_forelock"
+
+    arm[
+        "broken_knight_horse_v22_croup_union"
+    ] = (
+        "success"
+        if croup_union_success
+        else "fallback_deeper_overlay"
+    )
+
+    arm[
+        "broken_knight_horse_v22_hooves"
+    ] = "smaller_sloped_less_blocky"
+
+    arm[
+        "broken_knight_horse_v22_legs"
+    ] = "preserved_v21"
+
+    arm[
+        "broken_knight_horse_v22_tail"
+    ] = "preserved_with_root_and_taper_polish"
 
     arm[
         "broken_knight_horse_animation_acceptance"
