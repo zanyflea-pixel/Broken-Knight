@@ -3227,7 +3227,7 @@ def build_horse_model_v11_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v12_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V12
     #
@@ -3898,6 +3898,948 @@ def build_horse_model(arm):
     arm[
         "broken_knight_horse_animation_acceptance"
     ] = "ignored_for_anatomy_pass"
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V13
+    #
+    # SILHOUETTE BALANCE PASS
+    #
+    # V12 successfully made a substantial visible change,
+    # but width expanded too aggressively.
+    #
+    # V13 focuses on SHAPE rather than raw bulk:
+    #
+    # - reduce excessive overall width
+    # - preserve powerful croup
+    # - round rump vertically rather than sideways
+    # - cleaner topline
+    # - deeper rib cage
+    # - natural flank tuck
+    # - stronger chest
+    # - clear neck/body transition
+    # - curved neck crest / throat relationship
+    # - more downward horse-like head angle
+    # - smaller tapered muzzle
+    # - defined cheek and jaw
+    # - better hind leg S curve
+    # - mane hangs DOWN rather than sticking sideways
+    # - tail hangs with more vertical weight
+    # ========================================================
+
+    build_horse_model_v12_base(
+        arm
+    )
+
+    def gauss(
+        value,
+        center,
+        spread
+    ):
+        return math.exp(
+            -((value - center) / spread) ** 2
+        )
+
+    def clamp01(value):
+        return max(
+            0.0,
+            min(
+                1.0,
+                value
+            )
+        )
+
+    def rotate_head_point(
+        y,
+        z,
+        angle=math.radians(8.5)
+    ):
+        # Pivot near the poll.
+        pivot_y = -0.995
+        pivot_z = 1.825
+
+        dy = y - pivot_y
+        dz = z - pivot_z
+
+        cosine = math.cos(
+            angle
+        )
+
+        sine = math.sin(
+            angle
+        )
+
+        new_y = (
+            pivot_y
+            + dy * cosine
+            - dz * sine
+        )
+
+        new_z = (
+            pivot_z
+            + dy * sine
+            + dz * cosine
+        )
+
+        return (
+            new_y,
+            new_z
+        )
+
+    # ========================================================
+    # MAIN BODY
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV12AnatomyControlCage"
+    )
+
+    if core is None:
+        raise RuntimeError(
+            "V13 could not locate the V12 anatomy mesh"
+        )
+
+    for vertex in core.data.vertices:
+
+        x = vertex.co.x
+        y = vertex.co.y
+        z = vertex.co.z
+
+        croup = gauss(
+            y,
+            0.67,
+            0.34
+        )
+
+        loin = gauss(
+            y,
+            0.36,
+            0.31
+        )
+
+        barrel = gauss(
+            y,
+            0.03,
+            0.40
+        )
+
+        flank = gauss(
+            y,
+            0.29,
+            0.21
+        )
+
+        chest = gauss(
+            y,
+            -0.25,
+            0.22
+        )
+
+        shoulder = gauss(
+            y,
+            -0.42,
+            0.20
+        )
+
+        withers = gauss(
+            y,
+            -0.56,
+            0.16
+        )
+
+        neck = gauss(
+            y,
+            -0.78,
+            0.25
+        )
+
+        poll = gauss(
+            y,
+            -1.00,
+            0.16
+        )
+
+        cheek = gauss(
+            y,
+            -1.22,
+            0.16
+        )
+
+        muzzle = gauss(
+            y,
+            -1.43,
+            0.16
+        )
+
+        # ----------------------------------------------------
+        # CONTROL V12 WIDTH OVERCORRECTION
+        # ----------------------------------------------------
+
+        scale_x = 1.0
+
+        # Bring torso width back toward believable.
+        scale_x -= 0.045 * croup
+        scale_x -= 0.065 * loin
+        scale_x -= 0.070 * barrel
+        scale_x -= 0.055 * chest
+        scale_x -= 0.040 * shoulder
+
+        # Neck gets slimmer.
+        scale_x -= 0.065 * neck
+
+        # Cheek remains strong.
+        if (
+            y < -1.05
+            and y > -1.38
+            and z < 1.84
+        ):
+            scale_x += (
+                0.035
+                * cheek
+            )
+
+        # Muzzle becomes clearly smaller than jaw.
+        if y < -1.30:
+            scale_x -= (
+                0.085
+                * muzzle
+            )
+
+        vertex.co.x *= scale_x
+
+        # ====================================================
+        # RUMP / CROUP
+        # ====================================================
+
+        if y > 0.34:
+
+            # V12 got wide; V13 makes the croup round through
+            # height instead.
+
+            if z > 1.68:
+
+                vertex.co.z -= (
+                    0.035
+                    * croup
+                )
+
+            elif (
+                z > 1.35
+                and z <= 1.68
+            ):
+
+                vertex.co.z += (
+                    0.028
+                    * croup
+                )
+
+            elif (
+                z > 1.12
+                and z <= 1.35
+            ):
+
+                vertex.co.x *= (
+                    1.0
+                    + 0.020 * croup
+                )
+
+        # ====================================================
+        # TOPLINE
+        # ====================================================
+
+        # Smooth overly humped loin.
+        if (
+            y > 0.12
+            and y < 0.48
+            and z > 1.70
+        ):
+
+            vertex.co.z -= (
+                0.030
+                * loin
+            )
+
+        # Slight lift behind withers keeps the back from
+        # collapsing visually.
+        if (
+            y < -0.05
+            and y > -0.32
+            and z > 1.67
+        ):
+
+            vertex.co.z += (
+                0.015
+                * barrel
+            )
+
+        # ====================================================
+        # RIB CAGE
+        # ====================================================
+
+        # Add depth instead of simply adding width.
+        if (
+            y > -0.15
+            and y < 0.28
+            and z < 1.27
+        ):
+
+            vertex.co.z -= (
+                0.045
+                * barrel
+            )
+
+        # ====================================================
+        # FLANK TUCK
+        # ====================================================
+
+        if (
+            y > 0.17
+            and y < 0.48
+            and z < 1.18
+        ):
+
+            vertex.co.z += (
+                0.030
+                * flank
+            )
+
+        # ====================================================
+        # CHEST
+        # ====================================================
+
+        if (
+            y > -0.46
+            and y < -0.10
+            and z < 1.28
+        ):
+
+            vertex.co.z -= (
+                0.035
+                * chest
+            )
+
+        # Fuller lower front chest.
+        if (
+            y > -0.43
+            and y < -0.18
+            and z > 1.18
+            and z < 1.48
+        ):
+
+            vertex.co.x *= (
+                1.0
+                + 0.025 * chest
+            )
+
+        # ====================================================
+        # SHOULDER
+        # ====================================================
+
+        # Pull upper shoulder slightly back into torso,
+        # avoiding a round front-end blob.
+
+        if (
+            y > -0.56
+            and y < -0.26
+            and z > 1.42
+            and z < 1.73
+        ):
+
+            vertex.co.y += (
+                0.025
+                * shoulder
+            )
+
+        # ====================================================
+        # WITHERS
+        # ====================================================
+
+        if (
+            z > 1.79
+            and y > -0.66
+            and y < -0.45
+        ):
+
+            vertex.co.z -= (
+                0.025
+                * withers
+            )
+
+        # ====================================================
+        # NECK S CURVE
+        # ====================================================
+
+        if (
+            y < -0.56
+            and y > -1.03
+        ):
+
+            # Upper crest moves slightly toward head.
+            if z > 1.78:
+
+                vertex.co.y -= (
+                    0.035
+                    * neck
+                )
+
+                vertex.co.z += (
+                    0.020
+                    * neck
+                )
+
+            # Throat returns toward chest.
+            if z < 1.63:
+
+                vertex.co.y += (
+                    0.035
+                    * neck
+                )
+
+                vertex.co.z += (
+                    0.010
+                    * neck
+                )
+
+        # Narrow poll.
+        if (
+            y < -0.90
+            and y > -1.08
+        ):
+
+            vertex.co.x *= (
+                1.0
+                - 0.030 * poll
+            )
+
+        # ====================================================
+        # HEAD ROTATION
+        # ====================================================
+
+        if y < -1.00:
+
+            new_y, new_z = rotate_head_point(
+                vertex.co.y,
+                vertex.co.z
+            )
+
+            vertex.co.y = new_y
+            vertex.co.z = new_z
+
+        # ====================================================
+        # CHEEK / JAW
+        # ====================================================
+
+        if (
+            vertex.co.y < -1.08
+            and vertex.co.y > -1.34
+            and vertex.co.z < 1.78
+        ):
+
+            vertex.co.z -= (
+                0.018
+                * cheek
+            )
+
+            vertex.co.x *= (
+                1.0
+                + 0.020 * cheek
+            )
+
+        # ====================================================
+        # MUZZLE TAPER
+        # ====================================================
+
+        if vertex.co.y < -1.30:
+
+            amount = clamp01(
+                (
+                    -vertex.co.y
+                    - 1.30
+                )
+                / 0.35
+            )
+
+            vertex.co.x *= (
+                1.0
+                - 0.080 * amount
+            )
+
+            vertex.co.z = (
+                1.62
+                + (
+                    vertex.co.z
+                    - 1.62
+                )
+                * (
+                    1.0
+                    - 0.035 * amount
+                )
+            )
+
+    # ========================================================
+    # LEGS
+    # ========================================================
+
+    def refine_front_leg(
+        name,
+        center_x
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        center_y = -0.485
+
+        for vertex in obj.data.vertices:
+
+            z = vertex.co.z
+
+            # V12 upper legs were deliberately enlarged.
+            # Pull them back just enough to read as anatomy.
+
+            if z > 0.88:
+
+                sx = 0.955
+                sy = 0.965
+
+            elif z > 0.58:
+
+                sx = 0.970
+                sy = 0.975
+
+            elif z > 0.26:
+
+                sx = 0.980
+                sy = 0.985
+
+            else:
+
+                sx = 0.985
+                sy = 0.990
+
+            vertex.co.x = (
+                center_x
+                + (
+                    vertex.co.x
+                    - center_x
+                )
+                * sx
+            )
+
+            vertex.co.y = (
+                center_y
+                + (
+                    vertex.co.y
+                    - center_y
+                )
+                * sy
+            )
+
+            # Straighten cannon.
+            if (
+                z > 0.26
+                and z < 0.53
+            ):
+
+                vertex.co.y = (
+                    center_y
+                    + (
+                        vertex.co.y
+                        - center_y
+                    )
+                    * 0.96
+                )
+
+    def refine_hind_leg(
+        name,
+        center_x
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        center_y = 0.515
+
+        for vertex in obj.data.vertices:
+
+            z = vertex.co.z
+
+            # Thigh remains muscular.
+            if z > 0.90:
+
+                sx = 0.975
+                sy = 0.980
+
+            elif z > 0.67:
+
+                sx = 0.970
+                sy = 0.975
+
+            else:
+
+                sx = 0.980
+                sy = 0.985
+
+            vertex.co.x = (
+                center_x
+                + (
+                    vertex.co.x
+                    - center_x
+                )
+                * sx
+            )
+
+            vertex.co.y = (
+                center_y
+                + (
+                    vertex.co.y
+                    - center_y
+                )
+                * sy
+            )
+
+            # Stronger stifle-forward shape.
+            if (
+                z > 0.82
+                and z < 1.00
+            ):
+
+                vertex.co.y -= 0.028
+
+            # Hock projects rearward.
+            if (
+                z > 0.52
+                and z < 0.69
+            ):
+
+                vertex.co.y += 0.038
+
+            # Cannon returns beneath hock.
+            if (
+                z > 0.26
+                and z < 0.49
+            ):
+
+                vertex.co.y -= 0.020
+
+    refine_front_leg(
+        "RiverwatchV12FrontLeftLeg",
+        -0.285
+    )
+
+    refine_front_leg(
+        "RiverwatchV12FrontRightLeg",
+        0.285
+    )
+
+    refine_hind_leg(
+        "RiverwatchV12HindLeftLeg",
+        -0.305
+    )
+
+    refine_hind_leg(
+        "RiverwatchV12HindRightLeg",
+        0.305
+    )
+
+    # ========================================================
+    # HOOF BALANCE
+    # ========================================================
+
+    for name, center_x, center_y in (
+        (
+            "RiverwatchV12FrontLeftHoof",
+            -0.285,
+            -0.550
+        ),
+        (
+            "RiverwatchV12FrontRightHoof",
+            0.285,
+            -0.550
+        ),
+        (
+            "RiverwatchV12HindLeftHoof",
+            -0.305,
+            0.470
+        ),
+        (
+            "RiverwatchV12HindRightHoof",
+            0.305,
+            0.470
+        ),
+    ):
+
+        hoof = bpy.data.objects.get(
+            name
+        )
+
+        if hoof is None:
+            continue
+
+        for vertex in hoof.data.vertices:
+
+            # V12 hooves were enlarged.
+            # Preserve size but make them less paddle-like.
+
+            vertex.co.x = (
+                center_x
+                + (
+                    vertex.co.x
+                    - center_x
+                )
+                * 0.94
+            )
+
+            vertex.co.y = (
+                center_y
+                + (
+                    vertex.co.y
+                    - center_y
+                )
+                * 1.03
+            )
+
+    # ========================================================
+    # MANE
+    # ========================================================
+
+    mane = bpy.data.objects.get(
+        "RiverwatchV12Mane"
+    )
+
+    if mane is not None:
+
+        for vertex in mane.data.vertices:
+
+            # V12 spread the mane sideways.
+            # V13 makes it hang downward instead.
+
+            vertex.co.x *= 0.73
+
+            if vertex.co.z < 1.90:
+
+                drop = clamp01(
+                    (
+                        1.90
+                        - vertex.co.z
+                    )
+                    / 0.45
+                )
+
+                vertex.co.z -= (
+                    0.075
+                    * drop
+                )
+
+            # Front mane follows new head angle.
+            if vertex.co.y < -1.00:
+
+                new_y, new_z = rotate_head_point(
+                    vertex.co.y,
+                    vertex.co.z
+                )
+
+                vertex.co.y = new_y
+                vertex.co.z = new_z
+
+    # ========================================================
+    # TAIL
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV12Tail"
+    )
+
+    if tail is not None:
+
+        for vertex in tail.data.vertices:
+
+            # Less sideways width, more hanging hair mass.
+            vertex.co.x *= 0.82
+
+            if vertex.co.z < 1.22:
+
+                amount = clamp01(
+                    (
+                        1.22
+                        - vertex.co.z
+                    )
+                    / 0.86
+                )
+
+                vertex.co.z -= (
+                    0.055
+                    * amount
+                )
+
+                vertex.co.y += (
+                    0.025
+                    * amount
+                )
+
+    # ========================================================
+    # EARS
+    # ========================================================
+
+    for name in (
+        "RiverwatchV12LeftEar",
+        "RiverwatchV12RightEar",
+    ):
+
+        ear = bpy.data.objects.get(
+            name
+        )
+
+        if ear is None:
+            continue
+
+        for vertex in ear.data.vertices:
+
+            # Pull ears slightly closer to center.
+            vertex.co.x *= 0.90
+
+            new_y, new_z = rotate_head_point(
+                vertex.co.y,
+                vertex.co.z
+            )
+
+            vertex.co.y = new_y
+            vertex.co.z = new_z
+
+    # ========================================================
+    # FACE DETAILS FOLLOW HEAD
+    # ========================================================
+
+    face_prefixes = (
+        "RiverwatchV12MuzzlePatch",
+        "RiverwatchV12Eye",
+        "RiverwatchV12Pupil",
+        "RiverwatchV12EyeGlint",
+        "RiverwatchV12Nostril",
+        "RiverwatchV12Forelock",
+    )
+
+    for obj in bpy.context.scene.objects:
+
+        if not any(
+            obj.name.startswith(prefix)
+            for prefix in face_prefixes
+        ):
+            continue
+
+        new_y, new_z = rotate_head_point(
+            obj.location.y,
+            obj.location.z
+        )
+
+        obj.location.y = new_y
+        obj.location.z = new_z
+
+    # ========================================================
+    # MATERIAL TONE
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name == "Riverwatch V12 Warm Bay":
+
+            mat.diffuse_color = (
+                0.285,
+                0.075,
+                0.020,
+                1.0
+            )
+
+            if mat.use_nodes:
+
+                bsdf = mat.node_tree.nodes.get(
+                    "Principled BSDF"
+                )
+
+                if bsdf:
+
+                    bsdf.inputs[
+                        "Base Color"
+                    ].default_value = (
+                        0.285,
+                        0.075,
+                        0.020,
+                        1.0
+                    )
+
+                    bsdf.inputs[
+                        "Roughness"
+                    ].default_value = 0.60
+
+    # ========================================================
+    # VERSION NAMES
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name.startswith(
+            "Riverwatch V12"
+        ):
+
+            mat.name = mat.name.replace(
+                "Riverwatch V12",
+                "Riverwatch V13",
+                1
+            )
+
+    for obj in bpy.context.scene.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV12"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV12",
+                "RiverwatchV13",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "silhouette_balance_v13"
+
+    arm[
+        "broken_knight_horse_v13_goal"
+    ] = "reference_silhouette_over_raw_width"
+
+    arm[
+        "broken_knight_horse_v13_rump"
+    ] = "round_vertical_croup"
+
+    arm[
+        "broken_knight_horse_v13_neck"
+    ] = "defined_s_curve"
+
+    arm[
+        "broken_knight_horse_v13_head"
+    ] = "angled_down_tapered_muzzle"
+
+    arm[
+        "broken_knight_horse_v13_mane"
+    ] = "vertical_hanging_mass"
+
+    arm[
+        "broken_knight_horse_v13_tail"
+    ] = "vertical_weighted_mass"
 
 def reset_pose(arm):
     for bone in arm.pose.bones:
