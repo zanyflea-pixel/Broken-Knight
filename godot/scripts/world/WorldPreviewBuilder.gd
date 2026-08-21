@@ -359,11 +359,77 @@ func _add_riverwatch_stable(root:Node3D,center:Vector2,sampler:Callable)->void:
         horse.global_position=horse_ground
         horse.rotation.y=PI+float(index-1)*.055
         horse.scale=Vector3.ONE*(.96+float(index)*.025)
-        var model:=RIVERWATCH_HORSE_SCENE.instantiate() as Node3D
+        var model:=_instantiate_riverwatch_horse_model()
         model.name="Riverwatch Horse Model"
         horse.add_child(model)
         _mark_dynamic_geometry(model,true,300.0)
 
+
+func _instantiate_riverwatch_horse_model()->Node3D:
+    var awesome_path:="res://assets/animals/riverwatch_horse_awesome.bkglb"
+
+    if FileAccess.file_exists(awesome_path):
+        var horse_bytes:=FileAccess.get_file_as_bytes(awesome_path)
+
+        if not horse_bytes.is_empty():
+            var document:=GLTFDocument.new()
+            var state:=GLTFState.new()
+
+            var load_error:=document.append_from_buffer(
+                horse_bytes,
+                awesome_path.get_base_dir(),
+                state
+            )
+
+            if load_error==OK:
+                var generated:=document.generate_scene(
+                    state,
+                    30.0,
+                    false,
+                    true
+                )
+
+                if generated is Node3D:
+                    var model:=generated as Node3D
+
+                    model.name="Riverwatch Horse Model AWESOME"
+
+                    model.set_meta(
+                        "broken_knight_runtime_horse",
+                        "awesome_v2"
+                    )
+
+                    return model
+
+            push_warning(
+                "Awesome Riverwatch horse failed direct GLTF load. Error=%s"
+                % [load_error]
+            )
+
+    var fallback:=RIVERWATCH_HORSE_SCENE.instantiate()
+
+    if fallback is Node3D:
+        var fallback_model:=fallback as Node3D
+
+        fallback_model.name="Riverwatch Horse Model FALLBACK"
+
+        fallback_model.set_meta(
+            "broken_knight_runtime_horse",
+            "working_fallback"
+        )
+
+        return fallback_model
+
+    var empty_fallback:=Node3D.new()
+
+    empty_fallback.name="Riverwatch Horse Empty Fallback"
+
+    empty_fallback.set_meta(
+        "broken_knight_runtime_horse",
+        "empty_fallback"
+    )
+
+    return empty_fallback
 
 func _mark_dynamic_geometry(node:Node,skip_static_collision:bool,range_end:float)->void:
     if node is GeometryInstance3D:
