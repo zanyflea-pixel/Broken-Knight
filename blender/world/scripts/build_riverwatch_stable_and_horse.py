@@ -11477,7 +11477,7 @@ def build_horse_model_v18_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v19_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V19
     #
@@ -12470,6 +12470,1236 @@ def build_horse_model(arm):
     arm[
         "broken_knight_horse_v19_tail"
     ] = "three_overlapping_flowing_hair_locks"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_for_current_anatomy_review"
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V20
+    #
+    # TAIL SOCKET ELIMINATION
+    #
+    # Direct visual review of V19:
+    #
+    # IMPROVED:
+    #
+    # - overall horse silhouette
+    # - front leg stance
+    # - hind-leg stance
+    # - cannon thickness
+    # - tail no longer one giant solid paddle
+    #
+    # MAIN FAILURE:
+    #
+    # - tail still emerges from a giant circular button
+    # - circular rump/socket silhouette remains obvious
+    # - three separate tail locks resemble fingers
+    #
+    # V20 changes strategy.
+    #
+    # NO:
+    #
+    # - circular tail sphere
+    # - round tail plug
+    # - dark circular tail cap
+    # - separate spaghetti-like tail locks
+    #
+    # YES:
+    #
+    # - broad coat-colored curved rear-rump patch
+    # - panel overlaps the entire visible socket
+    # - center of patch follows rump curvature
+    # - edges sink back into existing body
+    # - one continuous tail hair curtain
+    # - narrow root
+    # - full middle
+    # - soft tapered end
+    #
+    # Hind legs are preserved from V19.
+    # ========================================================
+
+    build_horse_model_v19_base(
+        arm
+    )
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    def find_material(
+        contains_text
+    ):
+
+        for candidate in bpy.data.materials:
+
+            if contains_text.lower() in candidate.name.lower():
+                return candidate
+
+        return None
+
+    coat = find_material(
+        "Warm Bay"
+    )
+
+    dark_points = find_material(
+        "Dark Points"
+    )
+
+    mane_tail_mat = find_material(
+        "Mane Tail"
+    )
+
+    if coat is None:
+
+        raise RuntimeError(
+            "V20 could not find Warm Bay material"
+        )
+
+    if dark_points is None:
+        dark_points = coat
+
+    if mane_tail_mat is None:
+        mane_tail_mat = dark_points
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def smooth_object(
+        obj
+    ):
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_armature(
+        obj
+    ):
+
+        obj.parent = arm
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def apply_subdivision(
+        obj,
+        levels=1
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V20 Smooth",
+            "SUBSURF"
+        )
+
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = levels
+        modifier.render_levels = levels
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    # ========================================================
+    # DELETE EVERY V19 TAIL OBJECT
+    #
+    # Removes:
+    #
+    # TailRootCap
+    # TailCenter
+    # TailLeft
+    # TailRight
+    #
+    # and any accidental tail leftovers.
+    # ========================================================
+
+    delete_targets = []
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if (
+            obj.name.startswith(
+                "RiverwatchV19"
+            )
+            and "tail" in obj.name.lower()
+            and obj.type == "MESH"
+        ):
+
+            delete_targets.append(
+                obj
+            )
+
+    for obj in delete_targets:
+
+        if obj.name in bpy.data.objects:
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    # ========================================================
+    # SMALL FINAL CROUP CORRECTION
+    #
+    # Keep V19 improvement but make the rear transition a
+    # little less ball-like before covering the socket.
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV19AnatomyControlCage"
+    )
+
+    if core is None:
+
+        for candidate in bpy.data.objects:
+
+            if (
+                candidate.name.startswith(
+                    "RiverwatchV19"
+                )
+                and "AnatomyControlCage" in candidate.name
+            ):
+
+                core = candidate
+                break
+
+    if core is not None:
+
+        for vertex in core.data.vertices:
+
+            y = vertex.co.y
+            z = vertex.co.z
+
+            # Narrow highest rear quarter.
+            if (
+                y > 0.55
+                and z > 1.38
+            ):
+
+                vertex.co.x *= 0.975
+
+            # Slightly reduce highest rump dome.
+            if (
+                y > 0.48
+                and y < 0.78
+                and z > 1.57
+            ):
+
+                vertex.co.z -= 0.018
+
+            # Continue gentle croup slope.
+            if (
+                y > 0.70
+                and z > 1.42
+            ):
+
+                amount = min(
+                    1.0,
+                    max(
+                        0.0,
+                        (
+                            y - 0.70
+                        )
+                        / 0.30
+                    )
+                )
+
+                vertex.co.z -= (
+                    0.020
+                    * amount
+                )
+
+    # ========================================================
+    # CURVED REAR CROUP PATCH
+    #
+    # This is the important change.
+    #
+    # Previous versions placed a circle ON the socket.
+    #
+    # V20 places a broad coat-colored curved surface OVER THE
+    # ENTIRE REGION.
+    #
+    # Its outer edges sit closer to the old body.
+    # Its center protrudes farther rearward.
+    #
+    # Therefore the patch behaves more like part of the rump
+    # than like a button stuck onto it.
+    # ========================================================
+
+    def build_croup_patch():
+
+        name = "RiverwatchV20CroupBlendPatch"
+
+        # z, half width, base y, center bulge
+        bands = [
+
+            (
+                1.565,
+                0.120,
+                1.065,
+                0.080
+            ),
+
+            (
+                1.505,
+                0.220,
+                1.075,
+                0.105
+            ),
+
+            (
+                1.435,
+                0.285,
+                1.085,
+                0.125
+            ),
+
+            (
+                1.360,
+                0.325,
+                1.095,
+                0.145
+            ),
+
+            (
+                1.285,
+                0.315,
+                1.100,
+                0.145
+            ),
+
+            (
+                1.215,
+                0.270,
+                1.095,
+                0.130
+            ),
+
+            (
+                1.155,
+                0.195,
+                1.080,
+                0.100
+            ),
+        ]
+
+        column_values = [
+            -1.0,
+            -0.5,
+            0.0,
+            0.5,
+            1.0,
+        ]
+
+        shell_depth = 0.018
+
+        verts = []
+        faces = []
+
+        # ----------------------------------------------------
+        # FRONT / OUTER SURFACE
+        # ----------------------------------------------------
+
+        outer_indices = []
+
+        for (
+            z,
+            half_width,
+            base_y,
+            center_bulge
+        ) in bands:
+
+            row = []
+
+            for column in column_values:
+
+                x = (
+                    column
+                    * half_width
+                )
+
+                edge_factor = (
+                    1.0
+                    - abs(
+                        column
+                    ) ** 1.6
+                )
+
+                y = (
+                    base_y
+                    + center_bulge
+                    * edge_factor
+                )
+
+                # Slight downward curve at far sides so patch
+                # blends into quarter instead of reading as a
+                # flat shield.
+                side_drop = (
+                    0.012
+                    * abs(
+                        column
+                    )
+                )
+
+                index = len(
+                    verts
+                )
+
+                verts.append(
+                    (
+                        x,
+                        y,
+                        z - side_drop
+                    )
+                )
+
+                row.append(
+                    index
+                )
+
+            outer_indices.append(
+                row
+            )
+
+        # ----------------------------------------------------
+        # INNER SURFACE
+        # ----------------------------------------------------
+
+        inner_indices = []
+
+        for (
+            z,
+            half_width,
+            base_y,
+            center_bulge
+        ) in bands:
+
+            row = []
+
+            for column in column_values:
+
+                x = (
+                    column
+                    * half_width
+                )
+
+                edge_factor = (
+                    1.0
+                    - abs(
+                        column
+                    ) ** 1.6
+                )
+
+                y = (
+                    base_y
+                    + center_bulge
+                    * edge_factor
+                    - shell_depth
+                )
+
+                side_drop = (
+                    0.012
+                    * abs(
+                        column
+                    )
+                )
+
+                index = len(
+                    verts
+                )
+
+                verts.append(
+                    (
+                        x,
+                        y,
+                        z - side_drop
+                    )
+                )
+
+                row.append(
+                    index
+                )
+
+            inner_indices.append(
+                row
+            )
+
+        # ----------------------------------------------------
+        # SURFACE FACES
+        # ----------------------------------------------------
+
+        for row_index in range(
+            len(bands) - 1
+        ):
+
+            for column_index in range(
+                len(column_values) - 1
+            ):
+
+                a = outer_indices[
+                    row_index
+                ][
+                    column_index
+                ]
+
+                b = outer_indices[
+                    row_index
+                ][
+                    column_index + 1
+                ]
+
+                c = outer_indices[
+                    row_index + 1
+                ][
+                    column_index + 1
+                ]
+
+                d = outer_indices[
+                    row_index + 1
+                ][
+                    column_index
+                ]
+
+                faces.append(
+                    (
+                        a,
+                        b,
+                        c,
+                        d
+                    )
+                )
+
+                ia = inner_indices[
+                    row_index
+                ][
+                    column_index
+                ]
+
+                ib = inner_indices[
+                    row_index
+                ][
+                    column_index + 1
+                ]
+
+                ic = inner_indices[
+                    row_index + 1
+                ][
+                    column_index + 1
+                ]
+
+                idd = inner_indices[
+                    row_index + 1
+                ][
+                    column_index
+                ]
+
+                faces.append(
+                    (
+                        idd,
+                        ic,
+                        ib,
+                        ia
+                    )
+                )
+
+        # ----------------------------------------------------
+        # TOP / BOTTOM EDGES
+        # ----------------------------------------------------
+
+        for column_index in range(
+            len(column_values) - 1
+        ):
+
+            # Top.
+            faces.append(
+                (
+                    outer_indices[0][column_index],
+                    outer_indices[0][column_index + 1],
+                    inner_indices[0][column_index + 1],
+                    inner_indices[0][column_index]
+                )
+            )
+
+            # Bottom.
+            final_row = (
+                len(bands) - 1
+            )
+
+            faces.append(
+                (
+                    outer_indices[final_row][column_index + 1],
+                    outer_indices[final_row][column_index],
+                    inner_indices[final_row][column_index],
+                    inner_indices[final_row][column_index + 1]
+                )
+            )
+
+        # ----------------------------------------------------
+        # LEFT / RIGHT EDGES
+        # ----------------------------------------------------
+
+        final_column = (
+            len(column_values) - 1
+        )
+
+        for row_index in range(
+            len(bands) - 1
+        ):
+
+            # Left.
+            faces.append(
+                (
+                    outer_indices[row_index + 1][0],
+                    outer_indices[row_index][0],
+                    inner_indices[row_index][0],
+                    inner_indices[row_index + 1][0]
+                )
+            )
+
+            # Right.
+            faces.append(
+                (
+                    outer_indices[row_index][final_column],
+                    outer_indices[row_index + 1][final_column],
+                    inner_indices[row_index + 1][final_column],
+                    inner_indices[row_index][final_column]
+                )
+            )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            coat
+        )
+
+        group = obj.vertex_groups.new(
+            name="body"
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        apply_subdivision(
+            obj,
+            1
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # ONE CONTINUOUS FLOWING TAIL
+    #
+    # Not three separate fingers.
+    #
+    # It uses five columns across one connected hair curtain.
+    #
+    # Narrow root.
+    # Fuller upper-middle.
+    # Gradual taper.
+    # Slight sideways drift.
+    # Slight forward/back curvature.
+    # ========================================================
+
+    def build_tail():
+
+        name = "RiverwatchV20Tail"
+
+        # z, y center, half width, center x, thickness
+        stations = [
+
+            # Root emerging directly from new rump surface.
+            (
+                1.365,
+                1.255,
+                0.090,
+                0.000,
+                0.023
+            ),
+
+            (
+                1.300,
+                1.280,
+                0.125,
+                -0.004,
+                0.027
+            ),
+
+            (
+                1.220,
+                1.300,
+                0.160,
+                -0.010,
+                0.032
+            ),
+
+            (
+                1.125,
+                1.312,
+                0.185,
+                -0.020,
+                0.035
+            ),
+
+            (
+                1.020,
+                1.318,
+                0.198,
+                -0.030,
+                0.037
+            ),
+
+            (
+                0.910,
+                1.318,
+                0.190,
+                -0.035,
+                0.037
+            ),
+
+            (
+                0.800,
+                1.312,
+                0.175,
+                -0.030,
+                0.035
+            ),
+
+            (
+                0.695,
+                1.302,
+                0.150,
+                -0.015,
+                0.032
+            ),
+
+            (
+                0.600,
+                1.285,
+                0.120,
+                0.005,
+                0.028
+            ),
+
+            (
+                0.520,
+                1.262,
+                0.090,
+                0.022,
+                0.024
+            ),
+
+            (
+                0.455,
+                1.238,
+                0.060,
+                0.028,
+                0.020
+            ),
+
+            # Tip.
+            (
+                0.410,
+                1.215,
+                0.025,
+                0.020,
+                0.014
+            ),
+        ]
+
+        column_values = [
+            -1.0,
+            -0.5,
+            0.0,
+            0.5,
+            1.0,
+        ]
+
+        verts = []
+        faces = []
+
+        front_indices = []
+        back_indices = []
+
+        # ----------------------------------------------------
+        # CREATE CONNECTED GRID
+        # ----------------------------------------------------
+
+        for (
+            z,
+            center_y,
+            half_width,
+            center_x,
+            thickness
+        ) in stations:
+
+            front_row = []
+            back_row = []
+
+            for column in column_values:
+
+                x = (
+                    center_x
+                    + column
+                    * half_width
+                )
+
+                # Small center bulge prevents the tail from
+                # looking like a perfectly flat cardboard
+                # sheet.
+                middle_factor = (
+                    1.0
+                    - column * column
+                )
+
+                y_curve = (
+                    0.012
+                    * middle_factor
+                )
+
+                # Edge hairs hang slightly lower.
+                z_curve = (
+                    -0.012
+                    * abs(
+                        column
+                    )
+                )
+
+                front_index = len(
+                    verts
+                )
+
+                verts.append(
+                    (
+                        x,
+                        center_y
+                        - thickness
+                        + y_curve,
+                        z + z_curve
+                    )
+                )
+
+                front_row.append(
+                    front_index
+                )
+
+                back_index = len(
+                    verts
+                )
+
+                verts.append(
+                    (
+                        x,
+                        center_y
+                        + thickness
+                        + y_curve,
+                        z + z_curve
+                    )
+                )
+
+                back_row.append(
+                    back_index
+                )
+
+            front_indices.append(
+                front_row
+            )
+
+            back_indices.append(
+                back_row
+            )
+
+        # ----------------------------------------------------
+        # FRONT / BACK SURFACES
+        # ----------------------------------------------------
+
+        for row_index in range(
+            len(stations) - 1
+        ):
+
+            for column_index in range(
+                len(column_values) - 1
+            ):
+
+                a = front_indices[
+                    row_index
+                ][
+                    column_index
+                ]
+
+                b = front_indices[
+                    row_index
+                ][
+                    column_index + 1
+                ]
+
+                c = front_indices[
+                    row_index + 1
+                ][
+                    column_index + 1
+                ]
+
+                d = front_indices[
+                    row_index + 1
+                ][
+                    column_index
+                ]
+
+                faces.append(
+                    (
+                        a,
+                        b,
+                        c,
+                        d
+                    )
+                )
+
+                ba = back_indices[
+                    row_index
+                ][
+                    column_index
+                ]
+
+                bb = back_indices[
+                    row_index
+                ][
+                    column_index + 1
+                ]
+
+                bc = back_indices[
+                    row_index + 1
+                ][
+                    column_index + 1
+                ]
+
+                bd = back_indices[
+                    row_index + 1
+                ][
+                    column_index
+                ]
+
+                faces.append(
+                    (
+                        bd,
+                        bc,
+                        bb,
+                        ba
+                    )
+                )
+
+        # ----------------------------------------------------
+        # SIDE EDGES
+        # ----------------------------------------------------
+
+        last_column = (
+            len(column_values) - 1
+        )
+
+        for row_index in range(
+            len(stations) - 1
+        ):
+
+            # Left edge.
+            faces.append(
+                (
+                    front_indices[row_index + 1][0],
+                    front_indices[row_index][0],
+                    back_indices[row_index][0],
+                    back_indices[row_index + 1][0]
+                )
+            )
+
+            # Right edge.
+            faces.append(
+                (
+                    front_indices[row_index][last_column],
+                    front_indices[row_index + 1][last_column],
+                    back_indices[row_index + 1][last_column],
+                    back_indices[row_index][last_column]
+                )
+            )
+
+        # ----------------------------------------------------
+        # ROOT EDGE
+        # ----------------------------------------------------
+
+        for column_index in range(
+            len(column_values) - 1
+        ):
+
+            faces.append(
+                (
+                    front_indices[0][column_index],
+                    front_indices[0][column_index + 1],
+                    back_indices[0][column_index + 1],
+                    back_indices[0][column_index]
+                )
+            )
+
+        # ----------------------------------------------------
+        # TIP EDGE
+        # ----------------------------------------------------
+
+        final_row = (
+            len(stations) - 1
+        )
+
+        for column_index in range(
+            len(column_values) - 1
+        ):
+
+            faces.append(
+                (
+                    front_indices[final_row][column_index + 1],
+                    front_indices[final_row][column_index],
+                    back_indices[final_row][column_index],
+                    back_indices[final_row][column_index + 1]
+                )
+            )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            mane_tail_mat
+        )
+
+        tail_group = obj.vertex_groups.new(
+            name="tail.1"
+        )
+
+        tail_group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        apply_subdivision(
+            obj,
+            1
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # BUILD V20 REAR
+    # ========================================================
+
+    build_croup_patch()
+
+    build_tail()
+
+    # ========================================================
+    # SMALL HIND-LEG POLISH
+    #
+    # Do not redesign them again.
+    #
+    # V19 placement is much better.
+    #
+    # Only add slightly clearer cannon/fetlock taper.
+    # ========================================================
+
+    def polish_hind_leg(
+        name,
+        center_x
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        for vertex in obj.data.vertices:
+
+            z = vertex.co.z
+
+            # Cannon.
+            if (
+                z > 0.27
+                and z < 0.50
+            ):
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 0.955
+                )
+
+            # Fetlock slightly fuller.
+            elif (
+                z > 0.16
+                and z <= 0.27
+            ):
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 1.035
+                )
+
+    polish_hind_leg(
+        "RiverwatchV19HindLeftLeg",
+        -0.305
+    )
+
+    polish_hind_leg(
+        "RiverwatchV19HindRightLeg",
+        0.305
+    )
+
+    # ========================================================
+    # RENAME PRESERVED V19 OBJECTS / MATERIALS
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name.startswith(
+            "Riverwatch V19"
+        ):
+
+            mat.name = mat.name.replace(
+                "Riverwatch V19",
+                "Riverwatch V20",
+                1
+            )
+
+    for obj in bpy.context.scene.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV19"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV19",
+                "RiverwatchV20",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "tail_socket_body_patch_v20"
+
+    arm[
+        "broken_knight_horse_v20_basis"
+    ] = "direct_visual_v19_contact_sheet"
+
+    arm[
+        "broken_knight_horse_v20_tail_socket"
+    ] = "covered_by_curved_coat_colored_rump_surface"
+
+    arm[
+        "broken_knight_horse_v20_tail_root"
+    ] = "narrow_continuous_hair_root"
+
+    arm[
+        "broken_knight_horse_v20_tail"
+    ] = "single_connected_flowing_hair_curtain"
+
+    arm[
+        "broken_knight_horse_v20_rump"
+    ] = "less_round_more_croup_slope"
+
+    arm[
+        "broken_knight_horse_v20_hind_leg"
+    ] = "v19_preserved_with_minor_cannon_polish"
 
     arm[
         "broken_knight_horse_animation_acceptance"
