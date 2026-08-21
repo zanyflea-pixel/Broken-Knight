@@ -1,4 +1,4 @@
-# Runtime state
+﻿# Runtime state
 .broken-knight-server.json
 *.log
 *_stdout.txt
@@ -27,7 +27,6 @@ tmp-map-check/
 visual_reviews/
 _downloads/
 all-project.txt
-captures/
 Powershell output/
 .idea/
 .vs/
@@ -44,3 +43,11 @@ Thumbs.db
 # Python cache
 __pycache__/
 *.pyc
+
+# Horse capture reviews
+captures/*
+!captures/horse-review/
+captures/horse-review/*
+!captures/horse-review/current/
+!captures/horse-review/current/**
+

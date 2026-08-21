@@ -1,0 +1,127 @@
+BROKEN KNIGHT HORSE CAPTURE REVIEW
+==================================
+
+SOURCE=res://assets/animals/riverwatch_horse_awesome.bkglb
+CAPTURE_COUNT=30
+CAPTURE_FAILURES=0
+
+MODEL METRICS
+-------------
+BOUNDING_WIDTH_X=1.2160
+BOUNDING_HEIGHT_Y=2.1093
+BOUNDING_LENGTH_Z=3.2949
+LARGEST_DIMENSION=3.2949
+SMALLEST_DIMENSION=1.2160
+WIDTH_TO_HEIGHT=0.5765
+LENGTH_TO_HEIGHT=1.5621
+MESH_NODE_COUNT=1
+SURFACE_COUNT=19
+VERTEX_COUNT_APPROX=36212
+TRIANGLE_COUNT_APPROX=40520
+
+MATERIALS
+---------
+Riverwatch V5 Bay Coat
+Riverwatch V5 Hoof
+Riverwatch V5 Horseshoe Steel
+Riverwatch V5 Black Mane
+Riverwatch V5 Mane Soft Highlight
+Riverwatch V5 Iris
+Riverwatch V5 Pupil
+Riverwatch V5 Eye Glint
+Riverwatch V5 Coat Shadow
+Riverwatch V5 Ivory
+Riverwatch V5 Muzzle
+Riverwatch V5 Royal Blanket
+Riverwatch V5 Blanket Highlight
+Riverwatch V5 Gold Trim
+Riverwatch V5 Dark Leather
+Riverwatch V5 Leather Edge
+Riverwatch V5 Warm Leather
+Riverwatch V5 Brass
+Riverwatch V5 Forged Iron
+
+ANIMATIONS
+----------
+Idle
+Trot
+
+RIG BONES
+---------
+root
+body
+neck
+head
+tail.1
+tail.2
+front.L.upper
+front.L.lower
+front.L.hoof
+front.R.upper
+front.R.lower
+front.R.hoof
+hind.L.upper
+hind.L.lower
+hind.L.hoof
+hind.R.upper
+hind.R.lower
+hind.R.hoof
+
+CAPTURE FILES
+-------------
+orbit_000.png
+orbit_023.png
+orbit_045.png
+orbit_068.png
+orbit_090.png
+orbit_113.png
+orbit_135.png
+orbit_158.png
+orbit_180.png
+orbit_203.png
+orbit_225.png
+orbit_248.png
+orbit_270.png
+orbit_293.png
+orbit_315.png
+orbit_338.png
+elevated_000.png
+elevated_045.png
+elevated_090.png
+elevated_135.png
+elevated_180.png
+elevated_225.png
+elevated_270.png
+elevated_315.png
+closeup_head_a.png
+closeup_head_b.png
+closeup_saddle_a.png
+closeup_saddle_b.png
+closeup_rump_tail_a.png
+closeup_rump_tail_b.png
+
+NEXT HORSE PASS REVIEW CHECKLIST
+-------------------------------
+1. SIDE SILHOUETTE: inspect orbit_090 and orbit_270 for chest, back, belly, rump, leg proportions.
+2. RUMP: inspect rear three-quarter orbit views for roundness, croup slope and tail-root transition.
+3. MANE: inspect dark silhouette against the neck; it should read as one flowing crest rather than separate tubes.
+4. TAIL: inspect closeup_rump_tail_a/b for one continuous root, volume through the middle and a natural taper.
+5. SADDLE: inspect closeup_saddle_a/b for seat curvature, pommel/cantle proportions, blanket fit and whether anything floats.
+6. HEAD: inspect closeup_head_a/b for muzzle taper, cheek/jaw structure, ear size, eye placement and forehead shape.
+7. LEGS: inspect side and three-quarter views for knee/hock anatomy, cannon-bone thickness and hoof angle.
+8. FRONT/REAR SYMMETRY: use opposing orbit angles to spot asymmetrical floating tack or geometry.
+9. TACK SCALE: saddle, bags, reins and stirrups should support the horse rather than dominate its silhouette.
+10. OVERALL READ: the horse should still look convincingly equine when viewed only as a silhouette.
+
+BEST FILES TO SEND CHATGPT
+--------------------------
+contact_sheet.png
+horse_capture_report.txt
+horse_capture_metrics.json
+Then send individual closeups only if a specific area needs more inspection.
+SOURCE CONTROL / FILE HASHES
+----------------------------
+RUNTIME_HORSE_SHA256=2272C0141D315119167AA380459148987D7952FFDB0233C70AEC78A8F23F8D73
+BLENDER_BLEND_SHA256=DD29610E1CA39517FD5EA7057475556E9F26284D66256E31D3B37F68716C0DEE
+BLENDER_BUILDER_SHA256=9C30A3B0555B729062AFB77733E9F79AD0EF5F27CA12E2190BCB69877F0DF753
+GIT_COMMIT=d3694218a7eb66ae2ed4e5a1fee37daeb8879bf4
