@@ -3901,7 +3901,7 @@ def build_horse_model_v12_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v13_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V13
     #
@@ -4840,6 +4840,1057 @@ def build_horse_model(arm):
     arm[
         "broken_knight_horse_v13_tail"
     ] = "vertical_weighted_mass"
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V14
+    #
+    # ANATOMICAL DEFINITION
+    #
+    # V12 fixed bulk.
+    # V13 fixed balance.
+    #
+    # V14 concentrates on recognizable horse anatomy:
+    #
+    # HEAD
+    #   forehead
+    #   cheek
+    #   jaw
+    #   throat latch
+    #   nasal bridge
+    #   muzzle
+    #
+    # BODY
+    #   shoulder
+    #   rib cage
+    #   loin
+    #   rounded croup
+    #
+    # LEGS
+    #   forearm
+    #   knee
+    #   cannon
+    #   fetlock
+    #   pastern
+    #   thigh
+    #   stifle
+    #   gaskin
+    #   hock
+    #
+    # HOOF
+    #   narrow heel
+    #   broader toe
+    #   lower profile
+    #
+    # This is deliberately a definition pass rather than
+    # another global proportion swing.
+    # ========================================================
+
+    build_horse_model_v13_base(
+        arm
+    )
+
+    def gauss(
+        value,
+        center,
+        spread
+    ):
+        return math.exp(
+            -((value - center) / spread) ** 2
+        )
+
+    def clamp01(value):
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                value
+            )
+        )
+
+    # ========================================================
+    # MAIN ANATOMY
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV13AnatomyControlCage"
+    )
+
+    if core is None:
+        raise RuntimeError(
+            "V14 could not locate V13 anatomy mesh"
+        )
+
+    for vertex in core.data.vertices:
+
+        x = vertex.co.x
+        y = vertex.co.y
+        z = vertex.co.z
+
+        croup = gauss(
+            y,
+            0.66,
+            0.29
+        )
+
+        loin = gauss(
+            y,
+            0.34,
+            0.25
+        )
+
+        barrel = gauss(
+            y,
+            0.02,
+            0.34
+        )
+
+        chest = gauss(
+            y,
+            -0.27,
+            0.19
+        )
+
+        shoulder = gauss(
+            y,
+            -0.43,
+            0.16
+        )
+
+        neck = gauss(
+            y,
+            -0.79,
+            0.22
+        )
+
+        poll = gauss(
+            y,
+            -1.01,
+            0.12
+        )
+
+        cheek = gauss(
+            y,
+            -1.20,
+            0.14
+        )
+
+        jaw = gauss(
+            y,
+            -1.26,
+            0.16
+        )
+
+        muzzle = gauss(
+            y,
+            -1.43,
+            0.14
+        )
+
+        # ----------------------------------------------------
+        # KEEP BODY FROM GETTING TOO WIDE AGAIN
+        # ----------------------------------------------------
+
+        if (
+            y > -0.30
+            and y < 0.42
+        ):
+
+            vertex.co.x *= (
+                1.0
+                - 0.018 * barrel
+            )
+
+        # ----------------------------------------------------
+        # CROUP
+        #
+        # Build a rounded slope from loin into rump rather
+        # than a square or flat rear.
+        # ----------------------------------------------------
+
+        if (
+            y > 0.40
+            and z > 1.40
+        ):
+
+            rear_amount = clamp01(
+                (
+                    y - 0.40
+                )
+                / 0.48
+            )
+
+            vertex.co.z -= (
+                0.020
+                * rear_amount
+            )
+
+        if (
+            y > 0.48
+            and z > 1.24
+            and z < 1.58
+        ):
+
+            vertex.co.x *= (
+                1.0
+                + 0.020 * croup
+            )
+
+        # Lower rump rounds inward near the tail root.
+        if (
+            y > 0.78
+            and z < 1.42
+        ):
+
+            vertex.co.x *= 0.975
+
+        # ----------------------------------------------------
+        # LOIN
+        # ----------------------------------------------------
+
+        if (
+            y > 0.12
+            and y < 0.48
+            and z > 1.66
+        ):
+
+            vertex.co.z -= (
+                0.018
+                * loin
+            )
+
+        # ----------------------------------------------------
+        # RIB CAGE DEPTH
+        # ----------------------------------------------------
+
+        if (
+            y > -0.14
+            and y < 0.24
+            and z < 1.26
+        ):
+
+            vertex.co.z -= (
+                0.025
+                * barrel
+            )
+
+        # ----------------------------------------------------
+        # FLANK
+        #
+        # More recognizable rising underline behind ribs.
+        # ----------------------------------------------------
+
+        if (
+            y > 0.22
+            and y < 0.49
+            and z < 1.22
+        ):
+
+            tuck = gauss(
+                y,
+                0.34,
+                0.16
+            )
+
+            vertex.co.z += (
+                0.035
+                * tuck
+            )
+
+        # ----------------------------------------------------
+        # CHEST
+        # ----------------------------------------------------
+
+        if (
+            y > -0.43
+            and y < -0.12
+            and z < 1.31
+        ):
+
+            vertex.co.z -= (
+                0.028
+                * chest
+            )
+
+        # ----------------------------------------------------
+        # SHOULDER BLADE SHAPE
+        # ----------------------------------------------------
+
+        if (
+            y > -0.53
+            and y < -0.28
+            and z > 1.34
+            and z < 1.70
+        ):
+
+            upper = clamp01(
+                (
+                    z - 1.34
+                )
+                / 0.36
+            )
+
+            # Upper shoulder lays backward.
+            vertex.co.y += (
+                0.028
+                * upper
+                * shoulder
+            )
+
+            vertex.co.x *= (
+                1.0
+                + 0.018
+                * shoulder
+            )
+
+        # ====================================================
+        # NECK
+        # ====================================================
+
+        if (
+            y < -0.58
+            and y > -1.01
+        ):
+
+            # Crest.
+            if z > 1.76:
+
+                crest = clamp01(
+                    (
+                        z - 1.76
+                    )
+                    / 0.27
+                )
+
+                vertex.co.z += (
+                    0.018
+                    * crest
+                    * neck
+                )
+
+                vertex.co.y -= (
+                    0.018
+                    * crest
+                    * neck
+                )
+
+            # Throat.
+            if z < 1.64:
+
+                throat = clamp01(
+                    (
+                        1.64
+                        - z
+                    )
+                    / 0.25
+                )
+
+                vertex.co.y += (
+                    0.032
+                    * throat
+                    * neck
+                )
+
+                vertex.co.x *= (
+                    1.0
+                    - 0.030
+                    * throat
+                    * neck
+                )
+
+        # ----------------------------------------------------
+        # THROATLATCH
+        #
+        # Narrow just behind jaw.
+        # ----------------------------------------------------
+
+        if (
+            y < -0.94
+            and y > -1.10
+            and z < 1.72
+        ):
+
+            vertex.co.x *= (
+                1.0
+                - 0.055 * poll
+            )
+
+            vertex.co.y += (
+                0.020 * poll
+            )
+
+        # ====================================================
+        # SKULL
+        # ====================================================
+
+        # Forehead / poll width retained.
+        if (
+            y < -1.01
+            and y > -1.17
+            and z > 1.76
+        ):
+
+            vertex.co.x *= (
+                1.0
+                + 0.018 * cheek
+            )
+
+        # Cheek bone becomes fuller.
+        if (
+            y < -1.10
+            and y > -1.30
+            and z > 1.64
+            and z < 1.80
+        ):
+
+            vertex.co.x *= (
+                1.0
+                + 0.055 * cheek
+            )
+
+        # ----------------------------------------------------
+        # JAW
+        # ----------------------------------------------------
+
+        if (
+            y < -1.08
+            and y > -1.34
+            and z < 1.70
+        ):
+
+            vertex.co.z -= (
+                0.030 * jaw
+            )
+
+            vertex.co.x *= (
+                1.0
+                + 0.035 * jaw
+            )
+
+        # ====================================================
+        # NASAL BRIDGE
+        # ====================================================
+
+        if (
+            y < -1.25
+            and y > -1.43
+            and z > 1.64
+        ):
+
+            bridge = clamp01(
+                (
+                    -y
+                    - 1.25
+                )
+                / 0.18
+            )
+
+            vertex.co.x *= (
+                1.0
+                - 0.045 * bridge
+            )
+
+        # ====================================================
+        # MUZZLE
+        # ====================================================
+
+        if y < -1.34:
+
+            amount = clamp01(
+                (
+                    -y
+                    - 1.34
+                )
+                / 0.28
+            )
+
+            # Shorter nose.
+            vertex.co.y += (
+                0.035
+                * amount
+            )
+
+            # Noticeably narrower.
+            vertex.co.x *= (
+                1.0
+                - 0.060
+                * amount
+            )
+
+            # Slightly deeper at nostril end.
+            if z < 1.69:
+
+                vertex.co.z -= (
+                    0.012
+                    * amount
+                )
+
+        # ====================================================
+        # HEAD ANGLE
+        #
+        # A small additional downward rotation.
+        # ====================================================
+
+        if y < -1.02:
+
+            pivot_y = -1.01
+            pivot_z = 1.82
+
+            angle = math.radians(
+                3.5
+            )
+
+            dy = vertex.co.y - pivot_y
+            dz = vertex.co.z - pivot_z
+
+            cosine = math.cos(
+                angle
+            )
+
+            sine = math.sin(
+                angle
+            )
+
+            vertex.co.y = (
+                pivot_y
+                + dy * cosine
+                - dz * sine
+            )
+
+            vertex.co.z = (
+                pivot_z
+                + dy * sine
+                + dz * cosine
+            )
+
+    # ========================================================
+    # LEG HELPERS
+    # ========================================================
+
+    def scale_around(
+        vertex,
+        center_x,
+        center_y,
+        scale_x,
+        scale_y
+    ):
+
+        vertex.co.x = (
+            center_x
+            + (
+                vertex.co.x
+                - center_x
+            )
+            * scale_x
+        )
+
+        vertex.co.y = (
+            center_y
+            + (
+                vertex.co.y
+                - center_y
+            )
+            * scale_y
+        )
+
+    # ========================================================
+    # FRONT LEGS
+    # ========================================================
+
+    def refine_front(
+        name,
+        center_x
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        center_y = -0.485
+
+        for vertex in obj.data.vertices:
+
+            z = vertex.co.z
+
+            # Forearm muscle.
+            if z > 0.76:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.045,
+                    1.070
+                )
+
+            # Knee.
+            elif z > 0.56:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.055,
+                    1.070
+                )
+
+                vertex.co.y += 0.012
+
+            # Cannon.
+            elif z > 0.27:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    0.955,
+                    0.970
+                )
+
+            # Fetlock / pastern.
+            else:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.035,
+                    1.025
+                )
+
+            # Create a straighter cannon line.
+            if (
+                z > 0.29
+                and z < 0.52
+            ):
+
+                vertex.co.y = (
+                    center_y
+                    + (
+                        vertex.co.y
+                        - center_y
+                    )
+                    * 0.94
+                )
+
+    refine_front(
+        "RiverwatchV13FrontLeftLeg",
+        -0.285
+    )
+
+    refine_front(
+        "RiverwatchV13FrontRightLeg",
+        0.285
+    )
+
+    # ========================================================
+    # HIND LEGS
+    # ========================================================
+
+    def refine_hind(
+        name,
+        center_x
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        center_y = 0.515
+
+        for vertex in obj.data.vertices:
+
+            z = vertex.co.z
+
+            # Thigh.
+            if z > 0.91:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.055,
+                    1.095
+                )
+
+            # Gaskin / stifle.
+            elif z > 0.68:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.035,
+                    1.060
+                )
+
+                # Stifle forward.
+                vertex.co.y -= 0.018
+
+            # Hock.
+            elif z > 0.51:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.070,
+                    1.095
+                )
+
+                vertex.co.y += 0.030
+
+            # Cannon.
+            elif z > 0.27:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    0.950,
+                    0.965
+                )
+
+                vertex.co.y -= 0.010
+
+            # Fetlock / pastern.
+            else:
+
+                scale_around(
+                    vertex,
+                    center_x,
+                    center_y,
+                    1.035,
+                    1.025
+                )
+
+    refine_hind(
+        "RiverwatchV13HindLeftLeg",
+        -0.305
+    )
+
+    refine_hind(
+        "RiverwatchV13HindRightLeg",
+        0.305
+    )
+
+    # ========================================================
+    # HOOF SHAPING
+    # ========================================================
+
+    def refine_hoof(
+        name,
+        center_x,
+        center_y
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        for vertex in obj.data.vertices:
+
+            local_y = (
+                vertex.co.y
+                - center_y
+            )
+
+            # Heel is narrower.
+            if local_y > 0.0:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 0.94
+                )
+
+            # Toe is broader and slightly longer.
+            if local_y < -0.055:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 1.075
+                )
+
+                vertex.co.y = (
+                    center_y
+                    + local_y
+                    * 1.075
+                )
+
+            # Lower hoof profile.
+            vertex.co.z = (
+                0.025
+                + (
+                    vertex.co.z
+                    - 0.025
+                )
+                * 0.94
+            )
+
+    refine_hoof(
+        "RiverwatchV13FrontLeftHoof",
+        -0.285,
+        -0.550
+    )
+
+    refine_hoof(
+        "RiverwatchV13FrontRightHoof",
+        0.285,
+        -0.550
+    )
+
+    refine_hoof(
+        "RiverwatchV13HindLeftHoof",
+        -0.305,
+        0.470
+    )
+
+    refine_hoof(
+        "RiverwatchV13HindRightHoof",
+        0.305,
+        0.470
+    )
+
+    # ========================================================
+    # MANE
+    # ========================================================
+
+    mane = bpy.data.objects.get(
+        "RiverwatchV13Mane"
+    )
+
+    if mane is not None:
+
+        for vertex in mane.data.vertices:
+
+            # Keep mane close to neck.
+            vertex.co.x *= 0.90
+
+            # More hanging length near middle/lower neck.
+            middle = gauss(
+                vertex.co.y,
+                -0.75,
+                0.20
+            )
+
+            if vertex.co.z < 1.92:
+
+                vertex.co.z -= (
+                    0.045
+                    * middle
+                )
+
+    # ========================================================
+    # FORELOCK
+    # ========================================================
+
+    forelock = bpy.data.objects.get(
+        "RiverwatchV13Forelock"
+    )
+
+    if forelock is not None:
+
+        forelock.scale.x *= 0.90
+        forelock.scale.z *= 1.12
+
+    # ========================================================
+    # TAIL
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV13Tail"
+    )
+
+    if tail is not None:
+
+        for vertex in tail.data.vertices:
+
+            if vertex.co.z < 1.12:
+
+                amount = clamp01(
+                    (
+                        1.12
+                        - vertex.co.z
+                    )
+                    / 0.75
+                )
+
+                # Longer lower tail.
+                vertex.co.z -= (
+                    0.035
+                    * amount
+                )
+
+                # Keep it hanging instead of projecting far back.
+                vertex.co.y -= (
+                    0.018
+                    * amount
+                )
+
+    # ========================================================
+    # FACIAL DETAILS
+    #
+    # Match extra head rotation + shortening.
+    # ========================================================
+
+    face_prefixes = (
+        "RiverwatchV13MuzzlePatch",
+        "RiverwatchV13Eye",
+        "RiverwatchV13Pupil",
+        "RiverwatchV13EyeGlint",
+        "RiverwatchV13Nostril",
+        "RiverwatchV13Forelock",
+    )
+
+    for obj in bpy.context.scene.objects:
+
+        if not any(
+            obj.name.startswith(prefix)
+            for prefix in face_prefixes
+        ):
+            continue
+
+        if obj.location.y < -1.02:
+
+            old_y = obj.location.y
+            old_z = obj.location.z
+
+            pivot_y = -1.01
+            pivot_z = 1.82
+
+            angle = math.radians(
+                3.5
+            )
+
+            dy = old_y - pivot_y
+            dz = old_z - pivot_z
+
+            cosine = math.cos(
+                angle
+            )
+
+            sine = math.sin(
+                angle
+            )
+
+            obj.location.y = (
+                pivot_y
+                + dy * cosine
+                - dz * sine
+            )
+
+            obj.location.z = (
+                pivot_z
+                + dy * sine
+                + dz * cosine
+            )
+
+            if obj.location.y < -1.34:
+                obj.location.y += 0.025
+
+    # ========================================================
+    # EARS
+    # ========================================================
+
+    for name in (
+        "RiverwatchV13LeftEar",
+        "RiverwatchV13RightEar",
+    ):
+
+        ear = bpy.data.objects.get(
+            name
+        )
+
+        if ear is None:
+            continue
+
+        for vertex in ear.data.vertices:
+
+            # Slightly narrower and more upright.
+            vertex.co.x *= 0.94
+
+            if vertex.co.z > 1.98:
+                vertex.co.z += 0.012
+
+    # ========================================================
+    # VERSION NAMES
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name.startswith(
+            "Riverwatch V13"
+        ):
+
+            mat.name = mat.name.replace(
+                "Riverwatch V13",
+                "Riverwatch V14",
+                1
+            )
+
+    for obj in bpy.context.scene.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV13"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV13",
+                "RiverwatchV14",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "anatomical_definition_v14"
+
+    arm[
+        "broken_knight_horse_v14_head"
+    ] = "defined_skull_cheek_jaw_muzzle"
+
+    arm[
+        "broken_knight_horse_v14_neck"
+    ] = "crest_throat_throatlatch"
+
+    arm[
+        "broken_knight_horse_v14_front_leg"
+    ] = "forearm_knee_cannon_fetlock"
+
+    arm[
+        "broken_knight_horse_v14_hind_leg"
+    ] = "thigh_stifle_gaskin_hock_cannon"
+
+    arm[
+        "broken_knight_horse_v14_hoof"
+    ] = "narrow_heel_broad_toe"
+
+    arm[
+        "broken_knight_horse_v14_goal"
+    ] = "recognizable_horse_anatomy"
 
 def reset_pose(arm):
     for bone in arm.pose.bones:
