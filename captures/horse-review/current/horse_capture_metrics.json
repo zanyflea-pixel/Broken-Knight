@@ -24,9 +24,9 @@
 		"hind.R.hoof"
 	],
 	"bounds": {
-		"height_y": 2.06737947463989,
-		"length_z": 3.57407236099243,
-		"width_x": 1.06993627548218
+		"height_y": 2.09823536872864,
+		"length_z": 3.56772756576538,
+		"width_x": 0.979166746139526
 	},
 	"capture_count": 30,
 	"capture_failures": [],
@@ -63,26 +63,19 @@
 		"closeup_rump_tail_b"
 	],
 	"materials": [
-		"Riverwatch V10 Warm Bay",
-		"Riverwatch V10 Dark Points",
-		"Riverwatch V10 Hoof",
-		"Riverwatch V10 Muzzle",
-		"Riverwatch V10 Eye",
-		"Riverwatch V10 Pupil",
-		"Riverwatch V10 Eye Glint",
-		"Riverwatch V10 Blaze",
-		"Riverwatch V10 Mane Tail",
-		"Riverwatch V10 Blue Blanket",
-		"Riverwatch V10 Blanket Trim",
-		"Riverwatch V10 Saddle Leather",
-		"Riverwatch V10 Saddle Highlight",
-		"Riverwatch V10 Brass",
-		"Riverwatch V10 Saddle Shadow",
-		"Riverwatch V10 Iron"
+		"Riverwatch V11 Warm Bay",
+		"Riverwatch V11 Dark Points",
+		"Riverwatch V11 Hoof",
+		"Riverwatch V11 Muzzle",
+		"Riverwatch V11 Eye",
+		"Riverwatch V11 Pupil",
+		"Riverwatch V11 Eye Glint",
+		"Riverwatch V11 Blaze",
+		"Riverwatch V11 Mane Tail"
 	],
 	"mesh_nodes": 1,
 	"source": "res://assets/animals/riverwatch_horse_awesome.bkglb",
-	"surfaces": 16,
-	"triangles_approx": 39012,
-	"vertices_approx": 27641
+	"surfaces": 9,
+	"triangles_approx": 9788,
+	"vertices_approx": 5477
 }
