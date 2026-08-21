@@ -24,9 +24,9 @@
 		"hind.R.hoof"
 	],
 	"bounds": {
-		"height_y": 2.10465550422668,
-		"length_z": 3.66499352455139,
-		"width_x": 1.23087799549103
+		"height_y": 2.10972690582275,
+		"length_z": 3.62500500679016,
+		"width_x": 1.17728877067566
 	},
 	"capture_count": 30,
 	"capture_failures": [],
@@ -63,27 +63,25 @@
 		"closeup_rump_tail_b"
 	],
 	"materials": [
-		"Riverwatch V6 Bay Coat",
-		"Riverwatch V6 Hoof",
-		"Riverwatch V6 Mane",
-		"Riverwatch V6 Mane Light",
-		"Riverwatch V6 Muzzle",
-		"Riverwatch V6 Eye Brown",
-		"Riverwatch V6 Eye Black",
-		"Riverwatch V6 Eye Glint",
-		"Riverwatch V6 Bay Shadow",
-		"Riverwatch V6 Ivory",
-		"Riverwatch V6 Blanket",
-		"Riverwatch V6 Saddle Leather",
-		"Riverwatch V6 Leather Light",
-		"Riverwatch V6 Leather Mid",
-		"Riverwatch V6 Iron",
-		"Riverwatch V6 Brass",
-		"Riverwatch V6 Bay Highlight"
+		"Riverwatch V7 Deep Bay",
+		"Riverwatch V7 Hoof",
+		"Riverwatch V7 Mane",
+		"Riverwatch V7 Muzzle",
+		"Riverwatch V7 Eye",
+		"Riverwatch V7 Pupil",
+		"Riverwatch V7 Eye Glint",
+		"Riverwatch V7 Coat Shadow",
+		"Riverwatch V7 Ivory",
+		"Riverwatch V7 Royal Blanket",
+		"Riverwatch V7 Saddle Leather",
+		"Riverwatch V7 Leather Edge",
+		"Riverwatch V7 Warm Leather",
+		"Riverwatch V7 Iron",
+		"Riverwatch V7 Brass"
 	],
 	"mesh_nodes": 1,
 	"source": "res://assets/animals/riverwatch_horse_awesome.bkglb",
-	"surfaces": 17,
-	"triangles_approx": 37476,
-	"vertices_approx": 25508
+	"surfaces": 15,
+	"triangles_approx": 35196,
+	"vertices_approx": 23737
 }
