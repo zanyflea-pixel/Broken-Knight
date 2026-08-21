@@ -8,6 +8,12 @@ signal zone_travel_requested(zone_id:String,entry_edge:String)
 const IMP_SCENE: PackedScene = preload("res://assets/enemies/imp_enemy.glb")
 const DRAGON_SCENE: PackedScene = preload("res://assets/enemies/cave_dragon.glb")
 const ASHFANG_SCENE: PackedScene = preload("res://assets/enemies/ashfang_hound.glb")
+const GRAVEBOUND_SCENE:PackedScene=preload("res://assets/enemies/gravebound_zombie.glb")
+const GRAVEBOUND_CAMPAIGN_SCRIPT:=preload("res://scripts/gameplay/GraveboundCampaign.gd")
+const ZOMBIE_GROAN:AudioStream=preload("res://assets/audio/gravebound/groan.wav")
+const ZOMBIE_ATTACK:AudioStream=preload("res://assets/audio/gravebound/attack.wav")
+const ZOMBIE_HIT:AudioStream=preload("res://assets/audio/gravebound/hit.wav")
+const ZOMBIE_DEATH:AudioStream=preload("res://assets/audio/gravebound/death.wav")
 const AXE_SCENE:PackedScene=preload("res://assets/items/axe_v2.glb")
 const FISHING_POLE_SCENE:PackedScene=preload("res://assets/items/fishing_pole.glb")
 const FISH_SCENE:PackedScene=preload("res://assets/items/fish.glb")
@@ -57,7 +63,14 @@ var _nearby_loot:Dictionary={}
 var _gathered_counts:Dictionary={"herbs":0,"logs":0,"ore":0,"crafted":0,"dungeons":0,"ashfangs":0,"fish":0}
 var _quest_claimed:Dictionary={}
 var _stream_tick:=0.0
+var _stream_transition_queue:Array[Dictionary]=[]
+var _stream_transition_sequence:=0
+var _stream_transition_frame:=0
+var _last_stream_transition:Dictionary={}
+var _stream_scene_branches:=false
 var _collision_refresh_tick:=0.0
+var _collision_refresh_sequence:=0
+var _last_collision_refresh:Dictionary={}
 var _admin_one_hit_kill:=false
 var _admin_god_mode:=false
 var _forest_trees:Array[Dictionary]=[]
@@ -76,11 +89,17 @@ var _fishing_fish_shadow:MeshInstance3D
 var _fishing_target:=Vector3.ZERO
 var _local_prop_collision_body:StaticBody3D
 var _local_prop_collision_shapes:Array[CollisionShape3D]=[]
+var _active_prop_collision_slots:Dictionary={}
+var _prop_collision_slot_keys:Array[String]=[]
 var _rock_collision_registry:Array=[]
 var _prop_collision_buckets:Dictionary={}
+var _last_prop_collision_refresh_position:=Vector3(INF,INF,INF)
+var _active_prop_collision_signature:=""
+const LOCAL_PROP_COLLISION_REFRESH_DISTANCE:=3.0
 var _mineable_rocks:Array[Dictionary]=[]
 var _mineable_rock_buckets:Dictionary={}
 var _nearby_world_rock:Dictionary={}
+var _gravebound_campaign:Node3D
 
 const QUESTS:=[
     {"id":"road_imps","chapter":"I","giver":"Captain Elowen, Riverwatch","title":"The Road to Crownspire","counter":"kills","goal":8,"requires":"","story":"The king's courier vanished on the river road. Elowen needs the route cleared before she can search for the royal dispatch.","description":"Defeat hostile imps threatening the river roads.","reward":"35 gold and a health potion"},
@@ -120,32 +139,48 @@ const RECIPES:=[
     {"id":"royal_alloy","category":"Masterwork","name":"Royal Alloy Breastplate","cost":{"ore":18,"crystal":3,"essence":2,"leather":4},"kind":"gear","slot":"chest","icon":1,"armor":25,"hp":38,"mana":8,"power":7,"description":"Masterwork blue-steel plate bearing the Broken Crown crest."},
     {"id":"crest_shield","category":"Masterwork","name":"Broken Crown Crest Shield","cost":{"ore":10,"logs":5,"crystal":2,"resin":2},"kind":"gear","slot":"offhand","icon":9,"armor":19,"hp":27,"power":5,"description":"A royal shield carrying the realm's broken-crown-and-river crest."},
     {"id":"cooked_fish","category":"Cooking","name":"Cooked Fish","cost":{},"kind":"cook_food","ingredient_id":"raw_fish","description":"Cook one raw fish. Restores health and grants the strongest food buff."},
+    {"id":"graveward_tonic","category":"Gravecraft","name":"Graveward Tonic","cost":{"herbs":2,"grave_tokens":2,"plague_samples":1},"kind":"health_potion","amount":2,"unlock":"gravebound","description":"Two strong healing draughts brewed from purified Gravebound residue."},
+    {"id":"ossuary_buckler","category":"Gravecraft","name":"Ossuary Buckler","cost":{"ore":5,"grave_tokens":6},"kind":"gear","slot":"offhand","visual":"shield","icon":9,"armor":14,"hp":18,"power":4,"unlock":"gravebound","description":"A compact warded shield forged from recovered burial iron."},
+    {"id":"graveglass_sword","category":"Gravecraft","name":"Graveglass Sword","cost":{"ore":7,"crystal":1,"grave_tokens":7},"kind":"gear","slot":"mainhand","visual":"sword","icon":8,"power":21,"hp":5,"unlock":"gravebound","description":"A keen road blade edged with blue graveglass."},
+    {"id":"plagueward_cap","category":"Gravecraft","name":"Plagueward Coif","cost":{"cloth":4,"leather":3,"plague_samples":3},"kind":"gear","slot":"head","icon":0,"armor":9,"hp":12,"power":2,"unlock":"gravebound","description":"A sealed coif treated against the Gravebound plague."},
 ]
 
 func configure(hero: CharacterBody3D, height_call: Callable, walkable_call: Callable, world_profile: Dictionary = {}) -> void:
     player = hero; height_sampler = height_call; walkable_sampler = walkable_call
     profile = world_profile
+    _stream_scene_branches=OS.get_environment("BROKEN_KNIGHT_STREAM_SCENE_BRANCHES")=="1"
+    _stream_transition_queue.clear()
+    _stream_transition_sequence=0
+    _stream_transition_frame=0
+    _last_stream_transition={}
+    _collision_refresh_sequence=0
+    _last_collision_refresh={}
+    _last_prop_collision_refresh_position=Vector3(INF,INF,INF)
+    _active_prop_collision_signature=""
     _vendors.clear()
     safe_zone_center = profile.get("spawn_site", {}).get("position", Vector2(player.global_position.x, player.global_position.z))
     rng.seed = 71291
     # Keep the starting meadow readable and safe. The denser enemy groups now
     # live in the starter well and the higher-rank cavern dungeons.
-    for i in range(4): _spawn_minion(118.0 + i * 18.0, float(i) * 2.399)
+    for i in range(3): _spawn_minion(920.0 + i * 46.0, float(i) * 2.399)
     # A small number of solitary bramble wraiths inhabit the outer roads. They
     # are deliberately sparse so the world gains variety without becoming a
     # continuous combat field.
-    for i in range(7):_spawn_bramble_wraith(175.0+float(i)*24.0,float(i)*2.217+.42)
+    for i in range(4):_spawn_bramble_wraith(1120.0+float(i)*70.0,float(i)*2.217+.42)
     # Four Ashfang leaders roam with two smaller runts each. Packs sit well
     # outside the safe meadow and create recognizable outdoor combat pockets
     # instead of evenly carpeting the map with enemies.
-    for pack in range(4):
-        var pack_distance:=205.0+float(pack)*48.0
+    for pack in range(3):
+        var pack_distance:=1370.0+float(pack)*125.0
         var pack_angle:=.68+float(pack)*1.47
         _spawn_ashfang(pack_distance,pack_angle,false)
         _spawn_ashfang(pack_distance+5.0,pack_angle-.075,true)
         _spawn_ashfang(pack_distance+8.0,pack_angle+.090,true)
     _build_town_services()
     _build_dungeon_network()
+    _gravebound_campaign=GRAVEBOUND_CAMPAIGN_SCRIPT.new()
+    add_child(_gravebound_campaign)
+    _gravebound_campaign.configure(self,player,profile)
     _build_crafting_stations()
     _scatter_gathering_nodes()
     _build_fishing_spots()
@@ -156,10 +191,11 @@ func configure(hero: CharacterBody3D, height_call: Callable, walkable_call: Call
     _batch_static_service_geometry()
     # Hide distant dungeons and service clusters before the first playable
     # frame instead of briefly drawing the whole realm at startup.
-    _stream_local_gameplay()
+    _stream_local_gameplay(true)
 
 
 func clear_for_zone_reload()->void:
+    if is_instance_valid(player) and player.has_method("is_mounted") and player.is_mounted():player.dismount_horse()
     for child in get_children():child.free()
     minions.clear();projectiles.clear();loot.clear();_vendors.clear();_portals.clear();_interactables.clear()
     _nearby_portal={};_nearby_interactable={};_nearby_loot={};nearby_vendor_data={};nearby_vendor=""
@@ -168,7 +204,12 @@ func clear_for_zone_reload()->void:
     _fishing_active=false;_fishing_phase="";_fishing_timer=0.0;_fishing_spot={};_fishing_elapsed=0.0
     _fishing_visual=null;_fishing_bobber=null;_fishing_line=null;_fishing_ripple=null;_fishing_fish_shadow=null
     _local_prop_collision_shapes.clear();_rock_collision_registry.clear();_prop_collision_buckets.clear();_local_prop_collision_body=null
+    _active_prop_collision_slots.clear();_prop_collision_slot_keys.clear()
+    _stream_transition_queue.clear()
+    _last_stream_transition={}
+    _last_collision_refresh={}
     _service_material_cache.clear();_spawn_count=0
+    _gravebound_campaign=null
 
 
 func _build_zone_exits()->void:
@@ -188,6 +229,8 @@ func _build_zone_exits()->void:
 
 func _process(delta: float) -> void:
     if not is_instance_valid(player): return
+    _stream_transition_frame=(_stream_transition_frame+1)%4
+    if _stream_transition_frame==0:_apply_stream_transitions(1)
     if not (player.has_method("is_warrior") and player.is_warrior()):
         player.mana = minf(player.max_mana, player.mana + 2.2 * delta)
     for i in range(4): cooldowns[i] = maxf(0.0, cooldowns[i] - delta)
@@ -247,6 +290,12 @@ func _unhandled_input(event: InputEvent) -> void:
     elif event.keycode == KEY_F9: _save_game()
     elif event.keycode == KEY_F10: _load_game()
     elif event.keycode == KEY_E:
+        if is_instance_valid(player) and player.has_method("is_mounted") and player.is_mounted():
+            player.dismount_horse()
+            _refresh_horse_interaction_states()
+            _notify("Dismounted — press E beside the horse to ride again",Color(.86,.75,.48))
+            get_viewport().set_input_as_handled()
+            return
         if _fishing_active:
             _reel_fishing()
             get_viewport().set_input_as_handled()
@@ -283,6 +332,12 @@ func get_world_interaction_markers()->Array[Dictionary]:
     return result
 
 
+func get_story_map_markers()->Array[Dictionary]:
+    if is_instance_valid(_gravebound_campaign) and _gravebound_campaign.has_method("get_map_markers"):
+        return _gravebound_campaign.get_map_markers()
+    return []
+
+
 func get_map_service_markers()->Array[Dictionary]:
     # The royal survey is intentionally complete: services are mapped whether
     # or not the player has visited their town yet.
@@ -303,7 +358,8 @@ func get_gameplay_state() -> Dictionary:
     var interaction:="Equip the Royal Vanguard Staff to cast magic." if _magic_requirement_time>0.0 else nearby_vendor
     var quests:=get_quest_state()
     var active:Dictionary=quests[0] if not quests.is_empty() else {}
-    return {"quest":active.get("title",quest_title),"quest_current":active.get("current",mini(player.enemies_defeated,quest_goal)),"quest_goal":active.get("goal",quest_goal),"quest_complete":active.get("complete",quest_complete),"quests":quests,"loot":loot.size(),"minions":minions.size(),"interaction":interaction}
+    var defeated:int=int(player.enemies_defeated) if is_instance_valid(player) else 0
+    return {"quest":active.get("title",quest_title),"quest_description":active.get("description",""),"quest_current":active.get("current",mini(defeated,quest_goal)),"quest_goal":active.get("goal",quest_goal),"quest_complete":active.get("complete",quest_complete),"quests":quests,"loot":loot.size(),"minions":minions.size(),"interaction":interaction}
 
 func get_skill_state() -> Dictionary:
     var upgrades:=[]
@@ -492,7 +548,7 @@ func _damage_area(pos:Vector3,radius:float,damage:float,color:Color,excluded:Arr
 
 func _spawn_minion(distance: float, angle: float, fixed_position: Variant = null, rank: int = 1, dungeon_bounds: Rect2 = Rect2()) -> void:
     if not is_instance_valid(player): return
-    var root := Node3D.new(); add_child(root)
+    var root := Node3D.new();root.set_meta("always_streamed",true);add_child(root)
     _spawn_count += 1
     var elite := _spawn_count % 5 == 0
     var in_dungeon := fixed_position is Vector3
@@ -563,7 +619,7 @@ func _build_low_cost_imp(elite:bool)->Node3D:
     return visual
 
 func _spawn_dragon(position:Vector3,rank:int,bounds:Rect2,boss_id:String)->void:
-    var root:=Node3D.new();root.name="Cave Dragon Boss";add_child(root);root.global_position=position
+    var root:=Node3D.new();root.name="Cave Dragon Boss";root.set_meta("always_streamed",true);add_child(root);root.global_position=position
     var visual:=DRAGON_SCENE.instantiate() as Node3D
     if not visual:
         push_error("The authored cave dragon failed to instantiate.")
@@ -588,7 +644,7 @@ func _spawn_dragon(position:Vector3,rank:int,bounds:Rect2,boss_id:String)->void:
 
 func _spawn_bramble_wraith(distance:float,angle:float)->void:
     if not is_instance_valid(player):return
-    var root:=Node3D.new();root.name="Bramble Wraith";add_child(root)
+    var root:=Node3D.new();root.name="Bramble Wraith";root.set_meta("always_streamed",true);add_child(root)
     var pos:=player.global_position+Vector3(cos(angle),0,sin(angle))*distance
     for attempt in range(10):
         if (not walkable_sampler.is_valid() or walkable_sampler.call(pos.x,pos.z)) and not _inside_safe_zone(pos):break
@@ -622,6 +678,7 @@ func _spawn_ashfang(distance:float,angle:float,runt:bool)->void:
     if not is_instance_valid(player):return
     var root:=Node3D.new()
     root.name="Ashfang Runt" if runt else "Ashfang Pack Leader"
+    root.set_meta("always_streamed",true)
     add_child(root)
     var pos:=player.global_position+Vector3(cos(angle),0,sin(angle))*distance
     for attempt in range(10):
@@ -682,6 +739,86 @@ func _spawn_ashfang(distance:float,angle:float,runt:bool)->void:
         "anim_lock_duration":.52 if runt else .68,
         "attack_damage":7.0 if runt else 13.0,
     })
+
+
+func _spawn_zombie(world_point:Vector2,variant:String,encounter_id:String,dungeon:=false,fixed_position:Vector3=Vector3(INF,INF,INF),dungeon_bounds:Rect2=Rect2())->void:
+    if not is_instance_valid(player):return
+    var root:=Node3D.new();root.name="Gravebound %s"%variant.capitalize();root.set_meta("always_streamed",true);add_child(root)
+    var position:=fixed_position if fixed_position.is_finite() else _ground(Vector3(world_point.x,0,world_point.y))
+    root.global_position=position
+    var visual:=GRAVEBOUND_SCENE.instantiate() as Node3D
+    if visual==null:
+        root.queue_free();push_error("The authored Gravebound zombie failed to instantiate.");return
+    visual.name="GraveboundVisual";visual.rotation.y=PI;root.add_child(visual)
+    var collision_body:=AnimatableBody3D.new();collision_body.name="GraveboundCollision";collision_body.collision_layer=1;collision_body.collision_mask=0;collision_body.sync_to_physics=true;root.add_child(collision_body)
+    var collision:=CollisionShape3D.new();var capsule:=CapsuleShape3D.new();capsule.radius=.34 if variant=="runner" else (.48 if variant=="champion" else .40);capsule.height=1.62;collision.shape=capsule;collision.position=Vector3(0,.84,0);collision_body.add_child(collision)
+    var animation_player:=_find_animation_player(visual)
+    if animation_player:
+        for clip in ["Idle","Walk","Run"]:
+            if animation_player.has_animation(clip):animation_player.get_animation(clip).loop_mode=Animation.LOOP_LINEAR
+        for clip in ["Attack","Hit","Stagger","Knockdown","Death"]:
+            if animation_player.has_animation(clip):animation_player.get_animation(clip).loop_mode=Animation.LOOP_NONE
+        animation_player.play("Idle")
+    var stats:Dictionary={"hp":64.0,"scale":.96,"speed":1.75,"aggro":31.0,"range":2.05,"cooldown":1.52,"windup":.42,"damage":9.0,"rank":1,"elite":false,"movement":"Walk"}
+    match variant:
+        "runner":stats.merge({"hp":48.0,"scale":.92,"speed":4.35,"aggro":42.0,"range":1.85,"cooldown":1.05,"windup":.22,"damage":7.0,"rank":1,"movement":"Run"},true)
+        "graveguard":stats.merge({"hp":175.0,"scale":1.04,"speed":2.05,"aggro":36.0,"range":2.25,"cooldown":1.72,"windup":.48,"damage":14.0,"rank":3,"elite":true,"movement":"Walk"},true)
+        "carrier":stats.merge({"hp":118.0,"scale":1.08,"speed":1.48,"aggro":34.0,"range":2.35,"cooldown":1.85,"windup":.52,"damage":10.0,"rank":2,"movement":"Walk"},true)
+        "champion":stats.merge({"hp":980.0,"scale":1.34,"speed":2.22,"aggro":70.0,"range":2.75,"cooldown":1.45,"windup":.46,"damage":22.0,"rank":6,"elite":true,"movement":"Walk"},true)
+    root.scale=Vector3.ONE*float(stats.scale)
+    _add_zombie_variant_visual(root,variant)
+    var health_fill:=_add_zombie_health_bar(root,variant)
+    var audio_player:=AudioStreamPlayer3D.new();audio_player.name="GraveboundVoice";audio_player.max_distance=38.0;audio_player.unit_size=7.0;audio_player.volume_db=-7.0;root.add_child(audio_player)
+    var flash:=StandardMaterial3D.new();flash.albedo_color=Color(.62,1.0,.22);flash.emission_enabled=true;flash.emission=Color(.28,1.0,.06);flash.emission_energy_multiplier=2.1
+    minions.append({
+        "node":root,"hp":stats.hp,"max_hp":stats.hp,"phase":rng.randf_range(0,TAU),"attack":rng.randf_range(.15,.75),"windup":0.0,"knockback":Vector3.ZERO,
+        "elite":stats.elite,"base_scale":stats.scale,"animation":animation_player,"anim_lock":0.0,"flash_time":0.0,"flash_material":flash,"dead":false,"death_time":0.0,
+        "dungeon":dungeon,"floor_y":position.y,"bounds":dungeon_bounds,"rank":stats.rank,"kind":"zombie_%s"%variant,"zombie_variant":variant,"encounter_id":encounter_id,
+        "move_speed":stats.speed,"aggro_range":stats.aggro,"attack_range":stats.range,"attack_cooldown":stats.cooldown,"windup_duration":stats.windup,"anim_lock_duration":.74,"attack_damage":stats.damage,
+        "movement_animation":stats.movement,"audio":audio_player,"health_fill":health_fill,"groan_time":rng.randf_range(4.0,11.0),"plague_tick":rng.randf_range(1.0,2.0),"boss_phase":1,"summon_2":false,"summon_3":false,
+    })
+
+
+func _add_zombie_variant_visual(root:Node3D,variant:String)->void:
+    var gear:=Node3D.new();gear.name="VariantEquipment";root.add_child(gear)
+    var iron:=Color(.14,.16,.15);var rust:=Color(.28,.13,.055);var cloth:=Color(.16,.12,.075);var plague:=Color(.34,.52,.10)
+    if variant in ["graveguard","champion"]:
+        # Armor overlaps the body and is deliberately compact enough to retain
+        # the silhouette and animation readability of the authored corpse.
+        _service_box(gear,Vector3(0,1.46,.015),Vector3(.66,.56,.38),iron)
+        _service_box(gear,Vector3(0,1.77,.015),Vector3(.48,.10,.32),rust)
+        var helm:=MeshInstance3D.new();var helm_mesh:=CylinderMesh.new();helm_mesh.top_radius=.23;helm_mesh.bottom_radius=.29;helm_mesh.height=.34;helm_mesh.radial_segments=12;helm.mesh=helm_mesh;helm.position=Vector3(0,2.08,0);helm.material_override=_service_material(iron);gear.add_child(helm)
+        for side in [-1.0,1.0]:_service_box(gear,Vector3(side*.39,1.62,.015),Vector3(.26,.18,.42),iron).rotation.z=side*.18
+    if variant=="graveguard":
+        var shield:=MeshInstance3D.new();var shield_mesh:=CylinderMesh.new();shield_mesh.top_radius=.48;shield_mesh.bottom_radius=.48;shield_mesh.height=.12;shield_mesh.radial_segments=12;shield.mesh=shield_mesh;shield.position=Vector3(-.68,1.12,.12);shield.rotation.z=PI*.5;shield.material_override=_service_material(Color(.20,.24,.21));gear.add_child(shield)
+        _service_box(gear,Vector3(-.75,1.12,-.04),Vector3(.12,.78,.12),rust)
+    elif variant=="carrier":
+        for i in range(3):
+            var sack:=MeshInstance3D.new();var sack_mesh:=SphereMesh.new();sack_mesh.radius=.34;sack_mesh.height=.72;sack_mesh.radial_segments=12;sack_mesh.rings=7;sack.mesh=sack_mesh;sack.position=Vector3((float(i)-1.0)*.24,1.38,.31+float(i%2)*.10);sack.material_override=_service_material(plague.darkened(float(i)*.045));gear.add_child(sack)
+        var fumes:=GPUParticles3D.new();fumes.name="PlagueMotes";fumes.amount=10;fumes.lifetime=2.2;fumes.position=Vector3(0,1.55,.30);var process:=ParticleProcessMaterial.new();process.emission_shape=ParticleProcessMaterial.EMISSION_SHAPE_SPHERE;process.emission_sphere_radius=.34;process.initial_velocity_min=.18;process.initial_velocity_max=.5;process.gravity=Vector3(0,.24,0);process.scale_min=.06;process.scale_max=.16;process.color=Color(.34,.70,.10,.50);fumes.process_material=process;var mote:=SphereMesh.new();mote.radius=.05;mote.height=.10;mote.radial_segments=6;mote.rings=3;fumes.draw_pass_1=mote;gear.add_child(fumes)
+    elif variant=="champion":
+        _service_box(gear,Vector3(0,1.08,.015),Vector3(.58,.24,.42),rust)
+        for x in [-.22,0.0,.22]:
+            var spike:=MeshInstance3D.new();var spike_mesh:=CylinderMesh.new();spike_mesh.top_radius=0.0;spike_mesh.bottom_radius=.065;spike_mesh.height=.42;spike_mesh.radial_segments=8;spike.mesh=spike_mesh;spike.position=Vector3(x,2.42,0);spike.material_override=_service_material(rust);gear.add_child(spike)
+        var aura:=OmniLight3D.new();aura.light_color=Color(.30,1.0,.08);aura.light_energy=1.15;aura.omni_range=4.8;aura.shadow_enabled=false;aura.position=Vector3(0,1.3,0);gear.add_child(aura)
+    elif variant=="runner":
+        _service_box(gear,Vector3(0,1.26,.22),Vector3(.46,.18,.06),cloth)
+
+
+func _play_zombie_sound(m:Dictionary,stream:AudioStream)->void:
+    var audio_player:=m.get("audio") as AudioStreamPlayer3D
+    if not is_instance_valid(audio_player) or audio_player.playing:return
+    audio_player.stream=stream;audio_player.pitch_scale=rng.randf_range(.88,1.12);audio_player.play()
+
+
+func _add_zombie_health_bar(root:Node3D,variant:String)->MeshInstance3D:
+    var bar_root:=Node3D.new();bar_root.name="EnemyHealthBar";bar_root.position=Vector3(0,2.63 if variant!="champion" else 2.78,0);root.add_child(bar_root)
+    var width:=1.70 if variant=="champion" else 1.16
+    var back:=_service_box(bar_root,Vector3(0,0,.01),Vector3(width+.10,.15,.055),Color(.025,.018,.016));back.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    var fill:=_service_box(bar_root,Vector3(0,0,.055),Vector3(width,.09,.06),Color(.64,.08,.045));fill.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    if variant=="champion":
+        var label:=Label3D.new();label.text="GRAVEBOUND CHAMPION";label.position=Vector3(0,.28,0);label.font_size=24;label.pixel_size=.008;label.modulate=Color(1.0,.62,.25);label.outline_size=6;label.billboard=BaseMaterial3D.BILLBOARD_ENABLED;bar_root.add_child(label)
+    return fill
 
 
 func _dragon_part(root:Node3D,name_value:String,pos:Vector3,size:Vector3,color:Color,emissive:bool=false)->void:
@@ -780,6 +917,11 @@ func _tick_minions(delta: float) -> void:
                 if skull:skull.rotation.z=sin(float(m.phase)*.55)*.055
                 if torso:torso.rotation.z=-sin(float(m.phase)*.55)*.025
         var kind:String=str(m.get("kind",""))
+        if kind.begins_with("zombie_"):
+            m.groan_time=float(m.get("groan_time",8.0))-delta
+            if float(m.groan_time)<=0.0:
+                m.groan_time=rng.randf_range(7.0,15.0)
+                if rough_delta.length_squared()<900.0:_play_zombie_sound(m,ZOMBIE_GROAN)
         var in_dungeon: bool = m.get("dungeon", false)
         if not in_dungeon and _inside_safe_zone(m.node.global_position):
             var outward:=Vector2(m.node.global_position.x,m.node.global_position.z)-safe_zone_center
@@ -799,6 +941,34 @@ func _tick_minions(delta: float) -> void:
             m.node.visible = false
             continue
         m.node.visible = true
+        if kind=="zombie_carrier" and not player_in_safe_zone:
+            m.plague_tick=maxf(0.0,float(m.get("plague_tick",1.2))-delta)
+            if dist<4.6 and float(m.plague_tick)<=0.0:
+                m.plague_tick=2.25
+                _damage_player(3.0)
+                _burst(m.node.global_position,Color(.34,.68,.08),2.8)
+        if kind=="zombie_champion":
+            var health_fraction:=float(m.hp)/maxf(1.0,float(m.get("max_hp",m.hp)))
+            var boss_phase:=3 if health_fraction<.34 else (2 if health_fraction<.67 else 1)
+            if boss_phase!=int(m.get("boss_phase",1)):
+                m.boss_phase=boss_phase
+                _burst(m.node.global_position,Color(.30,1.0,.08),4.5+float(boss_phase))
+                _notify("Gravebound Champion — Phase %d"%boss_phase,Color(1.0,.34,.12))
+            if boss_phase>=2 and not bool(m.get("summon_2",false)):
+                m.summon_2=true
+                for offset in [Vector3(-5,0,2),Vector3(5,0,2)]:_spawn_zombie(Vector2.ZERO,"runner","champion_reinforcements",true,m.node.global_position+offset,m.get("bounds",Rect2()))
+            if boss_phase>=3 and not bool(m.get("summon_3",false)):
+                m.summon_3=true
+                _spawn_zombie(Vector2.ZERO,"carrier","champion_reinforcements",true,m.node.global_position+Vector3(0,0,6),m.get("bounds",Rect2()))
+                m.move_speed=2.72;m.attack_damage=27.0
+            m.slam_cooldown=maxf(0.0,float(m.get("slam_cooldown",2.8))-delta)
+            if dist<6.5 and float(m.slam_cooldown)<=0.0 and not player_in_safe_zone:
+                m.slam_cooldown=4.2 if boss_phase<3 else 3.1
+                m.attack=maxf(float(m.attack),1.2);m.anim_lock=1.0
+                _play_minion_animation(m,"Attack",true);_play_zombie_sound(m,ZOMBIE_ATTACK)
+                _burst(m.node.global_position,Color(.42,.72,.12),6.5)
+                var armor_value:int=player.get_equipment_state().get("armor",0)
+                _damage_player(maxf(8.0,28.0-float(armor_value)*.11))
         var windup:float=float(m.get("windup",0.0))
         if windup>0.0 and player_in_safe_zone:
             m.windup=0.0
@@ -828,7 +998,7 @@ func _tick_minions(delta: float) -> void:
                         if _dungeon_step_allowed(m,m.node.global_position,alternate):m.node.global_position=Vector3(alternate.x,float(m.floor_y),alternate.z);break
             elif not _inside_safe_zone(next) and (not walkable_sampler.is_valid() or walkable_sampler.call(next.x,next.z)): m.node.global_position=_ground(next)
             m.node.look_at(Vector3(player.global_position.x,m.node.global_position.y,player.global_position.z),Vector3.UP)
-            _play_minion_animation(m, "Run")
+            _play_minion_animation(m,str(m.get("movement_animation","Run")))
         elif windup<=0.0 and not player_in_safe_zone and dist <= attack_range and m.attack <= 0:
             var base_scale:float=float(m.get("base_scale",.62))
             m.attack=float(m.get("attack_cooldown",1.25))
@@ -836,6 +1006,7 @@ func _tick_minions(delta: float) -> void:
             m.node.scale=Vector3(1.10,.90,1.10)*base_scale
             m.anim_lock=float(m.get("anim_lock_duration",.62))
             _play_minion_animation(m,"Attack",true)
+            if kind.begins_with("zombie_"):_play_zombie_sound(m,ZOMBIE_ATTACK)
         elif float(m.get("anim_lock",0.0)) <= 0.0:
             _play_minion_animation(m, "Idle")
         if float(m.get("windup",0.0))<=0.0:m.node.scale=m.node.scale.lerp(Vector3.ONE*float(m.get("base_scale",.62)),delta*7.0)
@@ -866,9 +1037,13 @@ func _inside_safe_zone(position:Vector3)->bool:
 
 func _damage(m: Dictionary, amount: float, hit_direction:Vector3=Vector3.ZERO) -> void:
     if m.get("dead", false): return
+    var kind:String=str(m.get("kind",""))
+    if kind=="zombie_graveguard":amount*=.68
     if _admin_one_hit_kill:
         amount=maxf(amount,float(m.get("hp",1.0)))
     var base_scale:float=float(m.get("base_scale",.62));m.hp -= amount;m.node.scale=Vector3(1.28,.75,1.28)*base_scale
+    var health_fill:=m.get("health_fill") as MeshInstance3D
+    if is_instance_valid(health_fill):health_fill.scale.x=clampf(float(m.hp)/maxf(1.0,float(m.get("max_hp",m.hp+amount))),0.0,1.0)
     if hit_direction.length_squared()>0.001:m.knockback=Vector3(hit_direction.x,0.0,hit_direction.z).normalized()*(5.5 if not m.get("elite",false) else 2.8)
     m.flash_time=.12
     m.flash_applied=true
@@ -877,12 +1052,14 @@ func _damage(m: Dictionary, amount: float, hit_direction:Vector3=Vector3.ZERO) -
         var death_pos: Vector3 = m.node.global_position
         var was_elite: bool = m.get("elite", false)
         var is_dragon:bool=m.get("kind","")=="dragon"
-        var kind:String=m.get("kind","")
+        kind=m.get("kind","")
         m.dead=true
         m.death_elapsed=0.0
         m.death_time=3.5 if is_dragon else (2.1 if kind=="bramble_wraith" else (2.0 if kind.begins_with("ashfang") else 1.45))
         m.node.scale=Vector3.ONE*base_scale
+        if is_instance_valid(health_fill) and is_instance_valid(health_fill.get_parent()):health_fill.get_parent().visible=false
         _play_minion_animation(m,"Death",true)
+        if kind.begins_with("zombie_"):_play_zombie_sound(m,ZOMBIE_DEATH)
         player.enemies_defeated += 1
         if was_elite: player.elites_defeated += 1
         if kind.begins_with("ashfang"):
@@ -895,7 +1072,14 @@ func _damage(m: Dictionary, amount: float, hit_direction:Vector3=Vector3.ZERO) -
             var boss_id:String=m.get("boss_id","CAVE_DRAGON")
             var key_id:="dragon_key_%s"%boss_id
             player.bag_slots.append({"id":key_id,"slot":"key","icon":9,"name":"Dragon Hoard Key","armor":0,"hp":0,"mana":0,"power":0,"description":"A massive scorched key dropped by the cave dragon. It unlocks this dragon's royal hoard."})
-        _spawn_loot(death_pos,was_elite,rank,is_dragon)
+        if kind.begins_with("zombie_"):
+            _spawn_zombie_loot(death_pos,kind,was_elite)
+            if kind=="zombie_carrier":
+                _burst(death_pos,Color(.36,.78,.10),4.0)
+                if death_pos.distance_to(player.global_position)<4.2:_damage_player(6.0)
+            if is_instance_valid(_gravebound_campaign):_gravebound_campaign.enemy_defeated(m)
+        else:
+            _spawn_loot(death_pos,was_elite,rank,is_dragon)
         if kind.begins_with("ashfang"):
             _spawn_world_drop(death_pos+Vector3(.42,0,.18),{"kind":"material","material":"leather","amount":2 if was_elite else 1,"name":"Ashfang Hide"},was_elite)
         if player.enemies_defeated >= quest_goal and not quest_complete:
@@ -904,7 +1088,9 @@ func _damage(m: Dictionary, amount: float, hit_direction:Vector3=Vector3.ZERO) -
             player.health_potions += 1
     else:
         m.anim_lock=.26
-        _play_minion_animation(m,"Hit",true)
+        if kind.begins_with("zombie_"):_play_zombie_sound(m,ZOMBIE_HIT)
+        var reaction:="Knockdown" if amount>=48.0 and not m.get("elite",false) else ("Stagger" if amount>=24.0 else "Hit")
+        _play_minion_animation(m,reaction,true)
 
 func _tick_enemy_death(m:Dictionary,delta:float)->void:
     m.death_elapsed=float(m.get("death_elapsed",0.0))+delta
@@ -1072,7 +1258,12 @@ func craft_mana_potion() -> bool:
 
 
 func get_recipes()->Array:
-    return RECIPES.duplicate(true)
+    var result:Array=[]
+    var gravecraft_unlocked:=is_instance_valid(_gravebound_campaign) and int(_gravebound_campaign.get("stage"))>=9
+    for recipe in RECIPES:
+        if str(recipe.get("unlock",""))=="gravebound" and not gravecraft_unlocked:continue
+        result.append(recipe.duplicate(true))
+    return result
 
 
 func can_craft_recipe(recipe:Dictionary)->bool:
@@ -1127,6 +1318,8 @@ func _missing_cost_text(costs:Dictionary)->String:
 
 func get_quest_state()->Array[Dictionary]:
     var result:Array[Dictionary]=[]
+    if is_instance_valid(_gravebound_campaign) and _gravebound_campaign.has_method("get_active_state"):
+        result.append(_gravebound_campaign.get_active_state())
     for definition in QUESTS:
         var quest:Dictionary=definition.duplicate(true)
         var current:=_quest_counter(str(quest.counter))
@@ -1141,6 +1334,7 @@ func get_quest_state()->Array[Dictionary]:
 
 
 func _quest_counter(counter:String)->int:
+    if not is_instance_valid(player):return 0
     match counter:
         "kills":return player.enemies_defeated
         "elites":return player.elites_defeated
@@ -1260,7 +1454,7 @@ func _river_surface_y(x:float)->float:
     var grade:=2.4+x*.00042+sin(x*.003)*.08
     grade+=smoothstep(-1195.0,-1125.0,x)*3.2
     grade+=smoothstep(2005.0,2075.0,x)*2.6
-    return grade-.48
+    return grade-2.8+float(profile.get("river_water_lift",1.35))
 
 
 func _register_house_doors()->void:
@@ -1268,6 +1462,39 @@ func _register_house_doors()->void:
         if not door_node is Node3D:continue
         var door:=door_node as Node3D
         _interactables.append({"action":"door","position":door.global_position,"radius":3.8,"label":"Open door","node":door,"open":false,"active":true})
+
+
+func refresh_populated_world_registries()->void:
+    # Main configures gameplay before staged world dressing so the loading
+    # screen can advance. Rebuild the registries once those authored nodes and
+    # metadata exist, while retaining non-door gameplay interactions.
+    _interactables=_interactables.filter(func(interaction:Dictionary)->bool:
+        return str(interaction.get("action","")) not in ["door","mount_horse"]
+    )
+    _register_house_doors()
+    _register_rideable_horses()
+    _configure_harvestable_world_trees()
+    _configure_local_prop_collisions()
+
+
+func _register_rideable_horses()->void:
+    for horse_value in get_tree().get_nodes_in_group("rideable_horse"):
+        if not horse_value is Node3D:continue
+        var horse:=horse_value as Node3D
+        var horse_name:=str(horse.get_meta("horse_name","Riverwatch Courser"))
+        _interactables.append({
+            "action":"mount_horse","position":horse.global_position,"radius":3.4,
+            "label":"Ride %s"%horse_name,"node":horse,
+            "active":not bool(horse.get_meta("mounted",false)),
+        })
+
+
+func _refresh_horse_interaction_states()->void:
+    for interaction in _interactables:
+        if str(interaction.get("action",""))!="mount_horse":continue
+        var horse:=interaction.get("node") as Node3D
+        interaction.active=is_instance_valid(horse) and not bool(horse.get_meta("mounted",false))
+        if is_instance_valid(horse):interaction.position=horse.global_position
 
 
 func _set_geometry_range(root:Node,range_end:float)->void:
@@ -1411,31 +1638,56 @@ func _configure_local_prop_collisions()->void:
         var prop_key:=_tree_bucket_key(prop.get("position",Vector3.ZERO))
         if not _prop_collision_buckets.has(prop_key):_prop_collision_buckets[prop_key]=[]
         _prop_collision_buckets[prop_key].append(prop)
-    _local_prop_collision_body=StaticBody3D.new()
-    _local_prop_collision_body.name="LocalPropCollisionPool"
-    _local_prop_collision_body.collision_layer=1
-    _local_prop_collision_body.set_meta("always_streamed",true)
-    add_child(_local_prop_collision_body)
-    _local_prop_collision_shapes.clear()
-    for i in range(128):
-        var collision:=CollisionShape3D.new()
-        collision.disabled=true
-        _local_prop_collision_body.add_child(collision)
-        _local_prop_collision_shapes.append(collision)
-    _refresh_local_prop_collisions()
+    if not is_instance_valid(_local_prop_collision_body):
+        _local_prop_collision_body=StaticBody3D.new()
+        _local_prop_collision_body.name="LocalPropCollisionPool"
+        _local_prop_collision_body.collision_layer=1
+        _local_prop_collision_body.set_meta("always_streamed",true)
+        add_child(_local_prop_collision_body)
+        _local_prop_collision_shapes.clear()
+        for i in range(128):
+            var collision:=CollisionShape3D.new()
+            collision.disabled=true
+            _local_prop_collision_body.add_child(collision)
+            _local_prop_collision_shapes.append(collision)
+    _reset_local_prop_collision_slots()
+    _refresh_local_prop_collisions(true)
 
 
-func _refresh_local_prop_collisions()->void:
-    if not is_instance_valid(_local_prop_collision_body):return
+func _reset_local_prop_collision_slots()->void:
+    _active_prop_collision_slots.clear()
+    _prop_collision_slot_keys.clear()
+    _prop_collision_slot_keys.resize(_local_prop_collision_shapes.size())
+    for i in range(_local_prop_collision_shapes.size()):
+        _prop_collision_slot_keys[i]=""
+        var collision:=_local_prop_collision_shapes[i]
+        if not collision.disabled:collision.disabled=true
+    _active_prop_collision_signature=""
+
+
+func _refresh_local_prop_collisions(force:bool=false)->void:
+    if not is_instance_valid(_local_prop_collision_body) or not is_instance_valid(player):return
+    # These props are static. Rebuilding every pooled physics shape 12+ times a
+    # second produced visible walking hitches even when the nearby set had not
+    # changed. Sample after meaningful travel, then touch PhysicsServer only if
+    # a prop actually entered or left the active collision bubble.
+    var player_position:=player.global_position
+    if not force and is_finite(_last_prop_collision_refresh_position.x):
+        var travel:=Vector2(
+            player_position.x-_last_prop_collision_refresh_position.x,
+            player_position.z-_last_prop_collision_refresh_position.z
+        )
+        if travel.length_squared()<LOCAL_PROP_COLLISION_REFRESH_DISTANCE*LOCAL_PROP_COLLISION_REFRESH_DISTANCE:return
+    _last_prop_collision_refresh_position=player_position
     var candidates:Array[Dictionary]=[]
-    var center_key:=_tree_bucket_key(player.global_position)
+    var center_key:=_tree_bucket_key(player_position)
     for offset_x in range(-1,2):
         for offset_z in range(-1,2):
             for tree_value in _tree_buckets.get(center_key+Vector2i(offset_x,offset_z),[]):
                 var tree:Dictionary=tree_value
                 if not tree.get("active",true):continue
                 var position:Vector3=tree.get("position",Vector3.ZERO)
-                var distance:=Vector2(position.x-player.global_position.x,position.z-player.global_position.z).length_squared()
+                var distance:=Vector2(position.x-player_position.x,position.z-player_position.z).length_squared()
                 if distance<=22.0*22.0:
                     candidates.append({"kind":"tree","position":position,"scale":float(tree.get("scale",1.0)),"distance":distance})
     for offset_x in range(-1,2):
@@ -1444,29 +1696,81 @@ func _refresh_local_prop_collisions()->void:
                 var prop:Dictionary=prop_value
                 if not prop.get("active",true):continue
                 var position:Vector3=prop.get("position",Vector3.ZERO)
-                var distance:=Vector2(position.x-player.global_position.x,position.z-player.global_position.z).length_squared()
+                var distance:=Vector2(position.x-player_position.x,position.z-player_position.z).length_squared()
                 if distance<=28.0*28.0:
                     candidates.append({"kind":str(prop.get("kind","rock")),"position":position,"radius":float(prop.get("radius",1.0)),"distance":distance})
     candidates.sort_custom(func(a:Dictionary,b:Dictionary)->bool:return float(a.distance)<float(b.distance))
-    for i in range(_local_prop_collision_shapes.size()):
-        var collision:=_local_prop_collision_shapes[i]
-        if i>=candidates.size():
-            collision.disabled=true
-            continue
+    var desired_candidates:Dictionary={}
+    var desired_keys:Array[String]=[]
+    var active_count:=mini(candidates.size(),_local_prop_collision_shapes.size())
+    for i in range(active_count):
         var candidate:=candidates[i]
-        collision.position=candidate.position
+        var key:=_prop_collision_key(candidate)
+        desired_candidates[key]=candidate
+        desired_keys.append(key)
+    desired_keys.sort()
+    var signature:="|".join(PackedStringArray(desired_keys))
+    if not force and signature==_active_prop_collision_signature:return
+    var started_usec:=Time.get_ticks_usec()
+    var physics_changes:=0
+    _active_prop_collision_signature=signature
+    var removed_keys:Array[String]=[]
+    for key_value in _active_prop_collision_slots.keys():
+        var key:=str(key_value)
+        if not desired_candidates.has(key):removed_keys.append(key)
+    for key in removed_keys:
+        var slot:=int(_active_prop_collision_slots.get(key,-1))
+        _active_prop_collision_slots.erase(key)
+        if slot<0 or slot>=_local_prop_collision_shapes.size():continue
+        _prop_collision_slot_keys[slot]=""
+        var collision:=_local_prop_collision_shapes[slot]
+        if not collision.disabled:
+            collision.disabled=true
+            physics_changes+=1
+    for candidate in candidates.slice(0,active_count):
+        var key:=_prop_collision_key(candidate)
+        if _active_prop_collision_slots.has(key):continue
+        var slot:=_prop_collision_slot_keys.find("")
+        if slot<0:break
+        var collision:=_local_prop_collision_shapes[slot]
+        var position:Vector3=candidate.position
         if candidate.kind=="tree":
             var scale_value:=clampf(float(candidate.scale),.58,1.7)
-            var tree_shape:=CylinderShape3D.new()
+            var tree_shape:=collision.shape as CylinderShape3D
+            if tree_shape==null:
+                tree_shape=CylinderShape3D.new()
+                collision.shape=tree_shape
+                physics_changes+=1
             tree_shape.radius=.38*scale_value
             tree_shape.height=4.8*scale_value
-            collision.shape=tree_shape
-            collision.position.y+=tree_shape.height*.5
+            position.y+=tree_shape.height*.5
         else:
-            var rock_shape:=SphereShape3D.new()
+            var rock_shape:=collision.shape as SphereShape3D
+            if rock_shape==null:
+                rock_shape=SphereShape3D.new()
+                collision.shape=rock_shape
+                physics_changes+=1
             rock_shape.radius=maxf(.55,float(candidate.radius))
-            collision.shape=rock_shape
-        collision.disabled=false
+        collision.position=position
+        physics_changes+=1
+        if collision.disabled:
+            collision.disabled=false
+            physics_changes+=1
+        _active_prop_collision_slots[key]=slot
+        _prop_collision_slot_keys[slot]=key
+    _collision_refresh_sequence+=1
+    _last_collision_refresh={
+        "sequence":_collision_refresh_sequence,
+        "candidates":active_count,
+        "physics_changes":physics_changes,
+        "apply_ms":float(Time.get_ticks_usec()-started_usec)/1000.0,
+        "at_msec":Time.get_ticks_msec(),
+    }
+
+
+func _prop_collision_key(candidate:Dictionary)->String:
+    var position:Vector3=candidate.get("position",Vector3.ZERO)
+    return "%s:%.3f:%.3f:%.3f"%[candidate.get("kind","prop"),position.x,position.y,position.z]
 
 
 func _tree_bucket_key(position:Vector3)->Vector2i:
@@ -1557,11 +1861,13 @@ func _activate_world_tree(tree:Dictionary)->void:
     tree.active=false
     _nearby_world_tree={}
     _set_world_tree_visible(tree,false)
+    _refresh_local_prop_collisions(true)
     var position:Vector3=tree.get("position",Vector3.ZERO)
     _spawn_felled_tree_visual(position,clampf(float(tree.get("scale",1.0)),.68,1.35),int(roundi(position.x+position.z)))
     get_tree().create_timer(90.0).timeout.connect(func():
         tree.hits=0;tree.active=true
-        _set_world_tree_visible(tree,true))
+        _set_world_tree_visible(tree,true)
+        _refresh_local_prop_collisions(true))
 
 
 func _set_world_rock_visible(rock:Dictionary,visible_value:bool)->void:
@@ -1589,7 +1895,7 @@ func _activate_world_rock(rock:Dictionary)->void:
     rock.active=false
     _nearby_world_rock={}
     _set_world_rock_visible(rock,false)
-    _refresh_local_prop_collisions()
+    _refresh_local_prop_collisions(true)
     var ground:Vector3=rock.get("ground_position",rock.get("position",Vector3.ZERO))
     var ore_name:String=rock.get("ore_name","Iron Ore")
     var ore_color:Color=rock.get("ore_color",Color(.35,.37,.38))
@@ -1600,7 +1906,8 @@ func _activate_world_rock(rock:Dictionary)->void:
     get_tree().create_timer(150.0).timeout.connect(func():
         rock.hits=0
         rock.active=true
-        _set_world_rock_visible(rock,true))
+        _set_world_rock_visible(rock,true)
+        _refresh_local_prop_collisions(true))
 
 
 func _spawn_mined_rock_break(position:Vector3,rock_scale:float,ore_color:Color=Color(.35,.37,.38))->void:
@@ -1649,6 +1956,16 @@ func _spawn_felled_logs(position:Vector3)->void:
 func _activate_interactable(data:Dictionary)->void:
     if not data.get("active",true):return
     match data.get("action",""):
+        "gravebound_story":
+            if is_instance_valid(_gravebound_campaign):_gravebound_campaign.activate(data)
+        "mount_horse":
+            var horse:=data.get("node") as Node3D
+            if not is_instance_valid(horse):return
+            if player.has_method("mount_horse") and player.mount_horse(horse):
+                data.active=false
+                _nearby_interactable={}
+                var horse_name:=str(horse.get_meta("horse_name","Riverwatch Courser"))
+                _notify("Mounted %s — Shift gallops, E dismounts"%horse_name,Color(.88,.75,.42))
         "craft":crafting_requested.emit(data.get("station",{}))
         "door":
             var door:Node3D=data.get("node")
@@ -1846,7 +2163,10 @@ func _notify(message:String,color:Color=Color.WHITE)->void:
     notification_requested.emit(message,color)
 
 
-func _stream_local_gameplay()->void:
+func _stream_local_gameplay(force_immediate:bool=false)->void:
+    if not _stream_scene_branches:
+        _stream_transition_queue.clear()
+        return
     # Gameplay props, vendors, enemies, pickups and inactive dungeons are true
     # local chunks now. Hidden branches also stop their AnimationPlayers and
     # lights instead of merely relying on camera frustum culling.
@@ -1861,11 +2181,80 @@ func _stream_local_gameplay()->void:
         var node:=child as Node3D
         if node.has_meta("always_streamed"):continue
         var loaded:=node.global_position.distance_squared_to(player.global_position)<=radius_squared
-        if node.has_meta("stream_loaded") and bool(node.get_meta("stream_loaded"))==loaded:continue
-        node.set_meta("stream_loaded",loaded)
-        node.visible=loaded
-        node.process_mode=Node.PROCESS_MODE_INHERIT if loaded else Node.PROCESS_MODE_DISABLED
+        if node.has_meta("stream_target") and bool(node.get_meta("stream_target"))==loaded:continue
+        node.set_meta("stream_target",loaded)
+        if force_immediate:
+            _set_stream_loaded(node,loaded)
+        elif bool(node.get_meta("stream_loaded",node.visible))==loaded:
+            node.set_meta("stream_loaded",loaded)
+        else:
+            _stream_transition_queue.append({"node":node,"loaded":loaded})
     _refresh_local_prop_collisions()
+
+
+func _apply_stream_transitions(max_transitions:int)->void:
+    var applied:=0
+    var inspected:=0
+    while applied<max_transitions and inspected<8 and not _stream_transition_queue.is_empty():
+        inspected+=1
+        var transition:Dictionary=_stream_transition_queue.pop_back()
+        var node:Node3D=transition.get("node") as Node3D
+        if not is_instance_valid(node):continue
+        var loaded:=bool(transition.get("loaded",true))
+        if bool(node.get_meta("stream_target",not loaded))!=loaded:continue
+        if bool(node.get_meta("stream_loaded",node.visible))==loaded:continue
+        var started_usec:=Time.get_ticks_usec()
+        _set_stream_loaded(node,loaded)
+        _stream_transition_sequence+=1
+        _last_stream_transition={
+            "sequence":_stream_transition_sequence,
+            "node":str(node.name),
+            "loaded":loaded,
+            "children":node.get_child_count(),
+            "apply_ms":float(Time.get_ticks_usec()-started_usec)/1000.0,
+            "queue_remaining":_stream_transition_queue.size(),
+            "at_msec":Time.get_ticks_msec(),
+        }
+        applied+=1
+
+
+func _set_stream_loaded(node:Node3D,loaded:bool)->void:
+    node.set_meta("stream_loaded",loaded)
+    if not _stream_scene_branches:
+        return
+    node.visible=true if node.get_meta("stream_keep_visible",false) else loaded
+    node.process_mode=Node.PROCESS_MODE_INHERIT if loaded else Node.PROCESS_MODE_DISABLED
+
+
+func _configure_resident_stream_visuals(root:Node3D)->void:
+    for visual_value in root.find_children("*","GeometryInstance3D",true,false):
+        var visual:=visual_value as GeometryInstance3D
+        if not is_instance_valid(visual):continue
+        visual.visibility_range_end=390.0
+        visual.visibility_range_end_margin=45.0
+        visual.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    for light_value in root.find_children("*","OmniLight3D",true,false):
+        var light:=light_value as OmniLight3D
+        if not is_instance_valid(light):continue
+        light.distance_fade_enabled=true
+        light.distance_fade_begin=300.0
+        light.distance_fade_length=50.0
+        light.distance_fade_shadow=260.0
+
+
+func get_stream_diagnostics()->Dictionary:
+    var now_msec:=Time.get_ticks_msec()
+    var stream_age:=-1
+    if not _last_stream_transition.is_empty():stream_age=now_msec-int(_last_stream_transition.get("at_msec",now_msec))
+    var collision_age:=-1
+    if not _last_collision_refresh.is_empty():collision_age=now_msec-int(_last_collision_refresh.get("at_msec",now_msec))
+    return {
+        "queue":_stream_transition_queue.size(),
+        "last":_last_stream_transition.duplicate(),
+        "stream_age_ms":stream_age,
+        "collision":_last_collision_refresh.duplicate(),
+        "collision_age_ms":collision_age,
+    }
 
 func camp_rest() -> void:
     player.hp=minf(player.max_hp,player.hp+maxf(16.0,player.max_hp*.18))
@@ -1951,6 +2340,13 @@ func _build_town_services()->void:
             _add_vendor_counter(vendor,types[i],apron_color)
             vendor.rotation.y=angle+PI
             var sign:=Label3D.new();sign.text="%s\nE — BROWSE"%vendor_data.get("type_name","MERCHANT").to_upper();sign.position=Vector3(0,2.45,0);sign.font_size=34;sign.modulate=Color(1,.84,.42);sign.outline_size=8;sign.billboard=BaseMaterial3D.BILLBOARD_ENABLED;vendor.add_child(sign)
+            # Merchant roots contain enough separate meshes that hiding the
+            # whole branch can stall the renderer a few frames later. Keep the
+            # resources resident and let native distance culling retire each
+            # visual without rebuilding the render branch.
+            vendor.set_meta("stream_keep_visible",true)
+            vendor.set_meta("always_streamed",true)
+            _configure_resident_stream_visuals(vendor)
         # Ordinary townsfolk stay out until they have real movement schedules.
         town_index+=1
     for p in [Vector2(-2700,1700),Vector2(2620,-1800)]:
@@ -2341,6 +2737,9 @@ func _tick_vendor()->void:
     _nearby_loot={}
     _nearby_world_tree={}
     _nearby_world_rock={}
+    if is_instance_valid(player) and player.has_method("is_mounted") and player.is_mounted():
+        nearby_vendor="E — Dismount  |  Shift — Gallop"
+        return
     if _portal_cooldown <= 0.0:
         _nearby_portal=_find_available_portal()
         if not _nearby_portal.is_empty():
@@ -2348,6 +2747,10 @@ func _tick_vendor()->void:
             return
     var closest_interaction:=INF
     for interaction in _interactables:
+        if str(interaction.get("action",""))=="mount_horse":
+            var interaction_horse:=interaction.get("node") as Node3D
+            interaction.active=is_instance_valid(interaction_horse) and not bool(interaction_horse.get_meta("mounted",false))
+            if is_instance_valid(interaction_horse):interaction.position=interaction_horse.global_position
         if not interaction.get("active",true):continue
         var interaction_position:Vector3=interaction.get("position",Vector3.ZERO)
         var distance:=interaction_position.distance_squared_to(player.global_position)
@@ -2355,6 +2758,21 @@ func _tick_vendor()->void:
         if distance<=radius*radius and distance<closest_interaction:
             closest_interaction=distance
             _nearby_interactable=interaction
+    # A dropped reward can land beside a quest prop (notably a Barrowfen ward
+    # seal). Let the closest object win so pressing E over a coin pouch does
+    # not unexpectedly advance the nearby objective instead of picking it up.
+    if not _nearby_interactable.is_empty():
+        var closest_overlapping_loot:=INF
+        for dropped in loot:
+            if not is_instance_valid(dropped.get("node")):continue
+            var loot_distance:float=dropped.node.global_position.distance_squared_to(player.global_position)
+            if loot_distance<16.0 and loot_distance<closest_overlapping_loot:
+                closest_overlapping_loot=loot_distance
+                _nearby_loot=dropped
+        if not _nearby_loot.is_empty() and closest_overlapping_loot<closest_interaction:
+            _nearby_interactable={}
+            nearby_vendor="E - PICK UP %s"%str(_nearby_loot.get("reward",{}).get("name","item")).to_upper()
+            return
     if _nearby_interactable.is_empty():
         _nearby_interactable=_natural_fishing_interaction()
     if not _nearby_interactable.is_empty():
@@ -2638,6 +3056,23 @@ func _spawn_loot(pos:Vector3,elite:bool,rank:int=1,boss:bool=false)->void:
         for extra in ["crystal","essence","leather"]:_spawn_world_drop(pos+Vector3(rng.randf_range(-1.2,1.2),0,rng.randf_range(-1.2,1.2)),{"kind":"material","material":extra,"amount":2,"name":extra.capitalize()},true)
 
 
+func _spawn_zombie_loot(pos:Vector3,kind:String,elite:bool)->void:
+    var champion:=kind=="zombie_champion"
+    var carrier:=kind=="zombie_carrier"
+    var guard:=kind=="zombie_graveguard"
+    _spawn_world_drop(pos,{"kind":"material","material":"grave_tokens","amount":6 if champion else (2 if guard else 1),"name":"Grave Tokens"},elite or champion)
+    _spawn_world_drop(pos+Vector3(.54,0,.24),{"kind":"gold","amount":65 if champion else (10 if elite else rng.randi_range(2,5)),"name":"Gravebound Coin Pouch"},elite or champion)
+    if carrier:
+        _spawn_world_drop(pos+Vector3(-.50,0,.18),{"kind":"material","material":"plague_samples","amount":2,"name":"Plague Samples"},true)
+    if champion:
+        _spawn_world_drop(pos+Vector3(0,0,.72),{"kind":"material","material":"crystal","amount":2,"name":"Graveglass Crystals"},true)
+        _spawn_world_drop(pos+Vector3(-.74,0,-.18),{"kind":"item","id":"champion_bone_greaves","name":"Champion's Bone Greaves","slot":"feet","icon":4,"armor":12,"hp":16,"power":5,"description":"Heavy burial greaves taken from the Gravebound Champion."},true)
+    elif guard and rng.randf()<.34:
+        _spawn_world_drop(pos+Vector3(-.52,0,.20),{"kind":"item","id":"burial_iron_buckler_%d"%rng.randi(),"name":"Burial Iron Buckler","slot":"offhand","visual":"shield","icon":9,"armor":9,"hp":10,"power":2,"description":"A scarred shield carried by a Barrowfen graveguard."},true)
+    elif rng.randf()<.18:
+        _spawn_world_drop(pos+Vector3(-.44,0,.18),{"kind":"item","id":"gravebound_salve","stack_key":"item:gravebound_salve","stackable":true,"quantity":1,"name":"Gravebound Salve","slot":"consumable","icon":10,"use":"food","buff_name":"Graveward","duration":75.0,"buff_power":2,"health_regen":.22,"stamina_regen":1.2,"heal":14.0,"description":"A sealed battlefield remedy. Double-click to restore health and gain a short graveward buff."},false)
+
+
 func _spawn_world_drop(pos:Vector3,reward:Dictionary,rare:bool=false)->void:
     var kind:String=reward.get("kind","material")
     var material_name:String=reward.get("material","")
@@ -2662,6 +3097,7 @@ func _spawn_world_drop(pos:Vector3,reward:Dictionary,rare:bool=false)->void:
     elif item_id.begins_with("berries"):scene=BERRIES_SCENE
     elif material_name=="logs":scene=LOG_SCENE
     elif material_name=="crystal" or material_name=="essence":scene=CRYSTAL_DROP_SCENE
+    elif material_name in ["grave_tokens","plague_samples"]:scene=CRYSTAL_DROP_SCENE if material_name=="plague_samples" else COIN_POUCH_SCENE
     elif material_name in ["ore","stone","scrap"]:scene=ORE_DROP_SCENE
     elif kind=="item" and reward.get("slot","")=="mainhand":
         scene=AXE_SCENE if "axe" in item_id.to_lower() else (FISHING_POLE_SCENE if "fishing" in item_id.to_lower() else SWORD_DROP_SCENE)
@@ -2712,7 +3148,7 @@ func _collect_reward(reward:Dictionary)->void:
     _check_quest_rewards()
 
 func _save_game() -> void:
-    var data := {"position":[player.global_position.x,player.global_position.y,player.global_position.z],"class":player.active_class,"level":player.hero_level,"xp":player.hero_xp,"next_xp":player.next_xp,"hp":player.hp,"max_hp":player.max_hp,"mana":player.mana,"max_mana":player.max_mana,"gold":player.hero_gold,"shards":player.relic_shards,"hp_potions":player.health_potions,"mp_potions":player.mana_potions,"herbs":player.herbs,"scrap":player.scrap,"ore":player.ore,"essence":player.essence,"logs":player.logs,"leather":player.leather,"cloth":player.cloth,"stone":player.stone,"resin":player.resin,"mushrooms":player.mushrooms,"crystal":player.crystal,"kills":player.enemies_defeated,"elites":player.elites_defeated,"quest_complete":quest_complete,"quest_goal":quest_goal,"quest_claimed":_quest_claimed,"gathered_counts":_gathered_counts,"skill_levels":skill_levels,"skill_xp":skill_xp,"bag":player.bag_slots,"equipment_slots":player.equipment_slots}
+    var data := {"position":[player.global_position.x,player.global_position.y,player.global_position.z],"class":player.active_class,"level":player.hero_level,"xp":player.hero_xp,"next_xp":player.next_xp,"hp":player.hp,"max_hp":player.max_hp,"mana":player.mana,"max_mana":player.max_mana,"gold":player.hero_gold,"shards":player.relic_shards,"hp_potions":player.health_potions,"mp_potions":player.mana_potions,"herbs":player.herbs,"scrap":player.scrap,"ore":player.ore,"essence":player.essence,"logs":player.logs,"leather":player.leather,"cloth":player.cloth,"stone":player.stone,"resin":player.resin,"mushrooms":player.mushrooms,"crystal":player.crystal,"grave_tokens":player.grave_tokens,"plague_samples":player.plague_samples,"kills":player.enemies_defeated,"elites":player.elites_defeated,"quest_complete":quest_complete,"quest_goal":quest_goal,"quest_claimed":_quest_claimed,"gathered_counts":_gathered_counts,"skill_levels":skill_levels,"skill_xp":skill_xp,"bag":player.bag_slots,"equipment_slots":player.equipment_slots,"gravebound_campaign":_gravebound_campaign.get_save_state() if is_instance_valid(_gravebound_campaign) else {}}
     var file:=FileAccess.open("user://broken_knight_save.json",FileAccess.WRITE)
     if file: file.store_string(JSON.stringify(data))
 
@@ -2722,7 +3158,7 @@ func _load_game() -> void:
     if not data is Dictionary: return
     var p:Array=data.get("position",[0,0,0]); player.global_position=_ground(Vector3(p[0],p[1],p[2]))
     player.hero_level=data.get("level",1); player.hero_xp=data.get("xp",0); player.next_xp=data.get("next_xp",25); player.hero_gold=data.get("gold",4); player.relic_shards=data.get("shards",0); player.health_potions=data.get("hp_potions",2); player.mana_potions=data.get("mp_potions",1); player.herbs=data.get("herbs",0); player.scrap=data.get("scrap",0); player.ore=data.get("ore",0); player.essence=data.get("essence",0); player.enemies_defeated=data.get("kills",0); player.elites_defeated=data.get("elites",0); quest_complete=data.get("quest_complete",false)
-    for material_kind in ["logs","leather","cloth","stone","resin","mushrooms","crystal"]:player.set(material_kind,int(data.get(material_kind,0)))
+    for material_kind in ["logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:player.set(material_kind,int(data.get(material_kind,0)))
     if player.has_method("sync_material_inventory"):player.sync_material_inventory()
     _quest_claimed=data.get("quest_claimed",{})
     _gathered_counts.merge(data.get("gathered_counts",{}),true)
@@ -2747,3 +3183,4 @@ func _load_game() -> void:
     player.give_starter_fishing_pole()
     player._refresh_equipment_stats()
     player.hp=minf(player.max_hp,data.get("hp",player.max_hp)); player.mana=minf(player.max_mana,data.get("mana",player.max_mana))
+    if is_instance_valid(_gravebound_campaign):_gravebound_campaign.load_save_state(data.get("gravebound_campaign",{}))

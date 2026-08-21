@@ -13,4 +13,4 @@ if (-not (Test-Path $projectPath)) {
   throw "Godot project not found at $projectPath"
 }
 
-Start-Process -FilePath $godotExe -WorkingDirectory $projectDir -ArgumentList $projectPath, "--scene", "res://scenes/Main.tscn"
+Start-Process -FilePath $godotExe -WorkingDirectory $projectDir -ArgumentList "--path", $projectDir, "--scene", "res://scenes/Main.tscn", "--single-window"

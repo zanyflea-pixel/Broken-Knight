@@ -54,10 +54,20 @@ for obj in bpy.context.scene.objects:
         if modifier.type == "SUBSURF":
             modifier.levels = 0
             modifier.render_levels = 0
-for action_name, frames in [
-    ("TorchIdle", (1, 25)),
-    ("TorchWalk", (4, 10)),
-]:
+requested_action = os.environ.get("RIG_CHECK_ACTION", "").strip()
+if requested_action:
+    requested_frames = tuple(
+        int(value.strip())
+        for value in os.environ.get("RIG_CHECK_FRAMES", "1,4,7,10,13,16,19,22").split(",")
+        if value.strip()
+    )
+    checks = [(requested_action, requested_frames)]
+else:
+    checks = [
+        ("TorchIdle", (1, 25)),
+        ("TorchWalk", (4, 10)),
+    ]
+for action_name, frames in checks:
     arm.animation_data.action = bpy.data.actions[action_name]
     for frame in frames:
         scene.frame_set(frame)

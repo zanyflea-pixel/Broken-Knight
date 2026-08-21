@@ -14,9 +14,23 @@ from mathutils import Euler, Matrix, Vector
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-MASTER = os.path.join(ROOT, "blender", "BrokenKnight_Hero_Master.blend")
-REFERENCE_ARMOR = os.path.join(ROOT, "blender", "royal_armor_apex_editable_shoulders_improved.blend")
-PASS_ID = "RoyalArmor_SovereignAdminPanoply_2026_08_02"
+MASTER = os.path.abspath(os.environ.get(
+    "BK_ARMOR_OUTPUT_BLEND",
+    os.path.join(ROOT, "blender", "BrokenKnight_Hero_Master.blend"),
+))
+REFERENCE_ARMOR = os.path.abspath(os.environ.get(
+    "BK_ARMOR_REFERENCE_BLEND",
+    os.path.join(ROOT, "blender", "royal_armor_apex_editable_shoulders_improved.blend"),
+))
+PASS_ID = "RoyalArmor_LockedBodySovereignPanoply_2026_08_13"
+REFERENCE_FULL_BODY = os.path.join(
+    ROOT, "blender", "references", "royal_armor_splash_target",
+    "broken_knight_royal_armor_full_body_v1.png",
+)
+REFERENCE_FACE = os.path.join(
+    ROOT, "blender", "references", "royal_armor_splash_target",
+    "broken_knight_hero_face_v1.png",
+)
 
 COLLECTIONS = {
     "head": "10A_ARMOR_HEAD",
@@ -26,6 +40,38 @@ COLLECTIONS = {
     "pants": "10E_ARMOR_PANTS",
     "feet": "10F_ARMOR_FEET",
 }
+
+
+def ensure_build_prerequisites():
+    """Bootstrap the accepted unarmored master without importing an old body."""
+    if not os.path.exists(REFERENCE_ARMOR):
+        raise RuntimeError(f"Armor reference file is missing: {REFERENCE_ARMOR}")
+    required_materials = {
+        "Royal Blued Steel", "Royal Planished Edge Steel", "Royal Blackened Steel",
+        "Royal Gilt Brass", "Royal Cobalt Filigree Plate", "Helmet Interior",
+        "Ducal Crimson Horsehair", "Ducal Horsehair Shadow", "Riveted Mail",
+        "Harness Leather",
+    }
+    missing = sorted(name for name in required_materials if bpy.data.materials.get(name) is None)
+    if missing:
+        with bpy.data.libraries.load(REFERENCE_ARMOR, link=False) as (data_from, data_to):
+            data_to.materials = [name for name in missing if name in data_from.materials]
+    still_missing = sorted(name for name in required_materials if bpy.data.materials.get(name) is None)
+    if still_missing:
+        raise RuntimeError(f"Armor materials could not be bootstrapped: {still_missing}")
+
+    root_collection = bpy.data.collections.get("10_ROYAL_ARMOR")
+    if root_collection is None:
+        root_collection = bpy.data.collections.new("10_ROYAL_ARMOR")
+        bpy.context.scene.collection.children.link(root_collection)
+    for collection_name in COLLECTIONS.values():
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            collection = bpy.data.collections.new(collection_name)
+            root_collection.children.link(collection)
+
+
+ensure_build_prerequisites()
 
 
 def mat(name):
@@ -149,6 +195,34 @@ def append_reference_objects(predicate, slot, rigid_bone=None):
         attach_appended_plate(obj, slot, rigid_bone=rigid_bone)
         result.append(obj)
     return result
+
+
+def bootstrap_reference_harness():
+    """Bring the fitted underlayers onto the locked hero before rebuilding.
+
+    The accepted body master intentionally contains no armor.  Appending only
+    RoyalArmor-prefixed objects preserves that body while supplying the fitted
+    greaves, sabatons, gauntlets, mail voids and other deformation-safe layers
+    which the sovereign outer-shell builders refine or replace below.
+    """
+    if any(obj.name.startswith("RoyalArmor_") for obj in bpy.data.objects):
+        return
+    with bpy.data.libraries.load(REFERENCE_ARMOR, link=False) as (data_from, data_to):
+        data_to.objects = [name for name in data_from.objects if name.startswith("RoyalArmor_")]
+    imported = 0
+    for obj in data_to.objects:
+        if obj is None or obj.type != "MESH":
+            continue
+        remainder = obj.name[len("RoyalArmor_"):]
+        slot = remainder.split("_", 1)[0]
+        if slot not in COLLECTIONS:
+            bpy.data.objects.remove(obj, do_unlink=True)
+            continue
+        attach_appended_plate(obj, slot)
+        imported += 1
+    if imported < 100:
+        raise RuntimeError(f"Reference harness bootstrap was incomplete: {imported}")
+    print(f"ROYAL_ARMOR_BOOTSTRAP|objects={imported}|reference={REFERENCE_ARMOR}")
 
 
 def refine_horsehair_material():
@@ -600,21 +674,29 @@ def build_unified_connected_helmet():
     plume_vertices = []
     plume_faces = []
     plume_face_materials = []
-    x_centers = (-0.027, -0.013, 0.001, 0.016, 0.029, -0.020, -0.006, 0.010, 0.023)
+    # Dense offset locks remove the old comb/cake silhouette.  Each lock is a
+    # closed overlapping ribbon with an embedded root; alternating lateral
+    # offsets break the repeated vertical-stripe read from front and rear.
+    x_centers = (
+        -0.038, -0.029, -0.020, -0.011, -0.002, 0.007, 0.016, 0.025, 0.034,
+        -0.033, -0.024, -0.015, -0.006, 0.003, 0.012, 0.021, 0.030,
+    )
     for blade_index, x_center in enumerate(x_centers):
-        root_y = -0.108 + 0.031 * blade_index
+        layer = blade_index % 9
+        root_y = -0.116 + 0.027 * layer + (0.010 if blade_index >= 9 else 0.0)
         height_bias = 0.020 * math.sin(math.pi * blade_index / (len(x_centers) - 1))
+        lateral_sweep = 0.008 * math.sin(blade_index * 1.71)
         path = (
             (root_y, 1.902),
             (root_y - 0.004, 1.968),
             (root_y + 0.004, 2.035 + height_bias * 0.35),
             (root_y + 0.026, 2.112 + height_bias),
-            (root_y + 0.070, 2.150 + height_bias * 0.55),
-            (root_y + 0.119, 2.112 + height_bias * 0.20),
-            (root_y + 0.158, 2.030 - 0.005 * blade_index),
+            (root_y + 0.074, 2.150 + height_bias * 0.55),
+            (root_y + 0.130, 2.112 + height_bias * 0.20),
+            (root_y + 0.181, 2.025 - 0.0025 * layer),
         )
-        widths = (0.021, 0.026, 0.027, 0.024, 0.019, 0.011, 0.0035)
-        thicknesses = (0.019, 0.022, 0.023, 0.021, 0.017, 0.011, 0.0035)
+        widths = (0.016, 0.019, 0.020, 0.018, 0.014, 0.008, 0.0028)
+        thicknesses = (0.015, 0.017, 0.018, 0.016, 0.012, 0.007, 0.0028)
         blade_start = len(plume_vertices)
         for point_index, ((y, z), width, thickness) in enumerate(zip(path, widths, thicknesses)):
             previous = path[max(0, point_index - 1)]
@@ -625,10 +707,10 @@ def build_unified_connected_helmet():
             normal_y = -tangent_z / tangent_length
             normal_z = tangent_y / tangent_length
             plume_vertices.extend((
-                (x_center - width, y + normal_y * thickness, z + normal_z * thickness),
-                (x_center + width, y + normal_y * thickness, z + normal_z * thickness),
-                (x_center + width, y - normal_y * thickness, z - normal_z * thickness),
-                (x_center - width, y - normal_y * thickness, z - normal_z * thickness),
+                (x_center + lateral_sweep * point_index / (len(path) - 1) - width, y + normal_y * thickness, z + normal_z * thickness),
+                (x_center + lateral_sweep * point_index / (len(path) - 1) + width, y + normal_y * thickness, z + normal_z * thickness),
+                (x_center + lateral_sweep * point_index / (len(path) - 1) + width, y - normal_y * thickness, z - normal_z * thickness),
+                (x_center + lateral_sweep * point_index / (len(path) - 1) - width, y - normal_y * thickness, z - normal_z * thickness),
             ))
         for point_index in range(len(path) - 1):
             a = blade_start + point_index * 4
@@ -2108,6 +2190,10 @@ def purge_reference_orphans():
 
 
 def main():
+    for reference_path in (REFERENCE_FULL_BODY, REFERENCE_FACE):
+        if not os.path.exists(reference_path):
+            raise RuntimeError(f"Approved armor reference is missing: {reference_path}")
+    bootstrap_reference_harness()
     refine_mail_material()
     build_unified_connected_helmet()
     build_cuirass_and_waist()
@@ -2129,6 +2215,8 @@ def main():
     write_editing_guide()
     purge_reference_orphans()
     bpy.context.scene["bk_armor_visual_pass"] = PASS_ID
+    bpy.context.scene["bk_armor_reference_full_body"] = REFERENCE_FULL_BODY
+    bpy.context.scene["bk_armor_reference_face"] = REFERENCE_FACE
     bpy.context.scene.frame_set(1)
     ARM.animation_data.action = bpy.data.actions.get("WarriorIdle") or bpy.data.actions.get("Idle")
     bpy.ops.wm.save_as_mainfile(filepath=MASTER, check_existing=False)

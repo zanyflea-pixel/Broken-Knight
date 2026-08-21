@@ -20,7 +20,6 @@ var _map_label_rects:Array[Rect2]=[]
 var _map_features:Array[Dictionary]=[]
 var _map_cache_path:=""
 var _map_cache_enabled:=true
-var _terrain_background_tick:=0
 var _last_draw_player_position:=Vector2(INF,INF)
 var _last_draw_player_heading:=INF
 
@@ -54,24 +53,23 @@ func configure(profile: Dictionary, player: Node3D, director: Node = null, heigh
 
 
 func _process(delta: float) -> void:
-    # A missing 512px survey used to perform 4096 terrain queries every frame
-    # during ordinary play. Build slowly in the background and immediately at
-    # full speed only while the paused map is actually visible.
+    # The full 512px survey is presentation work. Do none of it while gameplay
+    # is active: even one row is 512 terrain queries, and the former hidden-map
+    # cadence caused large, regular hitches while the player walked. Main pauses
+    # gameplay when the map opens, so safely resume the cached build there.
+    if not visible:
+        return
     if _terrain_sample_row>=0:
-        if visible:_advance_terrain_samples(8)
-        else:
-            _terrain_background_tick=(_terrain_background_tick+1)%6
-            if _terrain_background_tick==0:_advance_terrain_samples(1)
+        _advance_terrain_samples(4)
     elif _terrain_color_row>=0:
-        _advance_terrain_colors(16 if visible else 2)
-    if visible and is_instance_valid(_player):
+        _advance_terrain_colors(8)
+    if is_instance_valid(_player):
         var player_position:=Vector2(_player.global_position.x,_player.global_position.z)
         var heading:=_player_map_heading()
         if player_position.distance_squared_to(_last_draw_player_position)>.25 or absf(angle_difference(heading,_last_draw_player_heading))>.012:
             _last_draw_player_position=player_position
             _last_draw_player_heading=heading
             queue_redraw()
-    if not visible and _terrain_sample_row<0 and _terrain_color_row<0:set_process(false)
 
 
 func _on_visibility_changed()->void:
@@ -80,11 +78,13 @@ func _on_visibility_changed()->void:
         _last_draw_player_position=Vector2(INF,INF)
         _last_draw_player_heading=INF
         queue_redraw()
+    else:
+        set_process(false)
 
 
 func _begin_terrain_texture_build(height_sampler:Callable)->void:
     _terrain_height_sampler=height_sampler
-    set_process(true)
+    set_process(visible)
     _map_cache_enabled=OS.get_environment("BROKEN_KNIGHT_DISABLE_MAP_CACHE")!="1"
     var signature:=var_to_str([
         TERRAIN_RESOLUTION,_profile.get("world_size",7200.0),
@@ -249,6 +249,7 @@ func _draw() -> void:
     _draw_waterfalls(panel, world_size)
     _draw_sites(panel, world_size)
     _draw_caves(panel, world_size)
+    _draw_story_markers(panel,world_size)
     if _full_detail:
         _draw_landmark_sites(panel,world_size)
         _draw_special_map_sites(panel,world_size)
@@ -276,6 +277,29 @@ func _draw_crafting_sites(panel:Rect2,world_size:float)->void:
         draw_rect(Rect2(p-Vector2(3.3,3.3),Vector2(6.6,6.6)),Color(.94,.58,.12),true)
         draw_line(p+Vector2(-4.2,4.2),p+Vector2(4.2,-4.2),Color(.24,.12,.03),1.7)
         _register_map_feature(p,7.0,"Town Crafting Yard","Crafting",Vector2(position.x,position.z))
+
+
+func _draw_story_markers(panel:Rect2,world_size:float)->void:
+    if not is_instance_valid(_director) or not _director.has_method("get_story_map_markers"):return
+    for marker in _director.get_story_map_markers():
+        var position:Vector3=marker.get("position",Vector3.ZERO)
+        if absf(position.x)>world_size*.55 or absf(position.z)>world_size*.55:continue
+        var p:=_map_point(Vector2(position.x,position.z),panel,world_size)
+        var kind:=str(marker.get("kind","story_site"))
+        var discovered:=bool(marker.get("discovered",false))
+        if kind=="story_objective":
+            var diamond:=PackedVector2Array([p+Vector2(0,-8),p+Vector2(7,0),p+Vector2(0,8),p+Vector2(-7,0)])
+            draw_colored_polygon(diamond,Color(1.0,.70,.12,.98));draw_polyline(diamond,Color(.18,.09,.025),1.6,true)
+        elif kind=="graveyard":
+            draw_rect(Rect2(p-Vector2(6,5),Vector2(12,10)),Color(.28,.30,.25,.96),true)
+            draw_line(p+Vector2(0,-5),p+Vector2(0,5),Color(.80,.78,.62),1.8);draw_line(p+Vector2(-3,-1),p+Vector2(3,-1),Color(.80,.78,.62),1.8)
+        elif kind=="dungeon":
+            draw_arc(p,7,PI,TAU,18,Color(.21,.16,.10),4.0,true);draw_line(p+Vector2(-7,0),p+Vector2(-7,6),Color(.21,.16,.10),3.0);draw_line(p+Vector2(7,0),p+Vector2(7,6),Color(.21,.16,.10),3.0)
+        else:
+            draw_rect(Rect2(p-Vector2(6,4),Vector2(12,8)),Color(.31,.19,.08,.96),true)
+            draw_line(p+Vector2(-7,-5),p+Vector2(0,-9),Color(.46,.20,.07),2.0);draw_line(p+Vector2(0,-9),p+Vector2(7,-5),Color(.46,.20,.07),2.0)
+        if not discovered and kind!="story_objective":draw_circle(p,2.2,Color(.86,.72,.45,.80))
+        _register_map_feature(p,9.0,str(marker.get("name","Story location")),"Story",Vector2(position.x,position.z))
 
 
 func _draw_realm_crest(panel:Rect2)->void:
@@ -440,6 +464,8 @@ func _draw_field_parcels(panel:Rect2,world_size:float)->void:
 
 func _draw_town_detail(panel:Rect2,world_size:float)->void:
     if not _full_detail:return
+    var spawn_site:Dictionary=_profile.get("spawn_site",{})
+    if spawn_site.get("starter",false):_draw_riverwatch_detail(spawn_site,panel,world_size)
     for site in _profile.get("town_sites",[]):
         var center:Vector2=site.get("position",Vector2.ZERO)
         if site.get("capital",false):
@@ -462,6 +488,35 @@ func _draw_town_detail(panel:Rect2,world_size:float)->void:
         var market:=_map_point(center+(Vector2(0,38) if site.get("capital",false) else Vector2.ZERO),panel,world_size)
         draw_circle(market,4.0,Color(.83,.66,.31,.82))
         _register_map_feature(market,5.0,"%s Market"%str(site.get("name","Town")),"Market",center)
+
+
+func _draw_riverwatch_detail(site:Dictionary,panel:Rect2,world_size:float)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var street:=Color(.72,.57,.30,.76)
+    # The exact authored crossroads and building plots mirror the starter-town
+    # generator so the map teaches the same layout the player sees in-world.
+    draw_line(_map_point(center+Vector2(0,-92),panel,world_size),_map_point(center+Vector2(0,118),panel,world_size),street,3.2,true)
+    draw_line(_map_point(center+Vector2(-92,0),panel,world_size),_map_point(center+Vector2(92,0),panel,world_size),street,2.7,true)
+    var plots:Array[Dictionary]=[
+        {"offset":Vector2(-40,-58),"yaw":PI*.5,"size":Vector2(12,9.5)},
+        {"offset":Vector2(-42,-20),"yaw":PI*.5,"size":Vector2(13.5,10)},
+        {"offset":Vector2(-42,78),"yaw":PI*.5,"size":Vector2(18,12)},
+        {"offset":Vector2(40,-57),"yaw":-PI*.5,"size":Vector2(11.5,9)},
+        {"offset":Vector2(42,-22),"yaw":-PI*.5,"size":Vector2(13,9.5)},
+        {"offset":Vector2(40,42),"yaw":-PI*.5,"size":Vector2(12.5,9.5)},
+        {"offset":Vector2(42,80),"yaw":-PI*.5,"size":Vector2(14.5,10.5)},
+    ]
+    for plot in plots:_draw_map_building(center+plot.offset,plot.size,float(plot.yaw),panel,world_size,Color(.55,.26,.085,.96))
+    var green_center:=center+Vector2(-34,30)
+    draw_circle(_map_point(green_center,panel,world_size),3.8,Color(.67,.64,.54,.88))
+    draw_circle(_map_point(green_center,panel,world_size),1.8,Color(.20,.47,.55,.96))
+    for side in [-1.0,1.0]:
+        var field_center:=center+Vector2(62.0*float(side),116)
+        _draw_world_rect(field_center,Vector2(24,32),0,panel,world_size,Color(.48,.43,.16,.44),Color(.30,.22,.08,.68),.7)
+        for row in range(1,5):
+            var z_offset:=lerpf(-14.0,14.0,float(row)/5.0)
+            draw_line(_map_point(field_center+Vector2(-10,z_offset),panel,world_size),_map_point(field_center+Vector2(10,z_offset),panel,world_size),Color(.40,.30,.08,.64),.65,true)
+    _register_map_feature(_map_point(center,panel,world_size),13.0,"Riverwatch","Starter town and river crossroads",center)
 
 
 func _draw_crownspire_detail(center:Vector2,panel:Rect2,world_size:float)->void:
@@ -582,6 +637,16 @@ func _draw_special_map_sites(panel:Rect2,world_size:float)->void:
                 draw_colored_polygon(PackedVector2Array([p+Vector2(0,-8),p+Vector2(-7,6),p+Vector2(7,6)]),Color(.58,.45,.22,.94));draw_line(p+Vector2(0,-5),p+Vector2(0,4),Color(.96,.81,.38),2.0);draw_circle(p,2.2,Color(.95,.72,.20))
             "well":
                 draw_circle(p,7.0,Color(.27,.18,.08),false,2.3);draw_circle(p,4.2,Color(.18,.48,.59));draw_line(p+Vector2(-7,-5),p+Vector2(7,-5),Color(.34,.20,.08),1.4)
+            "waystation":
+                _draw_world_rect(world_point,Vector2(18,13),.62,panel,world_size,Color(.55,.27,.09,.96),Color(.22,.11,.035,.94),1.0)
+                draw_line(p+Vector2(6,-8),p+Vector2(6,7),Color(.26,.15,.055,.96),1.6,true)
+                draw_colored_polygon(PackedVector2Array([p+Vector2(6,-8),p+Vector2(13,-5),p+Vector2(6,-2)]),Color(.72,.20,.08,.96))
+                if site.get("first_destination",false):_map_label(str(site.get("name","Waystation")),p+Vector2(13,15),12,Color(.18,.09,.025),panel)
+            "watchtower":
+                draw_rect(Rect2(p-Vector2(4.2,4.2),Vector2(8.4,8.4)),Color(.47,.39,.27,.96),true)
+                draw_rect(Rect2(p-Vector2(4.2,4.2),Vector2(8.4,8.4)),Color(.20,.12,.05,.96),false,1.2)
+                draw_colored_polygon(PackedVector2Array([p+Vector2(0,-8),p+Vector2(-6,-3),p+Vector2(6,-3)]),Color(.62,.18,.07,.98))
+                draw_circle(p+Vector2(0,-8),2.2,Color(1.0,.49,.10,.92))
             "castle":
                 pass # Crownspire's complete footprint is drawn by _draw_crownspire_detail.
         _register_map_feature(p,10.0,str(site.get("name","Landmark")),kind.capitalize(),world_point)
@@ -617,17 +682,45 @@ func _ellipse_polygon(center:Vector2,rx:float,ry:float,angle:float,segments:int)
 
 func _draw_corridors(corridors: Array, panel: Rect2, world_size: float, kind: String) -> void:
     if kind=="river":
-        var river_lines:Array[PackedVector2Array]=[]
-        var river_widths:Array[float]=[]
+        var river_segments:Array[Dictionary]=[]
         for corridor in corridors:
             var river_points:=PackedVector2Array()
             for point in corridor.get("points",[]):river_points.append(_map_point(point,panel,world_size))
             if river_points.size()<2:continue
-            river_lines.append(river_points)
-            river_widths.append(maxf(2.0,float(corridor.get("width",48.0))*.66/world_size*panel.size.x))
-        for i in range(river_lines.size()):draw_polyline(river_lines[i],Color(.10,.22,.25,.96),river_widths[i]+3.5,true)
-        for i in range(river_lines.size()):draw_polyline(river_lines[i],Color(.29,.67,.76,1.0),river_widths[i],true)
-        for i in range(river_lines.size()):draw_polyline(river_lines[i],Color(.67,.88,.88,.42),maxf(1.0,river_widths[i]*.18),true)
+            var authored_width:=float(corridor.get("width",48.0))
+            var source_width:=float(corridor.get("source_width",authored_width))
+            var mouth_width:=float(corridor.get("mouth_width",authored_width))
+            for segment_index in range(river_points.size()-1):
+                var progress:float=(float(segment_index)+.5)/maxf(1.0,float(river_points.size()-1))
+                var world_width:=lerpf(source_width,mouth_width,progress)
+                river_segments.append({
+                    "points":PackedVector2Array([river_points[segment_index],river_points[segment_index+1]]),
+                    "width":maxf(2.0,world_width*.66/world_size*panel.size.x),
+                })
+        for segment in river_segments:draw_polyline(segment.points,Color(.10,.22,.25,.96),float(segment.width)+3.5,true)
+        for segment in river_segments:draw_polyline(segment.points,Color(.29,.67,.76,1.0),float(segment.width),true)
+        for segment in river_segments:draw_polyline(segment.points,Color(.67,.88,.88,.42),maxf(1.0,float(segment.width)*.18),true)
+        return
+    if kind=="road":
+        # Draw secondary settlement spurs first and the realmway/capital
+        # network last. Explicit pixel floors preserve hierarchy on the full
+        # map even when physical widths would otherwise round to two pixels.
+        for route_class in ["secondary","major"]:
+            var road_lines:Array[Dictionary]=[]
+            for corridor in corridors:
+                if str(corridor.get("route_class","secondary"))!=route_class:continue
+                var road_points:=PackedVector2Array()
+                for point in corridor.get("points",[]):road_points.append(_map_point(point,panel,world_size))
+                if road_points.size()<2:continue
+                var physical_width:=float(corridor.get("width",14.0))*.48
+                var pixel_floor:=3.8 if route_class=="major" else 2.35
+                road_lines.append({"points":road_points,"width":maxf(pixel_floor,physical_width/world_size*panel.size.x)})
+            var outline:=Color(.17,.085,.025,.97) if route_class=="major" else Color(.19,.12,.055,.90)
+            var fill:=Color(.90,.62,.24,1.0) if route_class=="major" else Color(.66,.46,.24,.96)
+            for line in road_lines:draw_polyline(line.points,outline,float(line.width)+(3.2 if route_class=="major" else 2.4),true)
+            for line in road_lines:draw_polyline(line.points,fill,float(line.width),true)
+            if route_class=="major":
+                for line in road_lines:draw_polyline(line.points,Color(.98,.80,.44,.56),maxf(1.0,float(line.width)*.22),true)
         return
     for corridor in corridors:
         var points := PackedVector2Array()

@@ -4,6 +4,10 @@ signal environment_damage_requested(amount: float, source: String)
 
 @export var walk_speed := 5.2
 @export var sprint_speed := 8.5
+@export var mounted_walk_speed := 14.0
+@export var mounted_sprint_speed := 21.0
+@export var mounted_acceleration := 24.0
+@export var mounted_deceleration := 28.0
 @export var roll_speed := 10.8
 @export var roll_duration := 0.75
 @export var roll_recovery := 0.28
@@ -48,6 +52,8 @@ signal environment_damage_requested(amount: float, source: String)
 @export var resin := 0
 @export var mushrooms := 0
 @export var crystal := 0
+@export var grave_tokens := 0
+@export var plague_samples := 0
 @export var enemies_defeated := 0
 @export var elites_defeated := 0
 
@@ -75,6 +81,7 @@ var _roll_cooldown := 0.0
 var _roll_dir := Vector3.FORWARD
 var _interior_mode := false
 var _active_ladder:Node3D
+var _climbable_ladders:Array[Node3D]=[]
 var _ladder_release_time:=0.0
 var _released_ladder:Node3D
 var _released_ladder_at_top:=false
@@ -91,14 +98,22 @@ var food_buff_time:=0.0
 var food_power_bonus:=0
 var food_health_regen:=0.0
 var food_stamina_regen:=0.0
+var _mounted:=false
+var _mount_node:Node3D
+var _mount_original_parent:Node
+var _camera_pivot_base_position:=Vector3.ZERO
+var _spring_arm_base_length:=0.0
+var _visual_base_position:=Vector3.ZERO
 
 
 func _ready() -> void:
-    DisplayServer.window_set_title("Broken Knight Playtest")
     Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
     _yaw = rotation.y
     _camera_pivot.rotation.x = _pitch
     _camera_pivot.rotation.y = _yaw
+    _camera_pivot_base_position=_camera_pivot.position
+    _spring_arm_base_length=_spring_arm.spring_length
+    _visual_base_position=_visual.position
     base_max_hp = max_hp
     base_max_mana = max_mana
     give_knight_armor()
@@ -120,6 +135,8 @@ func configure_world(height_sampler: Callable, spawn_position: Vector3, walkable
     _walkable_sampler = walkable_sampler
     _structure_height_sampler = structure_height_sampler
     _spawn_position = spawn_position
+    _climbable_ladders.clear()
+    _active_ladder=null
     global_position = _resolve_ground_position(spawn_position)
 
 
@@ -132,6 +149,8 @@ func set_input_enabled(enabled: bool) -> void:
 
 
 func set_interior_mode(enabled: bool) -> void:
+    if enabled and _mounted:
+        dismount_horse()
     _interior_mode = enabled
     _vertical_velocity = 0.0
     _is_airborne = false
@@ -141,8 +160,62 @@ func set_interior_mode(enabled: bool) -> void:
 func is_interior_mode()->bool:return _interior_mode
 
 
+func is_mounted()->bool:return _mounted and is_instance_valid(_mount_node)
+
+
+func mount_horse(horse:Node3D)->bool:
+    if _mounted or not is_instance_valid(horse) or bool(horse.get_meta("mounted",false)):
+        return false
+    _mounted=true
+    _mount_node=horse
+    _mount_original_parent=horse.get_parent()
+    horse.set_meta("mounted",true)
+    horse.reparent(self,false)
+    horse.position=Vector3.ZERO
+    horse.rotation=Vector3(0.0,_visual.rotation.y,0.0)
+    if horse.has_method("set_mounted_state"):horse.set_mounted_state(true)
+    _visual.position=_visual_base_position+Vector3.UP*.72
+    _camera_pivot.position=_camera_pivot_base_position+Vector3.UP*.78
+    _spring_arm.spring_length=minf(camera_zoom_max,_spring_arm_base_length+1.25)
+    _roll_time=0.0
+    _vertical_velocity=0.0
+    _is_airborne=false
+    if _visual.has_method("set_mounted"):_visual.set_mounted(true)
+    return true
+
+
+func dismount_horse()->bool:
+    if not _mounted:
+        return false
+    var horse:=_mount_node
+    _mounted=false
+    _mount_node=null
+    if is_instance_valid(horse):
+        var forward:=get_combat_forward()
+        var right:=Vector3.UP.cross(forward).normalized()
+        var dismount_position:=_resolve_ground_position(global_position+right*1.85-forward*.35)
+        var destination_parent:=_mount_original_parent if is_instance_valid(_mount_original_parent) else get_parent()
+        horse.reparent(destination_parent,true)
+        horse.global_position=dismount_position
+        horse.global_rotation=Vector3(0.0,_visual.global_rotation.y,0.0)
+        horse.set_meta("mounted",false)
+        if horse.has_method("set_mounted_state"):horse.set_mounted_state(false)
+    _mount_original_parent=null
+    _camera_pivot.position=_camera_pivot_base_position
+    _spring_arm.spring_length=_spring_arm_base_length
+    _visual.position=_visual_base_position
+    if _visual.has_method("set_mounted"):_visual.set_mounted(false)
+    return true
+
+
 func _input(event: InputEvent) -> void:
     if not _input_enabled:
+        return
+    if event is InputEventKey and event.keycode in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
+        # Arrow keys are movement controls in play mode. Consume their press and
+        # repeat events here so Godot's UI focus navigation does not also walk
+        # the large HUD/menu control tree while the key is held.
+        get_viewport().set_input_as_handled()
         return
     if event is InputEventMouseButton:
         if event.pressed:
@@ -196,7 +269,7 @@ func _process(delta: float) -> void:
 
     var input_dir := _get_input_vector()
     _ladder_release_time=maxf(0.0,_ladder_release_time-delta)
-    if _try_climb_ladder(delta,input_dir):
+    if not _mounted and _try_climb_ladder(delta,input_dir):
         return
     var move_basis := Basis(Vector3.UP, _yaw)
     var move_dir: Vector3 = (move_basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
@@ -204,11 +277,11 @@ func _process(delta: float) -> void:
     var has_move_input := move_dir.length_squared() > 0.001
     _roll_cooldown=maxf(0.0,_roll_cooldown-delta)
     var jump_down := Input.is_key_pressed(KEY_SPACE)
-    if jump_down and not _jump_was_down and not _is_airborne:
+    if not _mounted and jump_down and not _jump_was_down and not _is_airborne:
         _start_jump()
     _jump_was_down = jump_down
     var roll_down:=Input.is_key_pressed(KEY_CTRL)
-    if roll_down and not _roll_was_down and not _is_airborne and _roll_time<=0.0 and _roll_cooldown<=0.0:
+    if not _mounted and roll_down and not _roll_was_down and not _is_airborne and _roll_time<=0.0 and _roll_cooldown<=0.0:
         _start_roll(move_dir if has_move_input else _last_move_dir)
     _roll_was_down=roll_down
     var rolling:=_roll_time>0.0
@@ -218,18 +291,25 @@ func _process(delta: float) -> void:
         _roll_time=maxf(0.0,_roll_time-delta)
         _current_move_speed=0.0
     else:
-        var target_speed:float=(sprint_speed if Input.is_key_pressed(KEY_SHIFT) else walk_speed) if has_move_input else 0.0
-        var speed_change:=acceleration if target_speed>_current_move_speed else deceleration
+        var active_walk_speed:=mounted_walk_speed if _mounted else walk_speed
+        var active_sprint_speed:=mounted_sprint_speed if _mounted else sprint_speed
+        var target_speed:float=(active_sprint_speed if Input.is_key_pressed(KEY_SHIFT) else active_walk_speed) if has_move_input else 0.0
+        var active_acceleration:=mounted_acceleration if _mounted else acceleration
+        var active_deceleration:=mounted_deceleration if _mounted else deceleration
+        var speed_change:=active_acceleration if target_speed>_current_move_speed else active_deceleration
         _current_move_speed=move_toward(_current_move_speed,target_speed,speed_change*delta)
         if has_move_input:_last_move_dir=move_dir
     if _visual.has_method("set_move_blend"):
-        _visual.set_move_blend(clampf(_current_move_speed / walk_speed, 0.0, 1.0))
+        _visual.set_move_blend(0.0 if _mounted else clampf(_current_move_speed / walk_speed, 0.0, 1.0))
     if _visual.has_method("set_movement_speed"):
-        _visual.set_movement_speed(_current_move_speed)
+        _visual.set_movement_speed(0.0 if _mounted else _current_move_speed)
     if rolling:
         _turn_visual_toward(_roll_dir,delta*2.5)
     elif has_move_input:
         _turn_visual_toward(move_dir, delta)
+    if _mounted and is_instance_valid(_mount_node):
+        _mount_node.rotation=Vector3(0.0,_visual.rotation.y,0.0)
+        if _mount_node.has_method("set_travel_speed"):_mount_node.set_travel_speed(_current_move_speed)
 
     var travel_speed:=roll_travel_speed if rolling else _current_move_speed
     if travel_speed > 0.001:
@@ -350,8 +430,10 @@ func _try_climb_ladder(delta:float,input_dir:Vector2)->bool:
     if not is_instance_valid(_active_ladder):
         _active_ladder=null
         var nearest_distance:=INF
-        for ladder_value in get_tree().get_nodes_in_group("climbable_ladder"):
-            var ladder:=ladder_value as Node3D
+        if _climbable_ladders.is_empty():
+            for ladder_value in get_tree().get_nodes_in_group("climbable_ladder"):
+                if ladder_value is Node3D:_climbable_ladders.append(ladder_value)
+        for ladder in _climbable_ladders:
             if not is_instance_valid(ladder):continue
             var bottom:Vector3=ladder.get_meta("climb_bottom",ladder.global_position)
             var top:Vector3=ladder.get_meta("climb_top",bottom+Vector3.UP*8.0)
@@ -412,6 +494,7 @@ func _start_roll(direction:Vector3)->void:
 
 
 func _begin_death()->void:
+    if _mounted:dismount_horse()
     _dead=true;_death_time=2.75;_input_enabled=false;_roll_time=0.0;_vertical_velocity=0.0
     if _visual.has_method("play_death"):_visual.play_death()
 
@@ -574,19 +657,21 @@ func get_hud_state() -> Dictionary:
         "resin":resin,
         "mushrooms":mushrooms,
         "crystal":crystal,
+        "grave_tokens":grave_tokens,
+        "plague_samples":plague_samples,
         "enemies_defeated": enemies_defeated,
         "elites_defeated": elites_defeated,
     }
 
 
 func get_material_amount(kind:String)->int:
-    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal"]:
+    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:
         return int(get(kind))
     return 0
 
 
 func add_material(kind:String,amount:int)->void:
-    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal"]:
+    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:
         set(kind,maxi(0,int(get(kind))+amount))
         _sync_material_stack(kind)
 
@@ -644,7 +729,7 @@ func consume_bag_item(item_id:String,amount:int=1)->bool:
 
 
 func sync_material_inventory()->void:
-    for kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal"]:
+    for kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:
         _sync_material_stack(kind)
 
 
@@ -665,6 +750,7 @@ func _sync_material_stack(kind:String)->void:
         "essence":"Arcane Essence","logs":"Wood Logs","leather":"Treated Leather",
         "cloth":"Woven Cloth","stone":"Field Stone","resin":"Tree Resin",
         "mushrooms":"Cave Mushrooms","crystal":"Royal Crystal",
+        "grave_tokens":"Grave Tokens","plague_samples":"Plague Samples",
     }
     bag_slots.append({
         "id":"material_%s"%kind,

@@ -17,8 +17,9 @@ func _verify()->void:
             failures.append("outcrop asset does not retain five detail-material surfaces")
         instance.free()
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     var props:=main.get_node("WorldRoot/PropsRoot")
     var outcrop_count:=int(props.get_meta("highland_outcrop_count",0))
     var bracken_count:=int(props.get_meta("outcrop_bracken_count",0))

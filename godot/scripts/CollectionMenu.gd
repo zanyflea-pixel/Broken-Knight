@@ -76,7 +76,7 @@ func refresh() -> void:
             var available:bool=quest.get("available",true)
             var status:="[color=#83d69a]COMPLETE - REWARD CLAIMED[/color]" if quest.get("claimed",false) else ("%d / %d"%[quest.current,quest.goal] if available else "[color=#78828c]LOCKED - continue the main story[/color]")
             var story:=str(quest.get("story","")) if available else "This chapter has not yet been revealed."
-            quest_lines.append("[color=#e7bd55]CHAPTER %s[/color]  [b]%s[/b]    %s\n[color=#a8b7c4]%s[/color]\n%s\n[color=#9fc6e8]Objective: %s\nReward: %s[/color]"%[quest.get("chapter",""),quest.title,status,quest.get("giver",""),story,quest.description,quest.reward])
+            quest_lines.append("[color=#e7bd55]CHAPTER %s[/color]  [b]%s[/b]    %s\n[color=#a8b7c4]%s[/color]\n%s\n[color=#9fc6e8]Objective: %s\nReward: %s[/color]"%[quest.get("chapter",""),quest.get("title","Untitled quest"),status,quest.get("giver",""),story,quest.get("description","No active objective."),quest.get("reward","Story progression")])
         quest_lines.append("\n[color=#8292a8]Quest, gathering, crafting, equipment and dungeon progress are saved.[/color]")
         body.text="\n\n".join(quest_lines)
 

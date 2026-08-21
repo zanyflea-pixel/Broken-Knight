@@ -13,7 +13,7 @@ func _run()->void:
     var builder:=TerrainBuilder.new()
     builder._prepare_bridge_cache(profile)
     builder._prepare_river_segment_cache(profile)
-    builder._prepare_engineered_trail_cache(profile)
+    builder._prepare_engineered_route_cache(profile)
     var cached_buckets:Dictionary=builder.get("_river_segment_buckets")
     var world_size:=float(profile.get("world_size",7200.0))
     var water_level:=float(profile.get("water_level",-18.0))

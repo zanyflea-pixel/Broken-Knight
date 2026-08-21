@@ -22,6 +22,12 @@ inside half of `world_size` unless deliberately creating a zone exit.
 - `trail_corridors`: narrower secondary routes.
 - `ford_sites`: bridge/crossing anchors shared by terrain and traversal logic.
 
+The starting settlement uses `spawn_site.starter: true` so it can receive an
+authored town layout without also being duplicated by the regional-town
+gameplay systems. `ground_height` and `ground_inner_ratio` keep its occupied
+footprint stable. Small `map_sites` may opt into the same terrain treatment with
+`usable_ground: true`; Ferrywatch Post is the reference example.
+
 ## Editing rules
 
 1. Move connected features together. A changed river crossing usually requires

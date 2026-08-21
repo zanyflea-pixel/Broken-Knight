@@ -1,17 +1,19 @@
-[gd_scene load_steps=13 format=3 uid="uid://broken_knight_main"]
+[gd_scene load_steps=15 format=3 uid="uid://broken_knight_main"]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/HeroController.gd" id="2_hero"]
 [ext_resource type="Script" path="res://scripts/HeroVisual.gd" id="3_visual"]
+[ext_resource type="Script" path="res://scripts/RuntimeHitchTracer.gd" id="15_hitch_tracer"]
 [ext_resource type="Script" path="res://scripts/WorldMap.gd" id="4_map"]
 [ext_resource type="Script" path="res://scripts/OldHud.gd" id="5_hud"]
-[ext_resource type="Script" path="res://scripts/Minimap.gd" id="6_minimap"]
+[ext_resource type="Script" path="res://scripts/MinimapShell.gd" id="6_minimap"]
 [ext_resource type="Script" path="res://scripts/GameplayDirector.gd" id="7_gameplay"]
 [ext_resource type="Script" path="res://scripts/AdminMenu.gd" id="8_adminmenu"]
 [ext_resource type="Script" path="res://scripts/HeroMenu.gd" id="9_heromenu"]
 [ext_resource type="Script" path="res://scripts/CollectionMenu.gd" id="10_collection"]
 [ext_resource type="Script" path="res://scripts/VendorMenu.gd" id="11_vendor"]
 [ext_resource type="Script" path="res://scripts/CraftingMenu.gd" id="12_crafting"]
+[ext_resource type="Texture2D" path="res://assets/branding/broken_knight_logo_v1.png" id="13_brand_logo"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
 radius = 0.55
@@ -25,6 +27,9 @@ rings = 6
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
+
+[node name="RuntimeHitchTracer" type="Node" parent="."]
+script = ExtResource("15_hitch_tracer")
 
 [node name="WorldRoot" type="Node3D" parent="."]
 
@@ -81,6 +86,63 @@ fov = 56.0
 far = 1000.0
 
 [node name="UI" type="CanvasLayer" parent="."]
+
+[node name="BootOverlay" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Dimmer" type="ColorRect" parent="UI/BootOverlay"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.03, 0.05, 1)
+
+[node name="Panel" type="Panel" parent="UI/BootOverlay"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -88.0
+offset_right = 260.0
+offset_bottom = 88.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Title" type="Label" parent="UI/BootOverlay/Panel"]
+offset_left = 28.0
+offset_top = 22.0
+offset_right = 492.0
+offset_bottom = 54.0
+theme_override_colors/font_color = Color(0.95, 0.84, 0.55, 1)
+theme_override_font_sizes/font_size = 24
+text = "BROKEN KNIGHT"
+horizontal_alignment = 1
+
+[node name="Status" type="Label" parent="UI/BootOverlay/Panel"]
+offset_left = 30.0
+offset_top = 64.0
+offset_right = 490.0
+offset_bottom = 92.0
+theme_override_colors/font_color = Color(0.82, 0.87, 0.92, 1)
+theme_override_font_sizes/font_size = 16
+text = "Loading world..."
+horizontal_alignment = 1
+
+[node name="ProgressBar" type="ProgressBar" parent="UI/BootOverlay/Panel"]
+offset_left = 36.0
+offset_top = 116.0
+offset_right = 484.0
+offset_bottom = 136.0
+value = 6.0
+show_percentage = false
 
 [node name="GameplayDirector" type="Node3D" parent="."]
 script = ExtResource("7_gameplay")
@@ -221,26 +283,38 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -190.0
-offset_top = -120.0
-offset_right = 190.0
-offset_bottom = 120.0
+offset_left = -240.0
+offset_top = -215.0
+offset_right = 240.0
+offset_bottom = 215.0
 grow_horizontal = 2
 grow_vertical = 2
 
+[node name="BrandLogo" type="TextureRect" parent="UI/PauseMenu/MenuPanel"]
+offset_left = 34.0
+offset_top = 14.0
+offset_right = 446.0
+offset_bottom = 244.0
+mouse_filter = 2
+texture = ExtResource("13_brand_logo")
+expand_mode = 1
+stretch_mode = 5
+
 [node name="MenuTitle" type="Label" parent="UI/PauseMenu/MenuPanel"]
 offset_left = 28.0
-offset_top = 24.0
-offset_right = 352.0
-offset_bottom = 54.0
-theme_override_font_sizes/font_size = 28
-text = "Paused"
+offset_top = 244.0
+offset_right = 452.0
+offset_bottom = 278.0
+theme_override_colors/font_color = Color(0.95, 0.77, 0.31, 1)
+theme_override_font_sizes/font_size = 24
+text = "GAME PAUSED"
+horizontal_alignment = 1
 
 [node name="MenuButtons" type="VBoxContainer" parent="UI/PauseMenu/MenuPanel"]
 offset_left = 28.0
-offset_top = 72.0
-offset_right = 352.0
-offset_bottom = 196.0
+offset_top = 292.0
+offset_right = 452.0
+offset_bottom = 402.0
 theme_override_constants/separation = 14
 
 [node name="ResumeButton" type="Button" parent="UI/PauseMenu/MenuPanel/MenuButtons"]

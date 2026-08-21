@@ -6,6 +6,8 @@ The canonical game is the Godot project at `godot/project.godot`. The old
 JavaScript/browser prototype is retired and is not a recovery or runtime
 dependency.
 
+Read `START-HERE.md` first if you just need to know what to open.
+
 ## Runtime
 
 - Engine: Godot 4.7 stable

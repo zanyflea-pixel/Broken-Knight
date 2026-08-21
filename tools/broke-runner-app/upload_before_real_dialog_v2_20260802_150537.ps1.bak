@@ -1,0 +1,406 @@
+param(
+    [string]$ProjectRoot = "C:\Users\Jimmy\Desktop\Broken Knight",
+    [string]$VideoPath = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+$OutputDir = Join-Path $ProjectRoot "Powershell output"
+$TestFile = Join-Path $OutputDir "test.txt"
+$LogFile = Join-Path $OutputDir "ai-runner.log"
+
+New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+
+function Report([string]$m) {
+    Add-Content -LiteralPath $TestFile -Value $m -Encoding UTF8
+}
+function Log([string]$m) {
+    Add-Content -LiteralPath $LogFile -Value ("{0} | {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),$m) -Encoding UTF8
+}
+
+if (-not (Test-Path -LiteralPath $VideoPath -PathType Leaf)) {
+    Report "UPLOAD_RESULT: FAILED - AVI missing"
+    Report "UPLOAD_VIDEO_PATH: $VideoPath"
+    Log "APP_UPLOAD_FAILED|AVI missing|$VideoPath"
+    exit 3
+}
+
+$VideoPath = [IO.Path]::GetFullPath($VideoPath)
+$BaseName = [IO.Path]::GetFileName($VideoPath)
+
+Report "UPLOAD_VIDEO_EXISTS: YES"
+Report "UPLOAD_VIDEO_PATH: $VideoPath"
+Report "UPLOAD_VIDEO_BYTES: $((Get-Item -LiteralPath $VideoPath).Length)"
+
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
+
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+public static class BKRealFileDialog
+{
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    public const uint WM_SETTEXT = 0x000C;
+    public const uint BM_CLICK = 0x00F5;
+    public const uint GW_CHILD = 5;
+    public const uint GW_HWNDNEXT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDlgItem(IntPtr hDlg, int nIDDlgItem);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    public static string ClassName(IntPtr hWnd)
+    {
+        var sb = new StringBuilder(256);
+        GetClassName(hWnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    public static string Title(IntPtr hWnd)
+    {
+        var sb = new StringBuilder(1024);
+        GetWindowText(hWnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    public static IntPtr FindEditRecursive(IntPtr parent)
+    {
+        IntPtr child = GetWindow(parent, GW_CHILD);
+        while (child != IntPtr.Zero)
+        {
+            string cls = ClassName(child);
+            if (string.Equals(cls, "Edit", StringComparison.OrdinalIgnoreCase))
+                return child;
+
+            IntPtr nested = FindEditRecursive(child);
+            if (nested != IntPtr.Zero)
+                return nested;
+
+            child = GetWindow(child, GW_HWNDNEXT);
+        }
+        return IntPtr.Zero;
+    }
+
+    public static string ReadText(IntPtr hWnd)
+    {
+        var sb = new StringBuilder(4096);
+        GetWindowText(hWnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    public static bool SetFileName(IntPtr dialog, string path, out string readback)
+    {
+        readback = "";
+        IntPtr field = GetDlgItem(dialog, 1148);
+        if (field == IntPtr.Zero) return false;
+
+        IntPtr edit = FindEditRecursive(field);
+        if (edit == IntPtr.Zero) edit = field;
+
+        SendMessage(edit, WM_SETTEXT, IntPtr.Zero, path);
+        readback = ReadText(edit);
+
+        return string.Equals(readback, path, StringComparison.OrdinalIgnoreCase)
+            || readback.EndsWith(System.IO.Path.GetFileName(path), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool ClickOpen(IntPtr dialog)
+    {
+        IntPtr open = GetDlgItem(dialog, 1);
+        if (open == IntPtr.Zero) return false;
+        SendMessage(open, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+        return true;
+    }
+}
+"@
+
+function Desc($root) {
+    return $root.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    )
+}
+
+function ById($root,[string]$id) {
+    $c = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id
+    )
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c)
+}
+
+function Chat {
+    foreach ($p in @(Get-Process firefox -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })) {
+        try {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+            $url = ById $root "urlbar-input"
+            if ($url -and ([string]$url.Current.Name -match '^https://chatgpt\.com/')) {
+                return [pscustomobject]@{ Process=$p; Root=$root }
+            }
+        } catch {}
+    }
+    return $null
+}
+
+function Get-RealFileDialogs {
+    $results = New-Object System.Collections.Generic.List[object]
+
+    $callback = [BKRealFileDialog+EnumWindowsProc]{
+        param([IntPtr]$hWnd,[IntPtr]$lParam)
+
+        try {
+            if (-not [BKRealFileDialog]::IsWindowVisible($hWnd)) { return $true }
+
+            $class = [BKRealFileDialog]::ClassName($hWnd)
+            if ($class -ne "#32770") { return $true }
+
+            $title = [BKRealFileDialog]::Title($hWnd)
+
+            [uint32]$pidValue = 0
+            [void][BKRealFileDialog]::GetWindowThreadProcessId($hWnd,[ref]$pidValue)
+
+            $fileField = [BKRealFileDialog]::GetDlgItem($hWnd,1148)
+            $openButton = [BKRealFileDialog]::GetDlgItem($hWnd,1)
+
+            if ($fileField -ne [IntPtr]::Zero -and $openButton -ne [IntPtr]::Zero) {
+                $results.Add([pscustomobject]@{
+                    Hwnd=$hWnd
+                    Title=$title
+                    Class=$class
+                    ProcessId=[int]$pidValue
+                })
+            }
+        } catch {}
+
+        return $true
+    }
+
+    [void][BKRealFileDialog]::EnumWindows($callback,[IntPtr]::Zero)
+    return @($results)
+}
+
+function Wait-RealFileDialog([int]$milliseconds) {
+    $loops = [Math]::Ceiling($milliseconds / 150.0)
+
+    for ($i=0; $i -lt $loops; $i++) {
+        Start-Sleep -Milliseconds 150
+        $dialogs = @(Get-RealFileDialogs)
+        if ($dialogs.Count -gt 0) {
+            return $dialogs[0]
+        }
+    }
+
+    return $null
+}
+
+function Wait-DialogClosed([IntPtr]$hWnd,[int]$milliseconds) {
+    $loops = [Math]::Ceiling($milliseconds / 150.0)
+
+    for ($i=0; $i -lt $loops; $i++) {
+        Start-Sleep -Milliseconds 150
+
+        $stillThere = $false
+        foreach ($d in @(Get-RealFileDialogs)) {
+            if ($d.Hwnd -eq $hWnd) {
+                $stillThere = $true
+                break
+            }
+        }
+
+        if (-not $stillThere) { return $true }
+    }
+
+    return $false
+}
+
+function Verify-ChatAttachment([string]$basename,[int]$seconds) {
+    for ($i=0; $i -lt ($seconds * 4); $i++) {
+        Start-Sleep -Milliseconds 250
+        $c = Chat
+        if (-not $c) { continue }
+
+        foreach ($e in (Desc $c.Root)) {
+            try {
+                $n = [string]$e.Current.Name
+
+                if ($n -like "*$basename*") {
+                    return "ATTACHED"
+                }
+
+                if ($n -match '(?i)(unsupported|failed to upload|upload failed|file type|could not upload)') {
+                    Report "UPLOAD_CHATGPT_MESSAGE: $n"
+                }
+            } catch {}
+        }
+    }
+
+    return "NOT_VERIFIED"
+}
+
+$chat = Chat
+if (-not $chat) {
+    Report "UPLOAD_RESULT: FAILED - ChatGPT Firefox tab not found"
+    Log "APP_UPLOAD_FAILED|ChatGPT tab not found"
+    exit 4
+}
+
+$ws = New-Object -ComObject WScript.Shell
+[void]$ws.AppActivate($chat.Process.Id)
+Start-Sleep -Milliseconds 400
+
+$chat = Chat
+$plus = ById $chat.Root "composer-plus-btn"
+
+if (-not $plus) {
+    Report "UPLOAD_RESULT: FAILED - composer plus button not found"
+    Log "APP_UPLOAD_FAILED|composer-plus-btn missing"
+    exit 5
+}
+
+try {
+    $plus.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+} catch {
+    Report "UPLOAD_RESULT: FAILED - could not open ChatGPT attachment menu"
+    Log "APP_UPLOAD_FAILED|plus activation failed"
+    exit 6
+}
+
+Start-Sleep -Milliseconds 400
+
+# Known-good bounded keyboard route through the ChatGPT attachment menu.
+[System.Windows.Forms.SendKeys]::SendWait("{HOME}")
+Start-Sleep -Milliseconds 100
+[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+
+$dialog = Wait-RealFileDialog 1800
+
+if (-not $dialog) {
+    # One extra level only. Never loop.
+    [System.Windows.Forms.SendKeys]::SendWait("{HOME}")
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    $dialog = Wait-RealFileDialog 2200
+}
+
+if (-not $dialog) {
+    [System.Windows.Forms.SendKeys]::SendWait("{ESC}{ESC}")
+    Report "UPLOAD_RESULT: FAILED - REAL Windows file chooser not found"
+    Report "UPLOAD_DIAGNOSTIC: Firefox itself is no longer accepted as a file chooser."
+    Log "APP_UPLOAD_FAILED|real #32770 file chooser not found"
+    exit 10
+}
+
+Report "UPLOAD_REAL_FILE_CHOOSER: FOUND"
+Report "UPLOAD_DIALOG_TITLE: $($dialog.Title)"
+Report "UPLOAD_DIALOG_CLASS: $($dialog.Class)"
+Report "UPLOAD_DIALOG_PID: $($dialog.ProcessId)"
+Log "APP_UPLOAD_REAL_DIALOG|title=$($dialog.Title)|pid=$($dialog.ProcessId)"
+
+[void][BKRealFileDialog]::SetForegroundWindow($dialog.Hwnd)
+Start-Sleep -Milliseconds 250
+
+$readback = ""
+$setOk = [BKRealFileDialog]::SetFileName($dialog.Hwnd,$VideoPath,[ref]$readback)
+
+Report "UPLOAD_FILENAME_SET: $setOk"
+Report "UPLOAD_FILENAME_READBACK: $readback"
+
+if (-not $setOk) {
+    # One keyboard fallback inside the *real* dialog.
+    try {
+        [System.Windows.Forms.Clipboard]::SetText($VideoPath)
+        [System.Windows.Forms.SendKeys]::SendWait("%n")
+        Start-Sleep -Milliseconds 150
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        [System.Windows.Forms.SendKeys]::SendWait("^v")
+        Start-Sleep -Milliseconds 200
+
+        $readback2 = ""
+        $setOk = [BKRealFileDialog]::SetFileName($dialog.Hwnd,$VideoPath,[ref]$readback2)
+        if (-not [string]::IsNullOrWhiteSpace($readback2)) {
+            $readback = $readback2
+        }
+
+        Report "UPLOAD_FILENAME_KEYBOARD_FALLBACK: attempted"
+        Report "UPLOAD_FILENAME_READBACK_AFTER_FALLBACK: $readback"
+    } catch {}
+}
+
+if (-not $setOk) {
+    Report "UPLOAD_RESULT: FAILED - real File name field rejected the path"
+    Log "APP_UPLOAD_FAILED|real filename field rejected path"
+    exit 11
+}
+
+$openOk = [BKRealFileDialog]::ClickOpen($dialog.Hwnd)
+Report "UPLOAD_OPEN_CLICKED: $openOk"
+
+if (-not $openOk) {
+    try {
+        [System.Windows.Forms.SendKeys]::SendWait("%o")
+        $openOk = $true
+        Report "UPLOAD_OPEN_FALLBACK: Alt+O"
+    } catch {}
+}
+
+if (-not $openOk) {
+    Report "UPLOAD_RESULT: FAILED - Open button could not be activated"
+    Log "APP_UPLOAD_FAILED|Open activation failed"
+    exit 12
+}
+
+if (-not (Wait-DialogClosed $dialog.Hwnd 3500)) {
+    Report "UPLOAD_RESULT: FAILED - real chooser stayed open after Open"
+    Log "APP_UPLOAD_FAILED|real chooser stayed open"
+    exit 13
+}
+
+Report "UPLOAD_SUBMITTED: $VideoPath"
+Log "APP_UPLOAD_SUBMITTED|$VideoPath"
+
+Start-Sleep -Seconds 1
+[void]$ws.AppActivate($chat.Process.Id)
+
+$verify = Verify-ChatAttachment $BaseName 12
+
+if ($verify -eq "ATTACHED") {
+    Report "UPLOAD_VERIFIED: $BaseName"
+    Report "UPLOAD_RESULT: SUCCESS"
+    Log "APP_UPLOAD_VERIFIED|$VideoPath"
+    exit 0
+}
+
+Report "UPLOAD_RESULT: SUBMITTED_UNVERIFIED"
+Log "APP_UPLOAD_SUBMITTED_UNVERIFIED|$VideoPath"
+exit 0

@@ -28,10 +28,12 @@ func _run()->void:
     root.add_child(world_map)
     var sampler:=func(x:float,z:float)->Vector3:return Vector3(x,sin(x*.004)*8.0+cos(z*.003)*6.0,z)
     world_map.configure(profile,player,null,sampler)
-    var frames:=0
-    while world_map.get("_terrain_texture")==null and frames<120:
-        await process_frame
-        frames+=1
+    # Headless frames can advance far faster than the map worker thread. Give
+    # the asynchronous survey real wall-clock time instead of 120 near-zero
+    # duration frames.
+    var survey_deadline_usec:=Time.get_ticks_usec()+8_000_000
+    while world_map.get("_terrain_texture")==null and Time.get_ticks_usec()<survey_deadline_usec:
+        await create_timer(.01).timeout
     if world_map.get("_terrain_texture")==null:failures.append("high-resolution terrain survey did not finish")
     else:
         var texture:ImageTexture=world_map.get("_terrain_texture")

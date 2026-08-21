@@ -4,6 +4,9 @@ const TerrainBuilder = preload("res://scripts/world/TerrainBuilder.gd")
 const WorldProfile = preload("res://scripts/world/WorldProfile.gd")
 const WorldPreviewBuilder = preload("res://scripts/world/WorldPreviewBuilder.gd")
 
+signal boot_completed
+
+var auto_boot_enabled := true
 var _terrain_builder: TerrainBuilder
 var _world_profile: WorldProfile
 var _preview_builder: WorldPreviewBuilder
@@ -19,6 +22,7 @@ var _hero_menu_open := false
 var _collection_menu: Control
 var _vendor_menu_open := false
 var _crafting_menu_open:=false
+var _world_streaming := false
 var _day_cycle_seconds := 3600.0
 var _day_clock := 900.0
 var _town_torches: Array[Node] = []
@@ -31,6 +35,18 @@ var _build_profile_start_usec:=0
 
 
 func _ready() -> void:
+    if auto_boot_enabled:
+        call_deferred("_bootstrap_world")
+
+
+func _bootstrap_world() -> void:
+    await boot_world(Callable(), true, false)
+
+
+func boot_world(progress_callback: Callable = Callable(), show_internal_overlay: bool = true, finish_world_before_enter: bool = false) -> void:
+    if not show_internal_overlay:
+        $UI.visible = false
+    $UI/BootOverlay.visible = show_internal_overlay
     if OS.get_environment("BROKEN_KNIGHT_PROFILE_BUILD")=="1":
         _build_profile_start_usec=Time.get_ticks_usec()
     process_mode=Node.PROCESS_MODE_ALWAYS
@@ -41,27 +57,35 @@ func _ready() -> void:
     var screen_size := DisplayServer.screen_get_size()
     DisplayServer.window_set_position((screen_size - Vector2i(1280, 720)) / 2)
     DisplayServer.window_set_title("Broken Knight")
+    _report_boot_status("Preparing world systems...", 10.0, progress_callback, show_internal_overlay)
+    await get_tree().process_frame
+    _report_boot_status("Configuring world lighting...", 14.0, progress_callback, show_internal_overlay)
     _configure_world_lighting()
+    _report_boot_status("Creating world builders...", 18.0, progress_callback, show_internal_overlay)
     _world_profile = WorldProfile.new()
     _terrain_builder = TerrainBuilder.new()
     _preview_builder = WorldPreviewBuilder.new()
 
+    _report_boot_status("Generating world profile...", 24.0, progress_callback, show_internal_overlay)
     var profile: Dictionary = _world_profile.make_zone_profile(_active_zone_id)
     _active_profile = profile
     var profile_world_size: float = profile.get("world_size", 600.0)
     $AdminCamera.size = profile_world_size * 1.08
     $AdminCamera.position.y = maxf(700.0, profile_world_size * 0.78)
+    _report_boot_status("Building terrain...", 34.0, progress_callback, show_internal_overlay)
+    await get_tree().process_frame
     _world_result = _terrain_builder.generate_world($WorldRoot/TerrainRoot, profile)
     _profile_build_checkpoint("terrain")
-    _preview_builder.populate($WorldRoot, profile, _world_result)
-    _profile_build_checkpoint("world_visuals")
-    _town_torches = get_tree().get_nodes_in_group("town_torches")
+    _report_boot_status("Starting gameplay systems...", 58.0, progress_callback, show_internal_overlay)
+    await get_tree().process_frame
     _position_player(_world_result.spawn_position)
     $GameplayDirector.configure($Player, _world_result.height_sampler, _world_result.walkable_sampler, profile)
     if not $Player.environment_damage_requested.is_connected($GameplayDirector.apply_environment_damage):
         $Player.environment_damage_requested.connect($GameplayDirector.apply_environment_damage)
     _profile_build_checkpoint("gameplay")
     _create_admin_marker()
+    _report_boot_status("Preparing maps and interface...", 76.0, progress_callback, show_internal_overlay)
+    await get_tree().process_frame
     # Maps shade terrain only; roads, trails and bridges are drawn as their own
     # layers. Sampling the raw cached heightfield avoids tens of thousands of
     # unnecessary road/bridge corridor checks at startup and while travelling.
@@ -87,6 +111,80 @@ func _ready() -> void:
     _apply_ui_theme()
     _set_menu_open(false)
     _profile_build_checkpoint("ready")
+    if finish_world_before_enter:
+        _report_boot_status("Finishing world details...", 86.0, progress_callback, show_internal_overlay)
+        await get_tree().process_frame
+        await _stream_world_preview(profile, progress_callback, show_internal_overlay)
+        await get_tree().process_frame
+        await get_tree().process_frame
+        $UI/BootOverlay.visible = false
+    else:
+        _report_boot_status("Entering world...", 88.0, progress_callback, show_internal_overlay)
+        await get_tree().process_frame
+        $UI/BootOverlay.visible = false
+        await get_tree().process_frame
+        await _stream_world_preview(profile, progress_callback, show_internal_overlay)
+    $UI.visible = true
+    boot_completed.emit()
+
+
+func _stream_world_preview(profile: Dictionary, progress_callback: Callable = Callable(), show_internal_overlay: bool = false) -> void:
+    _world_streaming = true
+    _preview_builder.begin_population($WorldRoot, profile)
+    var stage_count: int = _preview_builder.get_population_stage_count()
+    DisplayServer.window_set_title("Broken Knight")
+    for stage_idx in range(stage_count):
+        var stage_label: String = _preview_builder.get_population_stage_label(stage_idx)
+        var player_facing_label := _boot_stage_label(stage_label)
+        _report_boot_status(player_facing_label, 88.0 + (10.0 * float(stage_idx) / maxf(1.0, float(stage_count))), progress_callback, show_internal_overlay)
+        await get_tree().process_frame
+        _preview_builder.run_population_stage(stage_idx, $WorldRoot, profile, _world_result, _build_profile_start_usec)
+        await get_tree().process_frame
+    $GameplayDirector.refresh_populated_world_registries()
+    # The stage loop grows to tens of thousands of nodes. Scanning the complete
+    # tree after every stage made each later loading step progressively slower;
+    # the torch registry is only consumed after population is complete.
+    _town_torches = get_tree().get_nodes_in_group("town_torches")
+    _profile_build_checkpoint("world_visuals")
+    DisplayServer.window_set_title("Broken Knight")
+    _report_boot_status("Ready.", 100.0, progress_callback, show_internal_overlay)
+    _world_streaming = false
+
+
+func _boot_stage_label(stage_label: String) -> String:
+    match stage_label:
+        "Water, roads, and bridges":
+            return "Laying rivers, roads, and bridges"
+        "Forests and biome vegetation":
+            return "Growing forests and wildlands"
+        "Rocks and ground cover":
+            return "Scattering rocks and ground cover"
+        "Traversal cover and meadow detail":
+            return "Refining paths and meadows"
+        "Bushes and ecology detail":
+            return "Filling the living world"
+        "Landmarks and formations":
+            return "Raising landmarks"
+        "Towns and destinations":
+            return "Building towns and destinations"
+        "Town collision and batching":
+            return "Finalizing the world"
+        _:
+            return "Finishing world details"
+
+
+func _set_boot_status(text:String, progress:float)->void:
+    if not has_node("UI/BootOverlay"):
+        return
+    $UI/BootOverlay/Panel/Status.text = text
+    $UI/BootOverlay/Panel/ProgressBar.value = progress
+
+
+func _report_boot_status(text:String, progress:float, progress_callback:Callable = Callable(), show_internal_overlay:bool = true)->void:
+    if show_internal_overlay:
+        _set_boot_status(text, progress)
+    if progress_callback.is_valid():
+        progress_callback.call(text, progress)
 
 
 func _profile_build_checkpoint(label:String)->void:
@@ -428,10 +526,10 @@ func _on_close_game_pressed() -> void:
 func _configure_world_lighting() -> void:
     var sun: DirectionalLight3D = $Sun
     sun.light_color = Color(1.0, 0.965, 0.90, 1.0)
-    sun.light_energy = 0.64
+    sun.light_energy = 0.78
     sun.shadow_enabled = true
-    sun.shadow_opacity = 0.68
-    sun.shadow_blur = 1.35
+    sun.shadow_opacity = 0.58
+    sun.shadow_blur = 1.55
     sun.directional_shadow_mode=DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
     sun.directional_shadow_max_distance = 210.0
     # Fade the last cascade over a broad band. The old abrupt 180 m cutoff
@@ -443,6 +541,8 @@ func _configure_world_lighting() -> void:
     var environment_node: WorldEnvironment = $Environment
     var env := Environment.new()
     var sky := Sky.new()
+    # Preserve the fine edges of the animated cloud layers in wide views.
+    sky.radiance_size = Sky.RADIANCE_SIZE_512
     var sky_material := ShaderMaterial.new()
     var sky_shader := Shader.new()
     sky_shader.code = """
@@ -473,18 +573,51 @@ float fbm(vec2 p) {
     return value;
 }
 
+float hash31(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float noise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash31(i);
+    float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+    float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+    float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+    float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+    float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+    float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+    float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+               mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+float fbm3(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.56;
+    for (int i = 0; i < 4; i++) {
+        value += noise3(p) * amplitude;
+        p = p * 2.07 + vec3(7.1, 13.7, 5.3);
+        amplitude *= 0.47;
+    }
+    return value;
+}
+
 void sky() {
     vec3 dir = normalize(EYEDIR);
     float height = clamp(dir.y * 0.72 + 0.28, 0.0, 1.0);
-    vec3 horizon = vec3(0.47, 0.68, 0.82);
-    vec3 zenith = vec3(0.055, 0.20, 0.48);
-    vec3 lower = vec3(0.23, 0.38, 0.48);
+    vec3 horizon = vec3(0.54, 0.72, 0.86);
+    vec3 zenith = vec3(0.075, 0.27, 0.56);
+    vec3 lower = vec3(0.28, 0.43, 0.55);
     vec3 color = dir.y >= 0.0
         ? mix(horizon, zenith, pow(height, 0.62))
         : mix(horizon, lower, clamp(-dir.y * 2.0, 0.0, 1.0));
 
     float horizon_glow = exp(-abs(dir.y) * 11.0);
-    color = mix(color, vec3(0.83, 0.64, 0.43), horizon_glow * 0.24);
+    color = mix(color, vec3(0.90, 0.74, 0.57), horizon_glow * 0.14);
 
     vec3 sun_dir = normalize(vec3(-0.48, 0.62, 0.28));
     float sun_dot = max(dot(dir, sun_dir), 0.0);
@@ -495,35 +628,35 @@ void sky() {
 
     float sky_altitude = abs(dir.y);
     if (sky_altitude > 0.015) {
-        float longitude = atan(dir.z, dir.x);
-        float latitude = asin(clamp(sky_altitude, 0.0, 1.0));
-        vec2 cloud_uv = vec2(longitude * 1.35, latitude * 5.2);
-        cloud_uv += vec2(TIME * 0.012, TIME * 0.003);
-        float cloud_a = fbm(cloud_uv);
-        float cloud_b = fbm(cloud_uv * 0.48 + vec2(8.0, -4.0));
-        float broad_shapes = 0.50;
-        broad_shapes += sin(longitude * 4.0 + latitude * 7.0 + TIME * 0.010) * 0.20;
-        broad_shapes += sin(longitude * 9.0 - latitude * 4.0 - TIME * 0.007) * 0.13;
-        broad_shapes += sin(longitude * 15.0 + latitude * 11.0) * 0.07;
-        float cloud_field = broad_shapes * 0.62 + cloud_a * 0.27 + cloud_b * 0.11;
-        float clouds = smoothstep(0.45, 0.60, cloud_field);
-        float altitude_mask = smoothstep(0.02, 0.075, sky_altitude) * (1.0 - smoothstep(0.78, 0.99, sky_altitude));
+        // Sphere-space noise stays continuous across every view direction.
+        // The former longitude/latitude value-noise cells became visible as
+        // rectangular cloud tiles on the cubemap faces.
+        float cloud_a = fbm3(dir * 4.8 + vec3(1.7, 7.4, 3.1));
+        float cloud_b = fbm3(dir * 10.5 + vec3(11.0, 2.0, 17.0));
+        float weather = noise3(dir * 1.65 + vec3(8.0, 14.0, 4.0));
+        float cloud_field = cloud_a * 0.64 + cloud_b * 0.18 + weather * 0.27;
+        float clouds = smoothstep(0.55, 0.70, cloud_field);
+        float altitude_mask = smoothstep(0.025, 0.09, sky_altitude) * (1.0 - smoothstep(0.82, 0.995, sky_altitude));
         clouds *= altitude_mask;
-        vec3 cloud_shadow = vec3(0.34, 0.43, 0.52);
-        vec3 cloud_light = vec3(0.98, 0.985, 0.97);
-        float lit_edge = smoothstep(0.25, 0.68, cloud_a + broad_shapes * 0.28);
+        vec3 cloud_shadow = vec3(0.48, 0.56, 0.64);
+        vec3 cloud_light = vec3(0.985, 0.985, 0.965);
+        float lit_edge = smoothstep(0.40, 0.77, cloud_b * 0.42 + cloud_a * 0.72);
         vec3 cloud_color = mix(cloud_shadow, cloud_light, lit_edge);
-        color = mix(color, cloud_color, clouds * 0.96);
+        color = mix(color, cloud_color, clouds * 0.82);
+
+        // A faint high cirrus layer breaks up the silhouette without creating
+        // the large round cloud cutouts of the former panorama.
+        float cirrus_field = fbm3(dir * 18.0 + vec3(31.0, 9.0, 21.0));
+        float cirrus = smoothstep(0.68, 0.82, cirrus_field) * smoothstep(0.18, 0.42, sky_altitude);
+        color = mix(color, vec3(0.88, 0.92, 0.95), cirrus * 0.20);
     }
     COLOR = color;
 }
 """
     sky_material.shader = sky_shader
-    var panorama_material := PanoramaSkyMaterial.new()
-    panorama_material.panorama = load("res://assets/sky/daylight_panorama_v2.png")
-    panorama_material.filter = true
-    panorama_material.energy_multiplier = 0.58
-    _day_sky_material = panorama_material
+    # Use the procedural atmosphere above. The old panorama had visible
+    # seams and large painted cloud circles that made the sky feel pasted on.
+    _day_sky_material = sky_material
     var night_material := ShaderMaterial.new()
     var night_shader := Shader.new()
     night_shader.code = """
@@ -550,17 +683,17 @@ void sky() {
     env.sky = sky
     env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
     env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-    env.ambient_light_color = Color(0.72, 0.76, 0.80, 1.0)
-    env.ambient_light_energy = 0.42
+    env.ambient_light_color = Color(0.74, 0.79, 0.84, 1.0)
+    env.ambient_light_energy = 0.49
     env.tonemap_mode = Environment.TONE_MAPPER_ACES
     env.adjustment_enabled = true
-    env.adjustment_saturation = 1.0
-    env.adjustment_contrast = 1.04
-    env.adjustment_brightness = 0.88
+    env.adjustment_saturation = 1.03
+    env.adjustment_contrast = 1.015
+    env.adjustment_brightness = 0.94
     env.fog_enabled = true
-    env.fog_light_color = Color(0.63, 0.69, 0.72, 1.0)
-    env.fog_light_energy = 0.24
-    env.fog_density = 0.00015
+    env.fog_light_color = Color(0.69, 0.76, 0.81, 1.0)
+    env.fog_light_energy = 0.20
+    env.fog_density = 0.00011
     env.fog_sky_affect = 0.12
     env.fog_height = 18.0
     env.fog_height_density = 0.0035

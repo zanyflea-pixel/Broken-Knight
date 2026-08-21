@@ -16,8 +16,10 @@ func _check(condition:bool,label:String)->void:
 func _run()->void:
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
     root.add_child(main)
-    await process_frame
-    await process_frame
+    # Main streams the populated world asynchronously. Wait for the public
+    # readiness signal so this regression test inspects the finished game,
+    # rather than whichever boot stage happens to exist two frames in.
+    await main.boot_completed
     var player:Node=main.get_node("Player")
     var director:Node=main.get_node("GameplayDirector")
 
@@ -74,5 +76,8 @@ func _run()->void:
     print("RPG_EXPANSION_PASS|recipes=%d|craft=%d|gather=%d|trees=%d|keys=%d|gates=%d|chests=%d|torches=%d|crests=%d|failures=%d"%[
         recipes.size(),interaction_counts.craft,interaction_counts.gather,world_tree_count,key_count,gate_count,chest_count,torch_count,crest_count,failures.size()
     ])
-    main.free()
+    # boot_completed is emitted from inside Main.boot_world(). Defer teardown
+    # one frame so the scene is no longer locked by that signal call stack.
+    main.queue_free()
+    await process_frame
     quit(0 if failures.is_empty() else 14)

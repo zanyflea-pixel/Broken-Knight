@@ -30,7 +30,7 @@ func _run() -> void:
                 var p := a.lerp(b, float(step) / float(steps))
                 for fraction in [-.82, -.45, 0.0, .45, .82]:
                     var q := p + normal * half_water * float(fraction)
-                    var water_y: float = river.call(q.x, q.y).y + 2.35
+                    var water_y:float=river.call(q.x,q.y).y+float(main._profile.get("river_water_lift",1.35))
                     var terrain_y: float = raw.call(q.x, q.y).y
                     var clearance := water_y - terrain_y
                     worst_clearance = minf(worst_clearance, clearance)

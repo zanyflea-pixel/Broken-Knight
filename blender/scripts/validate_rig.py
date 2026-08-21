@@ -9,7 +9,18 @@ print("ACTIONS|" + ",".join(sorted(action.name for action in bpy.data.actions)))
 print("EXCLUDED_TYPES|" + ",".join(sorted({obj.type for obj in bpy.context.scene.objects if obj.type in {'CAMERA','LIGHT'}})))
 print(f"HAS_FLOOR|{int('Plane' in bpy.data.objects)}")
 
-for obj_name in ("ConnectedBody", "Loincloth.Front", "Loincloth.Back", "BodyHair"):
+weighted_names = list((
+    "ConnectedBody", "Loincloth.Front", "Loincloth.Back", "BodyHair",
+    "MouthUpperSurface", "MouthLowerSurface", "MouthCreaseSurface",
+))
+weighted_names.extend(sorted(
+    obj.name for obj in bpy.context.scene.objects
+    if obj.type == "MESH"
+    and (obj.get("replacement_role") or obj.get("hair_style"))
+    and obj.name not in weighted_names
+))
+
+for obj_name in weighted_names:
     obj = bpy.data.objects[obj_name]
     group_names = {group.index: group.name for group in obj.vertex_groups}
     min_sum = 99.0

@@ -60,6 +60,13 @@ func run_test() -> void:
 	await process_frame
 	var moving := player.current_animation
 	var walk_speed_scale := player.speed_scale
+	var walk_clip:=player.get_animation(&"Walk")
+	var walk_loop_mode:=walk_clip.loop_mode
+	var walk_length:=walk_clip.length
+	player.advance(walk_length*2.35)
+	await process_frame
+	var walk_still_playing:=player.is_playing() and player.current_animation=="Walk"
+	var walk_wrapped_position:=player.current_animation_position
 	visual.call("set_move_blend", 0.0)
 	await process_frame
 	var stopped := player.current_animation
@@ -118,10 +125,10 @@ func run_test() -> void:
 	var staff_spark:=player.current_animation
 	var staff_focus:=find_named(visual,"RoyalStaffFocus")
 	var staff_light:=find_named(visual,"RoyalStaffLight") as OmniLight3D
-	print("HERO_VISUAL_ANIM|initial=%s|moving=%s|stopped=%s|jumping=%s|landing=%s|after_land=%s|skills=%s|after_skills=%s|armor=%d,%d,%d,%d/%d|torch_idle=%s|torch_walk=%s|after_torch=%s|staff=%s,%s,%s,%d,%d|torch_visible=%s|torch_light=%s|walk_speed_scale=%.4f|playing=%s" % [initial, moving, stopped, jumping, landing, after_land, skill_results, after_skills, armor_total, armor_initial_visible, armor_all_visible, armor_head_visible, armor_head_total, torch_idle, torch_walk, after_torch,staff_idle,staff_walk,staff_spark,staff_total,staff_visible,torch_root != null, torch_light != null, walk_speed_scale, player.is_playing()])
+	print("HERO_VISUAL_ANIM|initial=%s|moving=%s|walk_loop=%d,%s,%.3f|stopped=%s|jumping=%s|landing=%s|after_land=%s|skills=%s|after_skills=%s|armor=%d,%d,%d,%d/%d|torch_idle=%s|torch_walk=%s|after_torch=%s|staff=%s,%s,%s,%d,%d|torch_visible=%s|torch_light=%s|walk_speed_scale=%.4f|playing=%s" % [initial, moving, walk_loop_mode, walk_still_playing, walk_wrapped_position, stopped, jumping, landing, after_land, skill_results, after_skills, armor_total, armor_initial_visible, armor_all_visible, armor_head_visible, armor_head_total, torch_idle, torch_walk, after_torch,staff_idle,staff_walk,staff_spark,staff_total,staff_visible,torch_root != null, torch_light != null, walk_speed_scale, player.is_playing()])
 	# The consolidated armor intentionally uses structural shells instead of
 	# dozens of freestanding decorative meshes.
-	if initial != "Idle" or moving != "Walk" or stopped != "Idle" or jumping != "Jump" or landing != "Land" or after_land != "Idle" or rolling!="Roll" or skill_results != ["Spark", "Nova", "Blink", "Orb"] or after_skills != "Idle" or armor_total < 50 or armor_initial_visible != 0 or armor_all_visible != armor_total or pants_visible<5 or armor_head_total < 1 or armor_head_visible != armor_head_total or torch_idle != "TorchIdle" or torch_walk != "TorchWalk" or after_torch != "Idle" or staff_idle!="StaffIdle" or staff_walk!="StaffWalk" or staff_spark!="StaffSpark" or staff_total<60 or staff_visible!=staff_total or staff_focus==null or staff_light==null or staff_light.light_energy>.5 or staff_light.omni_range>2.0 or torch_root == null or torch_light == null or not player.is_playing() or absf(walk_speed_scale - 5.2 / 3.6) > 0.01:
+	if initial != "Idle" or moving != "Walk" or walk_loop_mode!=Animation.LOOP_LINEAR or not walk_still_playing or walk_wrapped_position>=walk_length or stopped != "Idle" or jumping != "Jump" or landing != "Land" or after_land != "Idle" or rolling!="Roll" or skill_results != ["Spark", "Nova", "Blink", "Orb"] or after_skills != "Idle" or armor_total < 6 or armor_total > 12 or armor_initial_visible != 0 or armor_all_visible != armor_total or pants_visible<1 or armor_head_total < 1 or armor_head_visible < 1 or torch_idle != "TorchIdle" or torch_walk != "TorchWalk" or after_torch != "Idle" or staff_idle!="StaffIdle" or staff_walk!="StaffWalk" or staff_spark!="StaffSpark" or staff_total<1 or staff_visible!=staff_total or staff_focus==null or staff_light==null or staff_light.light_energy>.5 or staff_light.omni_range>2.0 or torch_root == null or torch_light == null or not player.is_playing() or absf(walk_speed_scale - 5.2 / 3.6) > 0.01:
 		push_error("HERO_VISUAL_ANIM|state_switch_failed")
 		quit(4)
 		return

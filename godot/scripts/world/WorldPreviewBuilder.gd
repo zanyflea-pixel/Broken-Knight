@@ -14,7 +14,11 @@ const FOREST_DEADWOOD_SCENE:PackedScene=preload("res://assets/vegetation/forest_
 const WOODLAND_FLOWER_SCENE:PackedScene=preload("res://assets/vegetation/woodland_flower_patch_v1.glb")
 const HIGHLAND_OUTCROP_SCENE:PackedScene=preload("res://assets/vegetation/highland_outcrop_v1.glb")
 const ROADSIDE_VERGE_SCENE:PackedScene=preload("res://assets/vegetation/roadside_verge_cluster_v1.glb")
-const MEADOW_CACHE_VERSION:=1
+const ARCHITECTURE_DETAIL_KIT_SCENE:PackedScene=preload("res://assets/architecture/architecture_detail_kit_v2.glb")
+const RIVERWATCH_STABLE_SCENE:PackedScene=preload("res://assets/architecture/riverwatch_stable.glb")
+const RIVERWATCH_HORSE_SCENE:PackedScene=preload("res://assets/animals/riverwatch_horse.glb")
+const RIDEABLE_HORSE_SCRIPT:Script=preload("res://scripts/world/RideableHorse.gd")
+const MEADOW_CACHE_VERSION:=3
 
 var _architecture_textures: Dictionary = {}
 var _shared_materials:Dictionary={}
@@ -25,18 +29,34 @@ var _shrub_leaf_mesh:ArrayMesh
 var _shrub_branch_mesh:ArrayMesh
 var _realistic_tree_meshes:Dictionary={}
 var _tree_species_mesh_cache:Dictionary={}
+var _architecture_detail_mesh_cache:Dictionary={}
 var _corridor_segment_buckets:Dictionary={}
 const CORRIDOR_BUCKET_SIZE:=192.0
+const POPULATE_STAGE_LABELS:=[
+    "Water, roads, and bridges",
+    "Forests and biome vegetation",
+    "Rocks and ground cover",
+    "Traversal cover and meadow detail",
+    "Bushes and ecology detail",
+    "Landmarks and formations",
+    "Towns and destinations",
+    "Town collision and batching",
+]
 
 func populate(world_root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
     var profile_start_usec:=Time.get_ticks_usec()
+    begin_population(world_root, profile)
+    for stage_idx in range(get_population_stage_count()):
+        run_population_stage(stage_idx, world_root, profile, terrain_result, profile_start_usec)
+
+
+func begin_population(world_root: Node3D, profile: Dictionary) -> void:
     _prepare_corridor_spatial_cache(profile)
     var river_root: Node3D = world_root.get_node("RiverRoot")
     var road_root: Node3D = world_root.get_node("RoadRoot")
     var bridge_root: Node3D = world_root.get_node("BridgeRoot")
     var town_root: Node3D = world_root.get_node("TownRoot")
     var props_root: Node3D = world_root.get_node("PropsRoot")
-
     _clear_root(river_root)
     _clear_root(road_root)
     _clear_root(bridge_root)
@@ -46,60 +66,79 @@ func populate(world_root: Node3D, profile: Dictionary, terrain_result: Dictionar
     props_root.set_meta("collision_prop_registry",[])
     props_root.set_meta("mineable_rock_registry",[])
     town_root.set_meta("harvestable_tree_registry",[])
-    _build_river_ribbons(river_root, profile.get("river_corridors", []), terrain_result, profile)
-    _build_ponds(river_root, profile.get("pond_sites", []), terrain_result)
-    _build_waterfalls(river_root, profile.get("waterfall_sites", []))
-    _build_road_ribbons(road_root, profile.get("road_corridors", []), terrain_result, profile)
-    _build_trail_ribbons(road_root, profile.get("trail_corridors", []), terrain_result)
-    _build_road_junctions(road_root, profile.get("road_corridors", []), terrain_result)
-    _build_wayfinding_landmarks(road_root, profile, terrain_result)
-    _build_bridges(bridge_root, profile, terrain_result)
-    _profile_preview_step("water_roads_bridges",profile_start_usec)
-    _build_forests(props_root, profile, terrain_result)
-    _profile_preview_step("forests",profile_start_usec)
-    _build_biome_vegetation(props_root, profile, terrain_result)
-    _profile_preview_step("biome_vegetation",profile_start_usec)
-    _build_rocks(props_root, profile, terrain_result)
-    _profile_preview_step("rocks",profile_start_usec)
-    _build_grass(props_root, profile, terrain_result)
-    _build_regional_ground_cover(props_root,profile,terrain_result)
-    _profile_preview_step("grass",profile_start_usec)
-    _build_traversal_ground_cover(props_root, profile, terrain_result)
-    _build_roadside_verge_clusters(props_root,profile,terrain_result)
-    _profile_preview_step("traversal_cover",profile_start_usec)
-    _build_meadow_floor_detail(props_root,profile,terrain_result)
-    _profile_preview_step("meadow_detail",profile_start_usec)
-    _build_forest_leaf_litter(props_root,terrain_result)
-    _profile_preview_step("leaf_litter",profile_start_usec)
-    _build_bushes(props_root, profile, terrain_result)
-    _build_authored_ecology(props_root,profile,terrain_result)
-    _build_wetland_vegetation(props_root,profile,terrain_result)
-    _build_field_boundaries(props_root,profile,terrain_result)
-    _profile_preview_step("ground_detail",profile_start_usec)
-    # Wildflower stems are disabled until they have proper flower-head meshes;
-    # bare colored sticks made the ground dressing less believable.
-    # Thin box reeds read as green sticks, especially against moving water.
-    # River vegetation returns later as proper cattail and leaf clusters.
-    _build_forest_composition(props_root,profile,terrain_result)
-    _build_ground_stones(props_root, profile, terrain_result)
-    _build_rock_formations(props_root, profile, terrain_result)
-    _build_highland_outcrop_clusters(props_root,profile,terrain_result)
-    _build_flower_meadows(props_root, profile, terrain_result)
-    _build_flowering_shrubs(props_root,profile,terrain_result)
-    _build_stone_landmarks(props_root, profile, terrain_result)
-    _build_authored_landmark_sites(props_root,profile,terrain_result)
-    _profile_preview_step("landmarks",profile_start_usec)
-    _build_enterable_towns(town_root, profile, terrain_result)
-    _build_town_outskirts(town_root, profile, terrain_result)
-    _build_camps(town_root,profile,terrain_result)
-    _build_world_landmarks(town_root,terrain_result)
-    _profile_preview_step("towns",profile_start_usec)
-    # Capture collision from visual-only town dressing before its box meshes
-    # are replaced by render batches. This makes lamp posts, planters, market
-    # furniture, arches and similar visible solids physical.
-    _solidify_static_town_details(town_root)
-    _batch_static_town_boxes(town_root)
-    _profile_preview_step("batching",profile_start_usec)
+
+
+func get_population_stage_count() -> int:
+    return POPULATE_STAGE_LABELS.size()
+
+
+func get_population_stage_label(stage_idx: int) -> String:
+    if stage_idx < 0 or stage_idx >= POPULATE_STAGE_LABELS.size():
+        return "World details"
+    return POPULATE_STAGE_LABELS[stage_idx]
+
+
+func run_population_stage(stage_idx: int, world_root: Node3D, profile: Dictionary, terrain_result: Dictionary, profile_start_usec: int = 0) -> void:
+    var river_root: Node3D = world_root.get_node("RiverRoot")
+    var road_root: Node3D = world_root.get_node("RoadRoot")
+    var bridge_root: Node3D = world_root.get_node("BridgeRoot")
+    var town_root: Node3D = world_root.get_node("TownRoot")
+    var props_root: Node3D = world_root.get_node("PropsRoot")
+    match stage_idx:
+        0:
+            _build_river_ribbons(river_root, profile.get("river_corridors", []), terrain_result, profile)
+            _build_ponds(river_root, profile.get("pond_sites", []), terrain_result)
+            _build_waterfalls(river_root,profile.get("waterfall_sites",[]),terrain_result,profile)
+            _build_road_ribbons(road_root, profile.get("road_corridors", []), terrain_result, profile)
+            _build_trail_ribbons(road_root, profile.get("trail_corridors", []), terrain_result)
+            _build_road_junctions(road_root, profile.get("road_corridors", []), terrain_result)
+            _build_wayfinding_landmarks(road_root, profile, terrain_result)
+            _build_bridges(bridge_root, profile, terrain_result)
+            _profile_preview_step("water_roads_bridges",profile_start_usec)
+        1:
+            _build_forests(props_root, profile, terrain_result)
+            _build_biome_vegetation(props_root, profile, terrain_result)
+            _profile_preview_step("forests_biomes",profile_start_usec)
+        2:
+            _build_rocks(props_root, profile, terrain_result)
+            _build_grass(props_root, profile, terrain_result)
+            _build_regional_ground_cover(props_root,profile,terrain_result)
+            _profile_preview_step("rocks_grass",profile_start_usec)
+        3:
+            _build_traversal_ground_cover(props_root, profile, terrain_result)
+            _build_roadside_verge_clusters(props_root,profile,terrain_result)
+            _build_meadow_floor_detail(props_root,profile,terrain_result)
+            _build_forest_leaf_litter(props_root,terrain_result)
+            _profile_preview_step("traversal_meadow",profile_start_usec)
+        4:
+            _build_bushes(props_root, profile, terrain_result)
+            _build_authored_ecology(props_root,profile,terrain_result)
+            _build_wetland_vegetation(props_root,profile,terrain_result)
+            _build_riverbank_ground_detail(props_root,profile,terrain_result)
+            _build_field_boundaries(props_root,profile,terrain_result)
+            _profile_preview_step("ecology_detail",profile_start_usec)
+        5:
+            _build_forest_composition(props_root,profile,terrain_result)
+            _build_ground_stones(props_root, profile, terrain_result)
+            _build_rock_formations(props_root, profile, terrain_result)
+            _build_highland_outcrop_clusters(props_root,profile,terrain_result)
+            _build_flower_meadows(props_root, profile, terrain_result)
+            _build_flowering_shrubs(props_root,profile,terrain_result)
+            _build_stone_landmarks(props_root, profile, terrain_result)
+            _build_authored_landmark_sites(props_root,profile,terrain_result)
+            _profile_preview_step("landmarks",profile_start_usec)
+        6:
+            _build_enterable_towns(town_root, profile, terrain_result)
+            _build_town_outskirts(town_root, profile, terrain_result)
+            _build_settlement_greenery(town_root,profile,terrain_result)
+            _build_camps(town_root,profile,terrain_result)
+            _build_world_landmarks(town_root,terrain_result)
+            _build_starter_region_destination(town_root,profile,terrain_result)
+            _profile_preview_step("towns",profile_start_usec)
+        7:
+            _solidify_static_town_details(town_root)
+            _batch_static_town_boxes(town_root)
+            _profile_preview_step("batching",profile_start_usec)
 
 
 func _profile_preview_step(label:String,start_usec:int)->void:
@@ -212,6 +251,12 @@ func _solidify_static_town_details(town_root:Node3D)->void:
 
 
 func _build_enterable_towns(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if spawn_site.get("starter",false):
+        var starter_hub:=Node3D.new()
+        starter_hub.name=str(spawn_site.get("name","Riverwatch"))
+        root.add_child(starter_hub)
+        _build_starter_town(starter_hub,spawn_site,terrain_result,profile.get("road_corridors",[]))
     for site in profile.get("town_sites", []):
         var hub := Node3D.new()
         hub.name = str(site.get("name", "Town"))
@@ -220,6 +265,199 @@ func _build_enterable_towns(root: Node3D, profile: Dictionary, terrain_result: D
             _build_capital_city(hub, site, terrain_result,profile.get("road_corridors",[]))
         else:
             _build_regional_town(hub, site, terrain_result,profile.get("road_corridors",[]))
+
+
+func _build_starter_town(root:Node3D,site:Dictionary,terrain_result:Dictionary,roads:Array)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var cobble:=_make_texture_material("res://assets/architecture/town_cobblestone_v1.png",Color(.72,.68,.58),1.0,8.0)
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.55,.40,.26),1.0,2.2)
+
+    # The existing gameplay well is placed here later by GameplayDirector. Its
+    # compact stone green gives it an intentional civic setting without adding
+    # a duplicate well or a broad slab that could shimmer over the terrain.
+    var green_center:=center+Vector2(-34.0,30.0)
+    var green_ground:Vector3=sampler.call(green_center.x,green_center.y)
+    var green_mesh:=CylinderMesh.new()
+    green_mesh.top_radius=13.0;green_mesh.bottom_radius=13.6;green_mesh.height=.16;green_mesh.radial_segments=28
+    var green:=MeshInstance3D.new()
+    green.name="Riverwatch Well Green"
+    green.mesh=green_mesh;green.position=green_ground+Vector3.UP*.09;green.material_override=cobble
+    root.add_child(green)
+    green.create_trimesh_collision()
+
+    # Two uneven rows frame the north-south main street while leaving the true
+    # east-west road junction and every doorway open. These are fixed authored
+    # plots rather than the circular/random layout used by regional towns.
+    var plots:Array[Dictionary]=[
+        {"offset":Vector2(-40,-58),"yaw":PI*.5,"width":12.0,"depth":9.5,"height":6.8,"style":0},
+        {"offset":Vector2(-42,-20),"yaw":PI*.5,"width":13.5,"depth":10.0,"height":7.1,"style":2},
+        {"offset":Vector2(-42,78),"yaw":PI*.5,"width":18.0,"depth":12.0,"height":8.2,"style":3},
+        {"offset":Vector2(40,-57),"yaw":-PI*.5,"width":11.5,"depth":9.0,"height":6.6,"style":1},
+        {"offset":Vector2(42,-22),"yaw":-PI*.5,"width":13.0,"depth":9.5,"height":7.0,"style":4},
+        {"offset":Vector2(40,42),"yaw":-PI*.5,"width":12.5,"depth":9.5,"height":6.9,"style":5},
+        {"offset":Vector2(42,80),"yaw":-PI*.5,"width":14.5,"depth":10.5,"height":7.4,"style":6},
+    ]
+    for plot in plots:
+        var point:Vector2=center+plot.offset
+        point=_clear_house_from_roads(point,maxf(float(plot.width),float(plot.depth))*.53,roads)
+        var ground:Vector3=sampler.call(point.x,point.y)
+        _add_enterable_house(root,ground,float(plot.yaw),float(plot.width),float(plot.depth),float(plot.height),int(plot.style))
+
+    # Short fence runs define private yards but deliberately stop at each road.
+    # The open perimeter makes town entry natural from all four routes.
+    for segment in [
+        [center+Vector2(-67,-76),center+Vector2(-67,-8)],
+        [center+Vector2(-67,34),center+Vector2(-67,88)],
+        [center+Vector2(67,-76),center+Vector2(67,-8)],
+        [center+Vector2(67,24),center+Vector2(67,90)],
+    ]:
+        _add_starter_fence_line(root,segment[0],segment[1],sampler,timber)
+
+    # Productive crofts mark the northern outskirts and frame the road onward.
+    _add_starter_croft(root,center+Vector2(-62,116),sampler,false,timber)
+    _add_starter_croft(root,center+Vector2(62,116),sampler,true,timber)
+
+    # A proper three-stall stable sits just beyond the eastern house row. The
+    # horses remain individual animated nodes so GameplayDirector can register
+    # them for E interactions after staged world population completes.
+    _add_riverwatch_stable(root,center+Vector2(82.0,-45.0),sampler)
+
+    # Low benches around the well green make the civic center readable without
+    # blocking the route or adding costly active objects.
+    for side in [-1.0,1.0]:
+        var bench_point:=green_center+Vector2(0,9.4*float(side))
+        var bench_ground:Vector3=sampler.call(bench_point.x,bench_point.y)
+        _solid_box_euler(root,Vector3(3.4,.28,.78),bench_ground+Vector3.UP*.72,Vector3(0,0,0),timber)
+        for x in [-1.25,1.25]:_visual_box(root,Vector3(.20,.65,.20),bench_ground+Vector3(x,.34,0),timber)
+
+
+func _add_riverwatch_stable(root:Node3D,center:Vector2,sampler:Callable)->void:
+    var stable_ground:Vector3=sampler.call(center.x,center.y)
+    var stable:=RIVERWATCH_STABLE_SCENE.instantiate() as Node3D
+    stable.name="Riverwatch Starter Stables"
+    root.add_child(stable)
+    stable.global_position=stable_ground
+    _mark_dynamic_geometry(stable,false,340.0)
+
+    var horse_names:=["Bracken","Cinder","Dawn"]
+    var horse_offsets:=[Vector2(-6.0,9.0),Vector2(0.0,9.4),Vector2(6.0,9.0)]
+    for index in range(horse_offsets.size()):
+        var horse_offset:Vector2=horse_offsets[index]
+        var point:Vector2=center+horse_offset
+        var horse_ground:Vector3=sampler.call(point.x,point.y)
+        var horse:=Node3D.new()
+        horse.name="Rideable Horse - %s"%horse_names[index]
+        horse.set_script(RIDEABLE_HORSE_SCRIPT)
+        horse.set("horse_name",horse_names[index])
+        horse.add_to_group("rideable_horse")
+        horse.set_meta("horse_name",horse_names[index])
+        horse.set_meta("mounted",false)
+        horse.set_meta("stable_home_position",horse_ground)
+        horse.set_meta("stable_parent",root)
+        root.add_child(horse)
+        horse.global_position=horse_ground
+        horse.rotation.y=PI+float(index-1)*.055
+        horse.scale=Vector3.ONE*(.96+float(index)*.025)
+        var model:=RIVERWATCH_HORSE_SCENE.instantiate() as Node3D
+        model.name="Riverwatch Horse Model"
+        horse.add_child(model)
+        _mark_dynamic_geometry(model,true,300.0)
+
+
+func _mark_dynamic_geometry(node:Node,skip_static_collision:bool,range_end:float)->void:
+    if node is GeometryInstance3D:
+        node.set_meta("skip_static_solidify",skip_static_collision)
+        node.visibility_range_end=range_end
+        node.visibility_range_end_margin=minf(36.0,range_end*.12)
+    for child in node.get_children():_mark_dynamic_geometry(child,skip_static_collision,range_end)
+
+
+func _add_starter_fence_line(root:Node3D,start:Vector2,finish:Vector2,sampler:Callable,timber:Material)->void:
+    var delta:=finish-start
+    var steps:=maxi(1,int(ceil(delta.length()/5.5)))
+    var yaw:=-atan2(delta.y,delta.x)
+    var ground_points:Array[Vector3]=[]
+    for i in range(steps+1):
+        var point:=start.lerp(finish,float(i)/float(steps))
+        var ground:Vector3=sampler.call(point.x,point.y)
+        ground_points.append(ground)
+        _visual_box(root,Vector3(.24,1.55,.24),ground+Vector3.UP*.775,timber)
+    for i in range(steps):
+        var a:Vector3=ground_points[i];var b:Vector3=ground_points[i+1]
+        var midpoint:=(a+b)*.5
+        var length:=Vector2(a.x-b.x,a.z-b.z).length()+.18
+        for height in [.52,1.10]:_visual_box(root,Vector3(length,.15,.16),midpoint+Vector3.UP*float(height),timber).rotation.y=yaw
+
+
+func _add_starter_croft(root:Node3D,center:Vector2,sampler:Callable,golden:bool,timber:Material)->void:
+    var crop_mesh:=_make_ground_cover_mesh()
+    var transforms:Array[Transform3D]=[]
+    for row in range(6):
+        for column in range(9):
+            var point:=center+Vector2((float(row)-2.5)*3.3,(float(column)-4.0)*3.2)
+            var ground:Vector3=sampler.call(point.x,point.y)
+            var scale_factor:=.72+float((row*3+column)%4)*.07
+            transforms.append(Transform3D(Basis(Vector3.UP,float(row+column)*.13).scaled(Vector3(scale_factor,scale_factor*.88,scale_factor)),ground+Vector3.UP*.025))
+    _add_ground_cover_batch(root,crop_mesh,transforms,Color(.52,.43,.13) if golden else Color(.29,.44,.13))
+    var half:=Vector2(12.0,16.0)
+    var corners:=[center+Vector2(-half.x,-half.y),center+Vector2(half.x,-half.y),center+Vector2(half.x,half.y),center+Vector2(-half.x,half.y)]
+    for i in range(4):_add_starter_fence_line(root,corners[i],corners[(i+1)%4],sampler,timber)
+
+
+func _build_starter_region_destination(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+    var destination:=_find_map_site(profile,"waystation")
+    var beacon:=_find_map_site(profile,"watchtower")
+    if destination.is_empty() or beacon.is_empty():return
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var hub:=Node3D.new();hub.name=str(destination.get("name","Ferrywatch Post"));root.add_child(hub)
+    var destination_center:Vector2=destination.get("position",Vector2.ZERO)
+    var house_point:=destination_center+Vector2(-15.0,-20.0)
+    _add_enterable_house(hub,sampler.call(house_point.x,house_point.y),.62,14.0,10.0,7.2,7)
+    _add_riverwatch_beacon(hub,beacon.get("position",destination_center+Vector2(34,0)),sampler)
+
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.50,.35,.20),1.0,2.2)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.58,.57,.51),1.0,2.8)
+    var ground:Vector3=sampler.call(destination_center.x,destination_center.y)
+    # Cargo, hitching rail and a warm road lantern make the post read as a
+    # deliberate first stop instead of one isolated tower beside the road.
+    for offset in [Vector2(-24,4),Vector2(-21,7),Vector2(-18,5)]:
+        var cargo_ground:Vector3=sampler.call(destination_center.x+offset.x,destination_center.y+offset.y)
+        _solid_box(hub,Vector3(1.35,1.0,1.2),cargo_ground+Vector3.UP*.5,timber)
+    _visual_box(hub,Vector3(6.5,.18,.18),ground+Vector3(-2.0,1.25,13.0),timber)
+    for x in [-5.1,1.1]:_visual_box(hub,Vector3(.22,2.3,.22),ground+Vector3(x,1.15,13.0),timber)
+    _solid_box(hub,Vector3(2.0,.48,2.0),ground+Vector3(8.0,.24,12.0),stone)
+    _visual_box(hub,Vector3(.18,3.2,.18),ground+Vector3(8.0,1.85,12.0),timber)
+    var lantern:=OmniLight3D.new();lantern.position=ground+Vector3(8.0,3.45,12.0);lantern.light_color=Color(1.0,.58,.25);lantern.light_energy=1.15;lantern.omni_range=13.0;hub.add_child(lantern)
+
+
+func _find_map_site(profile:Dictionary,kind:String)->Dictionary:
+    for site_value in profile.get("map_sites",[]):
+        if site_value is Dictionary and str(site_value.get("kind",""))==kind:return site_value
+    return {}
+
+
+func _add_riverwatch_beacon(root:Node3D,point:Vector2,sampler:Callable)->void:
+    var ground:Vector3=sampler.call(point.x,point.y)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.64,.63,.57),1.0,3.0)
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.46,.31,.18),1.0,2.4)
+    var roof:=_make_texture_material("res://assets/architecture/clay_roof_v1.png",Color(.34,.10,.055),.96,2.6)
+    var fire:=_make_lit_window_material(Color(1.0,.43,.08))
+    _solid_box(root,Vector3(8.5,4.6,8.5),ground+Vector3.UP*2.3,stone)
+    for x in [-3.35,3.35]:
+        for z in [-3.35,3.35]:
+            _solid_box(root,Vector3(.72,12.5,.72),ground+Vector3(x,10.75,z),timber)
+    for height in [7.0,12.8,16.8]:
+        _visual_box(root,Vector3(8.0,.45,.55),ground+Vector3(0,height,-3.35),timber)
+        _visual_box(root,Vector3(8.0,.45,.55),ground+Vector3(0,height,3.35),timber)
+        _visual_box(root,Vector3(.55,.45,8.0),ground+Vector3(-3.35,height,0),timber)
+        _visual_box(root,Vector3(.55,.45,8.0),ground+Vector3(3.35,height,0),timber)
+    _solid_box(root,Vector3(10.5,.55,10.5),ground+Vector3.UP*17.15,timber)
+    var roof_mesh:=CylinderMesh.new();roof_mesh.top_radius=0.0;roof_mesh.bottom_radius=7.0;roof_mesh.height=4.0;roof_mesh.radial_segments=4
+    var roof_instance:=MeshInstance3D.new();roof_instance.mesh=roof_mesh;roof_instance.position=ground+Vector3.UP*20.9;roof_instance.rotation.y=PI*.25;roof_instance.material_override=roof;root.add_child(roof_instance)
+    _visual_box(root,Vector3(2.4,.55,2.4),ground+Vector3.UP*17.75,stone)
+    var brazier:=MeshInstance3D.new();var brazier_mesh:=SphereMesh.new();brazier_mesh.radius=.75;brazier_mesh.height=1.2;brazier.mesh=brazier_mesh;brazier.position=ground+Vector3.UP*18.65;brazier.material_override=fire;root.add_child(brazier)
+    var beacon_light:=OmniLight3D.new();beacon_light.position=ground+Vector3.UP*19.0;beacon_light.light_color=Color(1.0,.43,.14);beacon_light.light_energy=2.1;beacon_light.omni_range=28.0;root.add_child(beacon_light)
 
 
 func _build_town_outskirts(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
@@ -310,6 +548,50 @@ func _build_town_outskirts(root:Node3D,profile:Dictionary,terrain_result:Diction
     _add_ground_cover_batch(root,crop_mesh,gold_crops,Color(.54,.43,.13,1))
     _add_multimesh_batch(root,post_mesh,fence_posts,Color(.38,.25,.12,1),false)
     _add_multimesh_batch(root,rail_mesh,fence_rails,Color(.34,.21,.10,1),false)
+
+
+func _build_settlement_greenery(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+    # Loose, species-mixed tree belts visually settle towns into the landscape
+    # without filling streets or randomly colliding with houses. Their outer
+    # ring also makes settlements readable from the road before roofs appear.
+    var sites:Array=[profile.get("spawn_site",{})]
+    sites.append_array(profile.get("town_sites",[]))
+    var entries:Array=[]
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    for site_index in range(sites.size()):
+        var site:Dictionary=sites[site_index]
+        if site.is_empty():continue
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var radius:float=float(site.get("radius",100.0))
+        var count:=24 if site.get("capital",false) else (16 if site.get("starter",false) else 18)
+        var belt_radius:=radius*(.90 if site.get("capital",false) else 1.02)+18.0
+        for tree_index in range(count):
+            var angle:=float(tree_index)*TAU/float(count)+float(site_index)*.43+sin(float(tree_index)*2.17)*.11
+            var distance:=belt_radius*(.90+.13*float((tree_index*7+site_index)%9)/8.0)
+            var point:=center+Vector2(cos(angle),sin(angle))*distance
+            if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),18.0):continue
+            if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),56.0):continue
+            if _is_too_close_to_sites(point,profile.get("pond_sites",[]),46.0):continue
+            if _is_near_bridge_site(point,profile.get("ford_sites",[]),74.0):continue
+            var ground:Vector3=sampler.call(point.x,point.y)
+            if ground.y<=float(terrain_result.water_level)+.9:continue
+            var maximum_delta:=0.0
+            for footprint in [Vector2(-2.6,0),Vector2(2.6,0),Vector2(0,-2.6),Vector2(0,2.6)]:
+                maximum_delta=maxf(maximum_delta,absf(sampler.call(point.x+footprint.x,point.y+footprint.y).y-ground.y))
+            if maximum_delta>1.5:continue
+            var species:="oak"
+            if tree_index%7==0:species="birch"
+            elif tree_index%5==1:species="maple"
+            elif site_index==3 and tree_index%4==0:species="pine"
+            entries.append({
+                "position":point,
+                "scale":.78+float((tree_index+site_index*3)%7)*.065,
+                "yaw":angle*1.73,
+                "style":tree_index%5,
+                "species":species,
+            })
+    _add_landmark_forest_batch(root,entries,terrain_result)
+    root.set_meta("settlement_greenery_count",entries.size())
 
 
 func _build_world_landmarks(root:Node3D,terrain_result:Dictionary)->void:
@@ -524,7 +806,7 @@ func _build_capital_city(root: Node3D, site: Dictionary, terrain_result: Diction
     var center: Vector2 = site.get("position", Vector2.ZERO)
     var radius: float = site.get("radius", 265.0)
     var ground: Vector3 = terrain_result.height_sampler.call(center.x, center.y)
-    var paving := _make_texture_material("res://assets/architecture/town_cobblestone_v1.png", Color(0.82, 0.82, 0.78), 1.0, 18.0)
+    var paving := _make_texture_material("res://assets/architecture/town_cobblestone_v1.png", Color(0.68, 0.69, 0.66), 1.0, 18.0)
     # Main north-south boulevard and east-west market street.
     # Stop the boulevard before the castle courtyard instead of layering two
     # almost-coplanar textured surfaces beneath the keep.
@@ -666,8 +948,8 @@ func _add_broken_crown_crest(root:Node3D,center:Vector3,scale_factor:float,gold:
 
 
 func _add_city_walls(root: Node3D, center: Vector2, half_extent: float, terrain_result: Dictionary) -> void:
-    var wall_mat := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(1.08, 1.10, 1.10), 1.0, 7.0)
-    var tower_mat := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.84, 0.87, 0.89), 1.0, 5.0)
+    var wall_mat := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.78, 0.80, 0.79), 1.0, 7.0)
+    var tower_mat := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.68, 0.71, 0.72), 1.0, 5.0)
     var center_ground: Vector3 = terrain_result.height_sampler.call(center.x, center.y)
     var segment_length := 32.0
     for side in [-1.0, 1.0]:
@@ -824,87 +1106,223 @@ func _add_town_well(root: Node3D, center: Vector2, terrain_result: Dictionary) -
 
 func _add_enterable_house(root: Node3D, ground: Vector3, yaw: float, width: float, depth: float, height: float, style: int = 0) -> void:
     var house := Node3D.new()
+    house.name="House_%02d_Family_%d"%[style,style%6]
     house.set_meta("batch_static_collision",true)
     house.position = ground
     house.rotation.y = yaw
     root.add_child(house)
-    var plaster_colors := [Color(0.68, 0.55, 0.39), Color(0.62, 0.52, 0.42), Color(0.74, 0.66, 0.51), Color(0.55, 0.48, 0.39)]
+    var family:=style%6
+    var storeys:=2 if family in [4,5] or style>=20 else 1
+    if storeys==2:height=maxf(height,8.8)
+    house.set_meta("architecture_family",family)
+    house.set_meta("architecture_storeys",storeys)
+    house.set_meta("architecture_width",width)
+    house.set_meta("architecture_depth",depth)
+    house.set_meta("architecture_height",height)
+    var plaster_colors := [
+        Color(0.76,0.62,0.44),Color(0.60,0.52,0.43),Color(0.82,0.74,0.57),
+        Color(0.57,0.49,0.43),Color(0.65,0.68,0.58),Color(0.72,0.52,0.43),
+    ]
     var wall_mat := _make_texture_material("res://assets/architecture/aged_plaster_v1.png", plaster_colors[style % plaster_colors.size()], 0.98, 2.5)
-    var beam_mat := _make_texture_material("res://assets/architecture/dark_oak_v1.png", Color(0.62, 0.48, 0.34), 1.0, 2.0)
-    var roof_colors := [Color(0.31, 0.09, 0.055), Color(0.24, 0.16, 0.09), Color(0.18, 0.20, 0.17)]
-    var roof_mat := _make_texture_material("res://assets/architecture/clay_roof_v1.png", roof_colors[style % roof_colors.size()] * 1.8, 0.96, 3.0)
+    var beam_tints:=[Color(.58,.42,.28),Color(.45,.31,.20),Color(.67,.49,.30)]
+    var beam_mat := _make_texture_material("res://assets/architecture/dark_oak_v1.png",beam_tints[style%beam_tints.size()],1.0,2.0)
+    var roof_colors := [Color(.56,.23,.13),Color(.39,.28,.16),Color(.27,.32,.29),Color(.47,.19,.10)]
+    var roof_mat := _make_texture_material("res://assets/architecture/clay_roof_v1.png",roof_colors[style%roof_colors.size()],.96,3.0)
+    var foundation := _make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.58,.57,.53),1.0,3.0)
     var thick := 0.45
-    var door_w := 2.2
+    var door_w := 2.25
     var door_h := 3.1
+    var door_x:=-width*.16 if family==3 else 0.0
+    var window_levels:Array[float]=[height*.53]
+    if storeys==2:window_levels=[2.45,height*.73]
+
     var rear_openings:Array[Dictionary]=[]
-    for x in [-width*.27,width*.27]:
-        rear_openings.append({"x0":x-.68,"x1":x+.68,"y0":height*.54-.72,"y1":height*.54+.72})
+    var front_openings:Array[Dictionary]=[{"x0":door_x-door_w*.5,"x1":door_x+door_w*.5,"y0":0.0,"y1":door_h}]
+    for window_y in window_levels:
+        for x in [-width*.29,width*.29]:
+            rear_openings.append({"x0":x-.70,"x1":x+.70,"y0":float(window_y)-.76,"y1":float(window_y)+.76})
+            front_openings.append({"x0":x-.70,"x1":x+.70,"y0":float(window_y)-.76,"y1":float(window_y)+.76})
     _build_keep_wall_with_openings(house,Vector3.ZERO,-depth*.5,width,height,thick,rear_openings,wall_mat)
+    _build_keep_wall_with_openings(house,Vector3.ZERO,depth*.5,width,height,thick,front_openings,wall_mat)
     for side in [-1.0,1.0]:
         var side_wall:=Node3D.new()
         side_wall.position=Vector3(width*.5*side,0,0)
         side_wall.rotation.y=PI*.5
         house.add_child(side_wall)
-        var side_openings:Array[Dictionary]=[{"x0":-depth*.16-.68,"x1":-depth*.16+.68,"y0":height*.54-.68,"y1":height*.54+.68}]
+        var side_openings:Array[Dictionary]=[]
+        for window_y in window_levels:
+            side_openings.append({"x0":-depth*.15-.68,"x1":-depth*.15+.68,"y0":float(window_y)-.72,"y1":float(window_y)+.72})
         _build_keep_wall_with_openings(side_wall,Vector3.ZERO,0.0,depth,height,thick,side_openings,wall_mat)
-    var side_w := (width - door_w) * 0.5
-    var window_w:=1.45;var window_h:=1.55;var window_y:=height*.54
-    for facade_side in [-1.0,1.0]:
-        var region_center:=float(facade_side)*(door_w+side_w)*.5
-        var window_center:=float(facade_side)*width*.27
-        var region_left:=region_center-side_w*.5;var region_right:=region_center+side_w*.5
-        var window_left:=window_center-window_w*.5;var window_right:=window_center+window_w*.5
-        var window_bottom:=window_y-window_h*.5;var window_top:=window_y+window_h*.5
-        _solid_box(house,Vector3(side_w,window_bottom,thick),Vector3(region_center,window_bottom*.5,depth*.5),wall_mat)
-        _solid_box(house,Vector3(side_w,height-window_top,thick),Vector3(region_center,window_top+(height-window_top)*.5,depth*.5),wall_mat)
-        if window_left>region_left:_solid_box(house,Vector3(window_left-region_left,window_h,thick),Vector3((region_left+window_left)*.5,window_y,depth*.5),wall_mat)
-        if region_right>window_right:_solid_box(house,Vector3(region_right-window_right,window_h,thick),Vector3((window_right+region_right)*.5,window_y,depth*.5),wall_mat)
-        _visual_box(house,Vector3(window_w+.18,.13,.14),Vector3(window_center,window_y-window_h*.5,depth*.5+.08),beam_mat)
-        _visual_box(house,Vector3(window_w+.18,.13,.14),Vector3(window_center,window_y+window_h*.5,depth*.5+.08),beam_mat)
-        _visual_box(house,Vector3(.13,window_h+.18,.14),Vector3(window_center-window_w*.5,window_y,depth*.5+.08),beam_mat)
-        _visual_box(house,Vector3(.13,window_h+.18,.14),Vector3(window_center+window_w*.5,window_y,depth*.5+.08),beam_mat)
-    _solid_box(house, Vector3(door_w, height - door_h, thick), Vector3(0, door_h + (height - door_h) * 0.5, depth * 0.5), wall_mat)
-    _add_working_house_door(house,door_w,door_h,depth,beam_mat)
+        for window_y in window_levels:_add_house_window_frame(side_wall,Vector3(-depth*.15,float(window_y),.02),beam_mat)
+    for window_y in window_levels:
+        for x in [-width*.29,width*.29]:
+            _add_house_window_frame(house,Vector3(x,float(window_y),depth*.515),beam_mat)
+            _add_house_window_frame(house,Vector3(x,float(window_y),-depth*.515),beam_mat,true)
+    _add_working_house_door(house,door_w,door_h,depth,beam_mat,door_x)
     for x in [-width * 0.5, width * 0.5]:
         _visual_box(house, Vector3(0.30, height + 0.25, 0.30), Vector3(x, height * 0.5, depth * 0.51), beam_mat)
-    if style % 4 == 3:
-        # A tidy parapeted workshop/inn profile breaks up the repeated gables.
-        _visual_box(house, Vector3(width + 0.9, 0.42, depth + 0.9), Vector3(0, height + 0.18, 0), roof_mat)
-        for z in [-depth * 0.52, depth * 0.52]:
-            _visual_box(house, Vector3(width + 1.0, 0.48, 0.28), Vector3(0, height + 0.55, z), beam_mat)
-        for x in [-width * 0.52, width * 0.52]:
-            _visual_box(house, Vector3(0.28, 0.48, depth + 1.0), Vector3(x, height + 0.55, 0), beam_mat)
-    else:
-        var roof_angle := 0.34
-        var roof_y := height + 1.16
-        var left_roof := _visual_box(house, Vector3(width * 0.56, 0.48, depth + 0.8), Vector3(-width * 0.235, roof_y, 0), roof_mat)
-        left_roof.rotation.z = roof_angle
-        var right_roof := _visual_box(house, Vector3(width * 0.56, 0.48, depth + 0.8), Vector3(width * 0.235, roof_y, 0), roof_mat)
-        right_roof.rotation.z = -roof_angle
-        _add_house_gables(house, width, depth, height, wall_mat, beam_mat)
+    _add_house_roof_profile(house,width,depth,height,family,wall_mat,beam_mat,roof_mat)
     _visual_box(house, Vector3(width - 0.7, 0.16, depth - 0.7), Vector3(0, 0.01, 0), beam_mat)
-    # Every window is a literal wall opening. Timber frames remain, but there
-    # is no blue glass card or collision pane filling the view.
-    for x in [-width*.27,width*.27]:
-        for frame_x in [-.70,.70]:_visual_box(house,Vector3(.12,1.54,.16),Vector3(x+frame_x,height*.54,-depth*.52),beam_mat)
-        for frame_y in [-.76,.76]:_visual_box(house,Vector3(1.52,.12,.16),Vector3(x,height*.54+frame_y,-depth*.52),beam_mat)
-    for side in [-1.0,1.0]:
-        for frame_z in [-.70,.70]:_visual_box(house,Vector3(.16,1.48,.12),Vector3(width*.52*side,height*.54,-depth*.16+frame_z),beam_mat)
-        for frame_y in [-.72,.72]:_visual_box(house,Vector3(.16,.12,1.52),Vector3(width*.52*side,height*.54+frame_y,-depth*.16),beam_mat)
-    _visual_box(house, Vector3(width + 0.15, 0.26, 0.28), Vector3(0, height * 0.68, depth * 0.52), beam_mat)
-    _visual_box(house, Vector3(0.85, 3.2, 0.85), Vector3(width * 0.28, height + 1.4, -depth * 0.18), _make_material(Color(0.28, 0.25, 0.22), 1.0))
-    # Stone foundation, door lintel and a projecting shop sign add believable
-    # street-level detail without blocking the open doorway.
-    var foundation := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.58, 0.57, 0.53), 1.0, 3.0)
+    # The foundation follows the actual shell and stops at the doorway instead
+    # of forming the old stone bar across the entrance.
     var foundation_side:=(width-door_w-.36)*.5
-    for side in [-1.0,1.0]:_visual_box(house,Vector3(foundation_side,.62,.20),Vector3(float(side)*(door_w*.5+.18+foundation_side*.5),.31,depth*.525),foundation)
-    _visual_box(house, Vector3(door_w + 0.7, 0.34, 0.34), Vector3(0, door_h + 0.17, depth * 0.54), beam_mat)
-    if style % 3 == 0:
-        _visual_box(house, Vector3(0.18, 1.65, 0.18), Vector3(width * 0.36, height * 0.62, depth * 0.72), beam_mat)
-        _visual_box(house, Vector3(1.75, 0.95, 0.16), Vector3(width * 0.36, height * 0.48, depth * 0.72), beam_mat)
-    _add_house_furniture(house, width, depth, beam_mat, style)
+    for side in [-1.0,1.0]:
+        var center_x:=door_x+float(side)*(door_w*.5+.18+foundation_side*.5)
+        _visual_box(house,Vector3(foundation_side,.62,.20),Vector3(center_x,.31,depth*.525),foundation)
+    # Continue the dressed stone skirt around the shell. The original only
+    # covered the front and made every house look like a thin stage facade.
+    _visual_box(house,Vector3(width+.12,.62,.22),Vector3(0,.31,-depth*.515),foundation)
+    for side in [-1.0,1.0]:
+        _visual_box(house,Vector3(.22,.62,depth-.18),Vector3(width*.515*float(side),.31,0),foundation)
+    _visual_box(house,Vector3(door_w+.7,.34,.34),Vector3(door_x,door_h+.17,depth*.54),beam_mat)
+    _add_house_exterior_character(house,width,depth,height,family,beam_mat,wall_mat,roof_mat,foundation)
+    _add_house_facade_details(house,width,depth,height,family,door_x,door_h)
+    if style%3==0 or style>=20:_add_attached_house_sign(house,width,depth,height,beam_mat)
+    if storeys==2:_add_house_upper_storey(house,width,depth,height,beam_mat,wall_mat,style)
+    _add_house_furniture(house,width,depth,beam_mat,style,storeys)
     _add_working_fireplace(house, width, depth, style)
-    _optimize_small_detail_node(house,72.0)
+    _optimize_small_detail_node(house,86.0)
+
+
+func _add_house_window_frame(root:Node3D,center:Vector3,timber:Material,back_facing:bool=false)->void:
+    # Blender-authored surround supplies a beveled sill, mullions and open
+    # shutters while retaining the actual hole in the generated wall.
+    _add_architecture_detail(root,"HouseWindowSurround",center,Vector3.ONE,timber,Vector3(0,PI if back_facing else 0.0,0),92.0)
+
+
+func _add_house_roof_profile(house:Node3D,width:float,depth:float,height:float,family:int,wall:Material,timber:Material,roof:Material)->void:
+    match family:
+        1:
+            # Broad four-sided roof gives crofts and alehouses a low, sturdy silhouette.
+            var roof_mesh:=CylinderMesh.new();roof_mesh.top_radius=.08;roof_mesh.bottom_radius=1.0;roof_mesh.height=3.0;roof_mesh.radial_segments=4
+            var hip:=MeshInstance3D.new();hip.name="HippedRoof";hip.mesh=roof_mesh;hip.position=Vector3(0,height+1.38,0);hip.rotation.y=PI*.25;hip.scale=Vector3(width*.72,1.0,depth*.72);hip.material_override=roof;house.add_child(hip)
+        3:
+            # Merchant houses use a shallow hipped roof and raised ridge cap,
+            # replacing the old flat rectangular lid.
+            var merchant_mesh:=CylinderMesh.new();merchant_mesh.top_radius=.10;merchant_mesh.bottom_radius=1.0;merchant_mesh.height=2.6;merchant_mesh.radial_segments=4
+            var merchant_roof:=MeshInstance3D.new();merchant_roof.name="MerchantHippedRoof";merchant_roof.mesh=merchant_mesh;merchant_roof.position=Vector3(0,height+1.20,0);merchant_roof.rotation.y=PI*.25;merchant_roof.scale=Vector3(width*.72,1.0,depth*.72);merchant_roof.material_override=roof;house.add_child(merchant_roof)
+            _visual_box(house,Vector3(width*.34,.34,depth*.34),Vector3(0,height+2.55,0),timber)
+        2:
+            var tall_side:=_visual_box(house,Vector3(width*.66,.50,depth+.9),Vector3(-width*.19,height+1.18,0),roof);tall_side.rotation.z=.42
+            var long_side:=_visual_box(house,Vector3(width*.48,.50,depth+.9),Vector3(width*.34,height+.86,0),roof);long_side.rotation.z=-.27
+            _add_house_gables(house,width,depth,height,wall,timber)
+        _:
+            var roof_angle:=.35 if family!=5 else .42
+            var roof_y:=height+1.18
+            var left_roof:=_visual_box(house,Vector3(width*.56,.50,depth+.9),Vector3(-width*.235,roof_y,0),roof);left_roof.rotation.z=roof_angle
+            var right_roof:=_visual_box(house,Vector3(width*.56,.50,depth+.9),Vector3(width*.235,roof_y,0),roof);right_roof.rotation.z=-roof_angle
+            _add_house_gables(house,width,depth,height,wall,timber)
+            if family==5:
+                # Two small dormers make the tall inn/townhouse profile legible.
+                for x in [-width*.24,width*.24]:
+                    _visual_box(house,Vector3(2.35,1.55,1.05),Vector3(x,height+1.04,depth*.38),wall)
+                    var dormer:=_visual_box(house,Vector3(2.75,.26,1.45),Vector3(x,height+1.92,depth*.40),roof);dormer.rotation.z=.08*signf(x)
+    var chimney_x:=width*(.27 if family%2==0 else -.31)
+    _visual_box(house,Vector3(.88,3.25,.88),Vector3(chimney_x,height+1.38,-depth*.18),_make_material(Color(.29,.27,.24),1.0))
+    _visual_box(house,Vector3(1.06,.24,1.06),Vector3(chimney_x,height+3.02,-depth*.18),timber)
+
+
+func _add_house_facade_details(house:Node3D,width:float,depth:float,height:float,family:int,door_x:float,door_height:float)->void:
+    # Distinct attached details make each architecture family legible without
+    # scattering unsupported props in front of the walls.
+    if family in [0,1,3,5]:
+        _add_architecture_detail(house,"HouseDoorCanopy",Vector3(door_x,door_height+.24,depth*.535),Vector3(.88,.88,.88),null,Vector3.ZERO,88.0)
+    var lantern_side:=-1.0 if door_x>=0.0 else 1.0
+    _add_architecture_detail(house,"HouseWallLantern",Vector3(door_x+lantern_side*1.72,2.36,depth*.55),Vector3(.78,.78,.78),null,Vector3.ZERO,78.0)
+    if family in [0,2,4,5]:
+        var box_x:=width*.29
+        _add_architecture_detail(house,"HouseFlowerBox",Vector3(box_x,1.42,depth*.565),Vector3(.82,.82,.82),null,Vector3.ZERO,68.0)
+    # Fascia boards and exposed rafter ends give roofs thickness at street eye
+    # level instead of reading as two unsupported paper planes.
+    var fascia:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.46,.31,.18),1.0,2.0)
+    for z in [-depth*.535,depth*.535]:
+        _visual_box(house,Vector3(width+1.0,.20,.18),Vector3(0,height+.20,z),fascia)
+    if family in [0,2,4,5]:
+        for x in [-width*.46,-width*.23,0.0,width*.23,width*.46]:
+            _visual_box(house,Vector3(.15,.20,depth+1.0),Vector3(float(x),height+.08,0),fascia)
+
+
+func _add_house_exterior_character(house:Node3D,width:float,depth:float,height:float,family:int,timber:Material,wall:Material,roof:Material,stone:Material)->void:
+    # Structural timber patterns change by family so houses do not read as scaled copies.
+    if family in [0,4,5]:
+        var band_y:=height*.28 if family==0 else height*.52
+        _visual_box(house,Vector3(width+.12,.24,.28),Vector3(0,band_y,depth*.525),timber)
+        var upright_bottom:=band_y+.08
+        var upright_top:=height*.98
+        for x in [-width*.44,width*.44]:
+            _visual_box(house,Vector3(.22,upright_top-upright_bottom,.24),Vector3(x,(upright_bottom+upright_top)*.5,depth*.535),timber)
+    if family==1:
+        # Supported porch, with the doorway kept completely clear.
+        for x in [-width*.28,width*.28]:_solid_box(house,Vector3(.28,2.75,.28),Vector3(x,1.38,depth*.68),timber)
+        _visual_box(house,Vector3(width*.72,.32,2.2),Vector3(0,2.72,depth*.68),roof).rotation.x=-.10
+    elif family==2:
+        # A lower side workshop wing creates a real stepped footprint.
+        var annex_x:=width*.58
+        _solid_box(house,Vector3(width*.28,height*.52,depth*.64),Vector3(annex_x,height*.26,-depth*.10),wall)
+        var lean:=_visual_box(house,Vector3(width*.36,.36,depth*.76),Vector3(annex_x,height*.56,-depth*.10),roof);lean.rotation.z=-.17
+        _visual_box(house,Vector3(.34,height*.48,.34),Vector3(width*.73,height*.24,depth*.19),timber)
+    elif family==4:
+        # Jettied upper-storey band and corbels mark wealthier urban homes.
+        _visual_box(house,Vector3(width+.72,.34,depth+.65),Vector3(0,height*.50,0),timber)
+        for x in [-width*.40,-width*.15,width*.15,width*.40]:
+            var corbel:=_visual_box(house,Vector3(.26,.78,.72),Vector3(x,height*.47,depth*.55),timber);corbel.rotation.x=-.34
+    elif family==5:
+        # Projecting side bay changes both footprint and street silhouette.
+        _solid_box(house,Vector3(width*.22,height*.70,depth*.42),Vector3(-width*.58,height*.35,depth*.04),wall)
+        _visual_box(house,Vector3(width*.28,.34,depth*.52),Vector3(-width*.58,height*.73,depth*.04),roof)
+    # Dressed corner stones give the plaster shells a convincing weight.
+    for x in [-width*.505,width*.505]:
+        for y in [.55,1.65]:_visual_box(house,Vector3(.54,.82,.34),Vector3(x,float(y),depth*.50),stone)
+
+
+func _add_attached_house_sign(house:Node3D,width:float,depth:float,height:float,timber:Material)->void:
+    var sign_x:=width*.37
+    var bracket_y:=minf(height*.66,5.0)
+    _add_architecture_detail(house,"HouseSignBracket",Vector3(sign_x,bracket_y,depth*.515),Vector3.ONE,null,Vector3.ZERO,72.0)
+    # The board hangs from the bracket's two modeled chains, well in front of
+    # the wall; there is no unsupported box hovering beside the building.
+    _add_architecture_detail(house,"HouseSignBoard",Vector3(sign_x,bracket_y+.13,depth*.515+1.52),Vector3.ONE,timber,Vector3.ZERO,72.0)
+
+
+func _add_house_upper_storey(house:Node3D,width:float,depth:float,height:float,timber:Material,wall:Material,style:int)->void:
+    var floor_y:=height*.50
+    house.set_meta("upper_floor_y",floor_y)
+    var hole:=Rect2(width*.08,-depth*.35,width*.28,depth*.58)
+    var x_cuts:Array=[-width*.5+.35,hole.position.x,hole.end.x,width*.5-.35]
+    var z_cuts:Array=[-depth*.5+.35,hole.position.y,hole.end.y,depth*.5-.35]
+    for xi in range(x_cuts.size()-1):
+        for zi in range(z_cuts.size()-1):
+            var x0:float=x_cuts[xi];var x1:float=x_cuts[xi+1];var z0:float=z_cuts[zi];var z1:float=z_cuts[zi+1]
+            var midpoint:=Vector2((x0+x1)*.5,(z0+z1)*.5)
+            if hole.has_point(midpoint):continue
+            _solid_box(house,Vector3(x1-x0,.20,z1-z0),Vector3(midpoint.x,floor_y,midpoint.y),timber)
+    var stair_x:=width*.22
+    var start_z:=depth*.31;var end_z:=-depth*.29
+    var ramp_mesh:=_build_bridge_ramp_mesh(Vector2(stair_x,start_z),Vector2(stair_x,end_z),Vector2(1,0),2.15,2.15,.04,floor_y+.03)
+    var ramp:=MeshInstance3D.new();ramp.name="HouseInteriorStairRamp";ramp.mesh=ramp_mesh;ramp.material_override=timber;ramp.set_meta("skip_static_solidify",true);house.add_child(ramp)
+    _add_walkable_ramp_collision(ramp,Vector2(stair_x,start_z),Vector2(stair_x,end_z),2.15,.04,floor_y+.03)
+    for step in range(13):
+        var t:=(float(step)+.5)/13.0
+        var tread:=_visual_box(house,Vector3(2.18,.09,depth*.60/13.0+.08),Vector3(stair_x,lerpf(.04,floor_y,t),lerpf(start_z,end_z,t)),timber)
+        tread.set_meta("skip_static_solidify",true)
+    # Bridge the final few centimetres between the ramp opening and upper
+    # floor. Without this landing the last stride could drop through the hole.
+    _solid_box(house,Vector3(2.18,.14,depth*.115),Vector3(stair_x,floor_y-.07,-depth*.36),timber)
+    for side in [-1.0,1.0]:
+        for post in range(5):
+            var t:=float(post)/4.0
+            _visual_box(house,Vector3(.14,1.0,.14),Vector3(stair_x+1.15*float(side),lerpf(.58,floor_y+.58,t),lerpf(start_z,end_z,t)),wall)
+
+
+func _add_architecture_detail(root:Node3D,mesh_name:String,position:Vector3,scale_factor:Vector3=Vector3.ONE,material:Material=null,rotation:Vector3=Vector3.ZERO,visibility_range:float=48.0)->MeshInstance3D:
+    var mesh_instance:=MeshInstance3D.new();mesh_instance.name=mesh_name;mesh_instance.set_meta("architecture_detail_kind",mesh_name);mesh_instance.mesh=_get_architecture_detail_mesh(mesh_name);mesh_instance.position=position;mesh_instance.scale=scale_factor;mesh_instance.rotation=rotation
+    if material==null:
+        if mesh_name in ["HouseSignBracket","CastleChandelier"]:material=_make_material(Color(.10,.11,.11),.72)
+        elif mesh_name in ["FurnitureBarrel","CastleWeaponRack"]:material=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.50,.34,.19),1.0,2.0)
+    if material!=null:mesh_instance.material_override=material
+    mesh_instance.visibility_range_end=visibility_range;mesh_instance.visibility_range_end_margin=14.0;mesh_instance.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(mesh_instance)
+    return mesh_instance
 
 
 func _make_real_window_material()->StandardMaterial3D:
@@ -927,30 +1345,73 @@ func _add_working_house_door(house:Node3D,door_width:float,door_height:float,dep
     var handle:=MeshInstance3D.new();var handle_mesh:=SphereMesh.new();handle_mesh.radius=.08;handle_mesh.height=.16;handle.mesh=handle_mesh;handle.position=Vector3(door_width*.30,0,-.15);handle.material_override=_make_material(Color(.68,.47,.13),.56);body.add_child(handle)
 
 
-func _add_house_furniture(house: Node3D, width: float, depth: float, timber: Material, style: int) -> void:
-    var furniture:=Node3D.new();furniture.name="Interior Detail";house.add_child(furniture)
-    var cloth_colors := [Color(0.42, 0.09, 0.07), Color(0.12, 0.25, 0.39), Color(0.34, 0.29, 0.10)]
-    var cloth := _make_material(cloth_colors[style % cloth_colors.size()], 0.94)
+func _add_house_furniture(house:Node3D,width:float,depth:float,timber:Material,style:int,storeys:int=1)->void:
+    var furniture:=Node3D.new();furniture.name="FurnishedInterior_Family_%d"%(style%6);house.add_child(furniture)
+    var family:=style%6
+    var furniture_timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.72,.53,.33),1.0,1.8)
+    var cloth_colors:=[Color(.42,.09,.07),Color(.12,.25,.39),Color(.34,.29,.10),Color(.24,.36,.19)]
+    var cloth:=_make_material(cloth_colors[style%cloth_colors.size()],.94)
     var timber_boxes:Array=[]
-    # Dining/work table with usable walking clearance around it.
-    _solid_box(furniture, Vector3(3.2, 0.28, 1.65), Vector3(0.25, 1.25, 0), timber)
-    for x in [-1.25, 1.75]:
-        for z in [-0.58, 0.58]:
-            timber_boxes.append({"size":Vector3(.20,1.12,.20),"position":Vector3(x,.56,z)})
-    for z in [-1.35, 1.35]:
-        timber_boxes.append({"size":Vector3(1.35,.25,.42),"position":Vector3(.25,.68,z)})
-        timber_boxes.append({"size":Vector3(1.35,.18,1.05),"position":Vector3(.25,1.20,z+(-.38 if z<0 else .38))})
-    # Bed, blanket, storage chest and shelf make interiors visibly inhabited.
-    var bed_x := -width * 0.28
-    var bed_z := -depth * 0.25
-    timber_boxes.append({"size":Vector3(2.5,.45,4.0),"position":Vector3(bed_x,.48,bed_z)})
-    _visual_box(furniture, Vector3(2.25, 0.20, 3.15), Vector3(bed_x, 0.80, bed_z - 0.18), cloth)
-    timber_boxes.append({"size":Vector3(2.2,.72,1.15),"position":Vector3(width*.29,.38,-depth*.30)})
-    timber_boxes.append({"size":Vector3(2.8,.22,.70),"position":Vector3(width*.24,2.15,-depth*.46)})
-    _add_box_batch(furniture,timber_boxes,timber,false,38.0)
-    for entry in timber_boxes:
-        _add_static_collision_box(furniture,entry.get("size",Vector3.ONE),entry.get("position",Vector3.ZERO),entry.get("rotation",Vector3.ZERO))
-    _optimize_small_detail_node(furniture,38.0)
+    var ground_rug:=_visual_box(furniture,Vector3(width*.42,.055,depth*.32),Vector3(-width*.08,.12,0),cloth);ground_rug.name="Ground Floor Woven Rug";ground_rug.set_meta("skip_static_solidify",true)
+    match family:
+        0:
+            # Compact cottage: bed, eating table, chest and wall shelf.
+            _append_house_bed(furniture,timber_boxes,Vector3(-width*.27,0,-depth*.25),furniture_timber,cloth)
+            _append_house_table(furniture,timber_boxes,Vector3(width*.15,0,0),Vector2(2.9,1.45))
+            _add_architecture_detail(furniture,"FurnitureChest",Vector3(width*.28,0,-depth*.30),Vector3(.88,.88,.88),null,Vector3.ZERO,48.0)
+        1:
+            # Alehouse/croft: communal table, benches and modeled barrels.
+            _append_house_table(furniture,timber_boxes,Vector3(0,0,-depth*.04),Vector2(4.8,1.65))
+            for z in [-1.45,1.45]:timber_boxes.append({"size":Vector3(4.2,.32,.48),"position":Vector3(0,.68,z)})
+            for x in [-width*.34,width*.34]:_add_architecture_detail(furniture,"FurnitureBarrel",Vector3(x,0,-depth*.30),Vector3(.82,.82,.82),furniture_timber,Vector3.ZERO,42.0)
+        2:
+            # Working house: heavy bench, tool counter, shelves and cargo.
+            _append_house_table(furniture,timber_boxes,Vector3(-width*.10,0,-depth*.12),Vector2(4.0,1.9))
+            timber_boxes.append({"size":Vector3(3.5,1.15,.85),"position":Vector3(width*.24,.58,-depth*.41)})
+            timber_boxes.append({"size":Vector3(1.4,1.2,1.3),"position":Vector3(-width*.31,.60,depth*.18)})
+            _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(width*.30,0,-depth*.43),Vector3(.92,.92,.92),furniture_timber,Vector3.ZERO,44.0)
+        3:
+            # Merchant shop: proper counter line, stock shelving and barrels.
+            timber_boxes.append({"size":Vector3(width*.56,1.18,1.05),"position":Vector3(width*.05,.59,-depth*.10)})
+            _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(-width*.30,0,-depth*.43),Vector3(1.05,1.05,1.05),furniture_timber,Vector3.ZERO,44.0)
+            _add_architecture_detail(furniture,"FurnitureBarrel",Vector3(width*.34,0,-depth*.34),Vector3(.88,.88,.88),furniture_timber,Vector3.ZERO,42.0)
+        4:
+            # Urban townhouse: reception table downstairs; sleeping rooms above.
+            _append_house_table(furniture,timber_boxes,Vector3(-width*.12,0,-depth*.08),Vector2(3.5,1.55))
+            _add_architecture_detail(furniture,"FurnitureChest",Vector3(-width*.29,0,-depth*.39),Vector3(1.05,1.05,1.05),null,Vector3.ZERO,48.0)
+        5:
+            # Inn: two dining tables downstairs with a service counter.
+            for x in [-width*.22,width*.18]:_append_house_table(furniture,timber_boxes,Vector3(x,0,-depth*.08),Vector2(3.1,1.35))
+            timber_boxes.append({"size":Vector3(width*.50,1.10,.90),"position":Vector3(0,.55,-depth*.40)})
+    if family not in [1,3]:
+        _add_architecture_detail(furniture,"FurnitureChair",Vector3(width*.12,0,depth*.16),Vector3(.72,.72,.72),furniture_timber,Vector3(0,PI,0),40.0)
+    _add_house_interior_light(furniture,Vector3(0,2.45,0))
+    # Storeys are furnished as actual rooms, not empty inaccessible shells.
+    if storeys==2:
+        var upper_y:=float(house.get_meta("upper_floor_y",4.4))
+        _append_house_bed(furniture,timber_boxes,Vector3(-width*.28,upper_y,-depth*.25),furniture_timber,cloth)
+        _append_house_bed(furniture,timber_boxes,Vector3(-width*.28,upper_y,depth*.22),furniture_timber,cloth)
+        var upper_rug:=_visual_box(furniture,Vector3(width*.38,.055,depth*.30),Vector3(-width*.04,upper_y+.12,0),cloth);upper_rug.name="Upper Floor Woven Rug";upper_rug.set_meta("skip_static_solidify",true)
+        timber_boxes.append({"size":Vector3(2.6,.24,.72),"position":Vector3(width*.30,upper_y+2.0,-depth*.44)})
+        _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(width*.31,upper_y,-depth*.42),Vector3(.82,.82,.82),furniture_timber,Vector3.ZERO,46.0)
+        _add_architecture_detail(furniture,"FurnitureChest",Vector3(width*.22,upper_y,depth*.28),Vector3(.82,.82,.82),null,Vector3.ZERO,46.0)
+        _add_house_interior_light(furniture,Vector3(-width*.08,upper_y+2.35,0))
+    _add_box_batch(furniture,timber_boxes,furniture_timber,false,46.0)
+    for entry in timber_boxes:_add_static_collision_box(furniture,entry.get("size",Vector3.ONE),entry.get("position",Vector3.ZERO),entry.get("rotation",Vector3.ZERO))
+    _optimize_small_detail_node(furniture,46.0)
+
+
+func _add_house_interior_light(root:Node3D,position:Vector3)->void:
+    var light:=OmniLight3D.new();light.name="Warm House Interior Light";light.position=position;light.light_color=Color(1.0,.70,.43);light.light_energy=.82;light.omni_range=8.5;light.shadow_enabled=false
+    light.distance_fade_enabled=true;light.distance_fade_begin=34.0;light.distance_fade_length=18.0;root.add_child(light)
+
+
+func _append_house_table(root:Node3D,_entries:Array,base:Vector3,top_size:Vector2)->void:
+    _add_architecture_detail(root,"FurnitureTable",base,Vector3(top_size.x/3.2,1.0,top_size.y/1.48),null,Vector3.ZERO,50.0)
+
+
+func _append_house_bed(root:Node3D,_entries:Array,base:Vector3,_timber:Material,_cloth:Material)->void:
+    _add_architecture_detail(root,"FurnitureBed",base,Vector3(.94,.94,.94),null,Vector3.ZERO,50.0)
 
 
 func _add_house_gables(house: Node3D, width: float, depth: float, height: float, wall_material: Material, beam_material: Material) -> void:
@@ -1012,12 +1473,12 @@ func _add_working_fireplace(house: Node3D, width: float, depth: float, style: in
 func _build_castle_complex(root: Node3D, center: Vector2, terrain_result: Dictionary) -> void:
     var castle_child_start:=root.get_child_count()
     var ground: Vector3 = terrain_result.height_sampler.call(center.x, center.y)
-    var stone := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(1.10, 1.08, 1.01), 1.0, 8.0)
-    var dark_stone := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.72, 0.76, 0.78), 1.0, 6.0)
+    var stone := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.78, 0.77, 0.73), 1.0, 8.0)
+    var dark_stone := _make_texture_material("res://assets/architecture/castle_stone_v1.png", Color(0.57, 0.60, 0.61), 1.0, 6.0)
     var roof_mat := _make_material(Color(0.16, 0.18, 0.21), 0.96)
     var royal_mat := _make_material(Color(0.45, 0.08, 0.075), 0.92)
     var gold_mat := _make_material(Color(0.72, 0.52, 0.12), 0.72)
-    var courtyard := _make_texture_material("res://assets/architecture/town_cobblestone_v1.png", Color(0.82, 0.83, 0.81), 1.0, 20.0)
+    var courtyard := _make_texture_material("res://assets/architecture/town_cobblestone_v1.png", Color(0.66, 0.68, 0.66), 1.0, 20.0)
     _solid_box(root, Vector3(142.0, 0.22, 118.0), ground + Vector3(0, 0.15, 0), courtyard)
 
     # Inner bailey with an open southern gate.
@@ -1029,6 +1490,7 @@ func _build_castle_complex(root: Node3D, center: Vector2, terrain_result: Dictio
     _solid_box(root, Vector3(3.0, 8.0, 5.0), ground + Vector3(-11.5, 4.0, 58.5), dark_stone)
     _solid_box(root, Vector3(3.0, 8.0, 5.0), ground + Vector3(11.5, 4.0, 58.5), dark_stone)
     _solid_box(root, Vector3(20.0, 3.0, 5.0), ground + Vector3(0, 9.5, 58.5), dark_stone)
+    _dress_castle_courtyard(root,ground,stone,dark_stone,roof_mat,royal_mat,gold_mat)
 
     for corner in [Vector2(-71, -59), Vector2(71, -59), Vector2(-71, 59), Vector2(71, 59)]:
         _solid_box(root, Vector3(14.0, 20.0, 14.0), ground + Vector3(corner.x, 10.0, corner.y), dark_stone)
@@ -1067,6 +1529,7 @@ func _build_castle_complex(root: Node3D, center: Vector2, terrain_result: Dictio
         for slit_x in [-18.0, 18.0]:
             front_openings.append({"x0": slit_x - 0.48, "x1": slit_x + 0.48, "y0": slit_center_y - 1.45, "y1": slit_center_y + 1.45})
     _build_keep_wall_with_openings(root, keep_center, keep_depth * 0.5, keep_width, keep_height, wall_thickness, front_openings, stone)
+    _dress_castle_keep_exterior(root,keep_center,keep_width,keep_depth,keep_height,stone,dark_stone,royal_mat,gold_mat)
     # The continuous courtyard is the keep's ground floor. A second thin slab
     # here produced the broad interior shimmer and added no traversal value.
     for floor_index in range(1, 4):
@@ -1106,13 +1569,16 @@ func _build_castle_complex(root: Node3D, center: Vector2, terrain_result: Dictio
             _solid_box(root, Vector3(1.5, 6.5, 1.5), keep_center + Vector3(x, 3.25, z), dark_stone)
     _build_grand_throne(root,keep_center,royal_mat,gold_mat,dark_stone)
     var hall_timber := roof_timber
-    for z in [-8.0, 3.0, 12.0]:
-        _solid_box(root, Vector3(12.0, 0.32, 2.2), keep_center + Vector3(0, 1.15, z), hall_timber)
-        for x in [-5.1, 5.1]:
-            _visual_box(root, Vector3(0.35, 1.05, 1.5), keep_center + Vector3(x, 0.53, z), hall_timber)
+    for table_index in range(3):
+        var z:=float([-8.0,3.0,12.0][table_index])
+        var table_x:=-10.5 if table_index%2==0 else 10.5
+        _solid_box(root,Vector3(9.0,.32,2.2),keep_center+Vector3(table_x,1.15,z),hall_timber)
+        for x_offset in [-3.8,3.8]:
+            _visual_box(root,Vector3(.35,1.05,1.5),keep_center+Vector3(table_x+x_offset,.53,z),hall_timber)
         for side in [-1.0, 1.0]:
-            _visual_box(root, Vector3(10.5, 0.28, 0.65), keep_center + Vector3(0, 0.62, z + side * 2.0), hall_timber)
+            _visual_box(root,Vector3(8.0,.28,.65),keep_center+Vector3(table_x,.62,z+side*2.0),hall_timber)
     _visual_box(root, Vector3(4.8, 1.7, 2.0), keep_center + Vector3(-20.5, 0.85, -16.0), hall_timber)
+    _dress_castle_ground_hall(root,keep_center,hall_timber,royal_mat,gold_mat,dark_stone)
     _build_internal_keep_stairs(root, keep_center, hall_timber, dark_stone)
     _add_castle_roof_ladder(root,keep_center,hall_timber,dark_stone)
     _dress_keep_upper_floors(root, keep_center, hall_timber, royal_mat, gold_mat, dark_stone)
@@ -1122,15 +1588,95 @@ func _build_castle_complex(root: Node3D, center: Vector2, terrain_result: Dictio
     root.add_child(keep_interior)
     _add_working_fireplace(keep_interior, keep_width, keep_depth, 0)
 
-    # Legacy exterior gallery ramps were removed. They created invisible
-    # sampled stairs outside the keep and bypassed the intended interior route.
-    for side in [-1.0, 1.0]:
-        var hall_banner_center:=keep_center+Vector3(11.0*side,13.0,keep_depth*.52)
-        _visual_box(root,Vector3(3.2,8.5,.18),hall_banner_center,royal_mat)
-        _add_broken_crown_crest(root,hall_banner_center+Vector3(0,0,.13),.92,gold_mat)
-        _visual_box(root, Vector3(0.35, 9.0, 0.35), keep_center + Vector3(13.0 * side, 13.2, keep_depth * 0.54), gold_mat)
+    # Legacy exterior gallery ramps and duplicate facade banners were removed.
+    # They bypassed the intended interior route and created overlapping detail.
     for child_index in range(castle_child_start,root.get_child_count()):
         _optimize_small_detail_node(root.get_child(child_index),82.0)
+
+
+func _dress_castle_courtyard(root:Node3D,ground:Vector3,stone:Material,dark_stone:Material,roof:Material,royal:Material,gold:Material)->void:
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.54,.38,.22),1.0,2.2)
+    var courtyard_detail:=Node3D.new();courtyard_detail.name="Castle Courtyard Workshops And Training Yard";courtyard_detail.set_meta("batch_static_collision",true);root.add_child(courtyard_detail)
+    # West-wall stable/work shed: open front, supported roof, divided stalls.
+    var stable_center:=ground+Vector3(-57.0,0,15.0)
+    _solid_box(courtyard_detail,Vector3(22.0,.28,11.0),stable_center+Vector3(0,.14,0),stone)
+    for x in [-10.2,-3.4,3.4,10.2]:
+        _solid_box(courtyard_detail,Vector3(.38,4.4,.38),stable_center+Vector3(x,2.2,4.7),timber)
+    for x in [-6.8,0.0,6.8]:
+        _solid_box(courtyard_detail,Vector3(.24,2.2,8.5),stable_center+Vector3(x,1.1,-.7),timber)
+    var stable_roof:=_visual_box(courtyard_detail,Vector3(23.5,.42,12.8),stable_center+Vector3(0,4.62,-.25),roof);stable_roof.rotation.x=-.10
+    for x in [-7.0,0.0,7.0]:_solid_box(courtyard_detail,Vector3(4.7,.72,1.10),stable_center+Vector3(x,.36,-3.8),timber)
+    for offset in [Vector3(-8.8,0,2.4),Vector3(-6.9,0,1.5),Vector3(8.2,0,2.2)]:
+        _add_architecture_detail(courtyard_detail,"FurnitureBarrel",stable_center+offset,Vector3(.88,.88,.88),null,Vector3.ZERO,70.0)
+
+    # East training yard: racks, dummies and a low stone-edged practice surface.
+    var yard_center:=ground+Vector3(49.0,0,14.0)
+    _visual_box(courtyard_detail,Vector3(27.0,.14,24.0),yard_center+Vector3.UP*.08,_make_material(Color(.32,.27,.19),1.0))
+    for z in [-9.8,9.8]:_solid_box(courtyard_detail,Vector3(27.0,.48,.42),yard_center+Vector3(0,.24,z),stone)
+    for x in [-12.8,12.8]:_solid_box(courtyard_detail,Vector3(.42,.48,20.0),yard_center+Vector3(x,.24,0),stone)
+    for z in [-6.5,0.0,6.5]:
+        _solid_box(courtyard_detail,Vector3(.34,2.7,.34),yard_center+Vector3(-4.0,1.35,z),timber)
+        _visual_box(courtyard_detail,Vector3(2.6,.24,.28),yard_center+Vector3(-4.0,2.25,z),timber)
+        _visual_box(courtyard_detail,Vector3(1.1,1.45,.55),yard_center+Vector3(-4.0,1.68,z),royal)
+    _add_architecture_detail(courtyard_detail,"CastleWeaponRack",yard_center+Vector3(6.5,0,-5.5),Vector3(.92,.92,.92),null,Vector3.ZERO,78.0)
+    _add_architecture_detail(courtyard_detail,"CastleWeaponRack",yard_center+Vector3(6.5,0,5.5),Vector3(.92,.92,.92),null,Vector3(0,PI,0),78.0)
+
+    # Supplies beside the gate make the bailey useful without obstructing the central route.
+    for offset in [Vector3(-53,0,47),Vector3(-49,0,49),Vector3(51,0,46),Vector3(55,0,48)]:
+        _add_architecture_detail(courtyard_detail,"FurnitureBarrel",ground+offset,Vector3(.90,.90,.90),null,Vector3.ZERO,72.0)
+    for side in [-1.0,1.0]:
+        var banner_center:=ground+Vector3(29.0*float(side),5.4,57.25)
+        _visual_box(courtyard_detail,Vector3(4.4,5.8,.16),banner_center,royal)
+        _add_broken_crown_crest(courtyard_detail,banner_center+Vector3(0,0,.11),.72,gold)
+
+
+func _dress_castle_keep_exterior(root:Node3D,keep_center:Vector3,width:float,depth:float,height:float,stone:Material,dark_stone:Material,royal:Material,gold:Material)->void:
+    # Deep masonry course bands and rear/side buttresses break up the broad
+    # keep walls without introducing coplanar shimmer surfaces.
+    for band_y in [7.8,15.8,23.8]:
+        _visual_box(root,Vector3(width+.5,.42,.34),keep_center+Vector3(0,float(band_y),depth*.515),dark_stone)
+        _visual_box(root,Vector3(width+.5,.42,.34),keep_center+Vector3(0,float(band_y),-depth*.515),dark_stone)
+        _visual_box(root,Vector3(.34,.42,depth+.5),keep_center+Vector3(width*.515,float(band_y),0),dark_stone)
+        _visual_box(root,Vector3(.34,.42,depth+.5),keep_center+Vector3(-width*.515,float(band_y),0),dark_stone)
+    for x in [-width*.47,-width*.24,width*.24,width*.47]:
+        _solid_box(root,Vector3(1.8,height-3.0,2.0),keep_center+Vector3(x,(height-3.0)*.5,-depth*.53),dark_stone)
+    for side in [-1.0,1.0]:
+        for z in [-depth*.38,0.0,depth*.38]:
+            _solid_box(root,Vector3(2.0,height-4.0,1.8),keep_center+Vector3(width*.53*float(side),(height-4.0)*.5,z),dark_stone)
+    # Every slit remains a real opening; these frames only dress its reveal.
+    for floor_index in range(4):
+        var y:=float(floor_index)*8.0+4.0
+        for x in [-18.0,0.0,18.0]:_add_arrow_slit_frame(root,keep_center+Vector3(x,y,-depth*.515),dark_stone)
+        for side in [-1.0,1.0]:
+            var side_root:=Node3D.new();side_root.position=keep_center+Vector3(width*.515*float(side),0,0);side_root.rotation.y=PI*.5;root.add_child(side_root)
+            for z in [-11.0,0.0,11.0]:_add_arrow_slit_frame(side_root,Vector3(z,y,0),dark_stone)
+    for side in [-1.0,1.0]:
+        var banner_center:=keep_center+Vector3(12.0*float(side),12.0,depth*.532)
+        _visual_box(root,Vector3(3.2,7.5,.16),banner_center,royal)
+        _add_broken_crown_crest(root,banner_center+Vector3(0,0,.11),.82,gold)
+
+
+func _dress_castle_ground_hall(root:Node3D,keep_center:Vector3,timber:Material,royal:Material,gold:Material,stone:Material)->void:
+    # Chandelier pair, sideboards and weapon displays leave a broad central aisle.
+    var runner:=_visual_box(root,Vector3(5.2,.07,30.0),keep_center+Vector3(0,.31,3.0),royal);runner.name="Royal Hall Runner";runner.set_meta("skip_static_solidify",true)
+    for z in [-9.0,3.0,15.0]:
+        _visual_box(root,Vector3(4.55,.035,.22),keep_center+Vector3(0,.355,z),gold).set_meta("skip_static_solidify",true)
+    for z in [-8.0,8.0]:
+        _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(0,6.15,z),Vector3(1.1,1.1,1.1),null,Vector3.ZERO,78.0)
+    for z in [-10.0,2.0,14.0]:
+        _add_architecture_detail(root,"CastleWeaponRack",keep_center+Vector3(22.0,0,z),Vector3(.82,.82,.82),null,Vector3(0,-PI*.5,0),58.0)
+    for z in [-12.0,10.0]:
+        _add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(-22.4,0,z),Vector3(1.08,1.08,1.08),timber,Vector3(0,PI*.5,0),58.0)
+    for side in [-1.0,1.0]:
+        var brazier_x:=7.0*float(side)
+        _solid_box(root,Vector3(1.4,1.0,1.4),keep_center+Vector3(brazier_x,.50,-12.0),stone)
+        _visual_box(root,Vector3(.34,.95,.34),keep_center+Vector3(brazier_x,1.35,-12.0),gold)
+    _add_castle_room_light(root,keep_center+Vector3(0,5.8,1.5))
+
+
+func _add_castle_room_light(root:Node3D,position:Vector3)->void:
+    var light:=OmniLight3D.new();light.name="Warm Castle Interior Light";light.position=position;light.light_color=Color(1.0,.69,.42);light.light_energy=1.15;light.omni_range=24.0;light.shadow_enabled=false
+    light.distance_fade_enabled=true;light.distance_fade_begin=180.0;light.distance_fade_length=60.0;root.add_child(light)
 
 
 func _optimize_small_detail_node(node:Node,detail_range:float)->void:
@@ -1413,11 +1959,11 @@ func _build_internal_keep_stairs(root: Node3D, keep_center: Vector3, tread_mater
         ramp.name = "SmoothCastleStairRamp"
         ramp.mesh = ramp_mesh
         ramp.material_override = tread_material
-        # This ramp already owns exact trimesh collision. The town detail pass
-        # must not wrap its sloped AABB in a solid box.
+        # The ramp owns a solid slope collision below; the town detail pass
+        # must not wrap its sloped visual AABB in a solid box.
         ramp.set_meta("skip_static_solidify",true)
         root.add_child(ramp)
-        ramp.create_trimesh_collision()
+        _add_walkable_ramp_collision(ramp,start2,end2,4.35,keep_center.y+base_y,keep_center.y+target_y)
         # A flush final landing closes the visible end of the ramp and hands
         # the hero directly to the storey slab. Its outer edge matches the
         # floor opening so there is no unsupported strip to fall through.
@@ -1457,16 +2003,26 @@ func _build_internal_keep_stairs(root: Node3D, keep_center: Vector3, tread_mater
 
 
 func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Material, royal: Material, gold: Material, stone: Material) -> void:
-    # Second floor: council chamber with a long table, chairs, wall maps and banners.
+    # Second floor: council chamber with a long table, modeled chairs, archive
+    # shelves, wall maps and a central chandelier. The eastern stair route is clear.
     var council_y := 8.21
     _solid_box(root, Vector3(15.0, 0.42, 4.4), keep_center + Vector3(-8.0, council_y + 1.1, -5.0), timber)
     for x in [-14.0, -10.0, -6.0, -2.0]:
-        for z in [-8.0, -2.0]:
-            _visual_box(root, Vector3(1.4, 1.15, 1.3), keep_center + Vector3(x, council_y + 0.58, z), timber)
+        _add_architecture_detail(root,"FurnitureChair",keep_center+Vector3(x,council_y,-8.0),Vector3(.76,.76,.76),timber,Vector3.ZERO,64.0)
+        _add_architecture_detail(root,"FurnitureChair",keep_center+Vector3(x,council_y,-2.0),Vector3(.76,.76,.76),timber,Vector3(0,PI,0),64.0)
     _visual_box(root, Vector3(13.0, 5.2, 0.16), keep_center + Vector3(-8.0, council_y + 4.3, -20.90), royal)
     _visual_box(root, Vector3(8.0, 3.8, 0.18), keep_center + Vector3(10.0, council_y + 4.0, -20.88), royal)
+    _add_broken_crown_crest(root,keep_center+Vector3(-8.0,council_y+3.8,-20.76),1.20,gold)
+    _add_broken_crown_crest(root,keep_center+Vector3(10.0,council_y+3.7,-20.73),.92,gold)
     for x in [-18.0, 18.0]:
         _visual_box(root, Vector3(2.8, 6.0, 0.20), keep_center + Vector3(x, council_y + 4.5, 20.92), royal)
+        _add_broken_crown_crest(root,keep_center+Vector3(x,council_y+4.15,20.77),.70,gold)
+    for x in [-20.0,14.0]:_add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(x,council_y,-19.9),Vector3(1.2,1.2,1.2),timber,Vector3.ZERO,66.0)
+    _solid_box(root,Vector3(5.2,.34,2.3),keep_center+Vector3(-16.0,council_y+1.0,11.0),timber)
+    for x in [-18.0,-14.0]:
+        for z in [10.2,11.8]:_visual_box(root,Vector3(.20,.90,.20),keep_center+Vector3(x,council_y+.45,z),timber)
+    _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(-5.0,council_y+6.0,5.5),Vector3(.92,.92,.92),null,Vector3.ZERO,72.0)
+    _add_castle_room_light(root,keep_center+Vector3(-5.0,council_y+5.7,4.5))
 
     # Third floor: armory and archive, deliberately unlike the council room.
     var armory_y := 16.21
@@ -1479,17 +2035,35 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
         _visual_box(root, Vector3(2.1, 0.9, 0.24), keep_center + Vector3(22.85, armory_y + 2.4, z), stone)
     _solid_box(root, Vector3(6.5, 1.1, 3.4), keep_center + Vector3(-12.0, armory_y + 0.55, 10.0), stone)
     _solid_box(root, Vector3(5.0, 1.0, 3.2), keep_center + Vector3(-4.0, armory_y + 0.50, 12.0), timber)
+    for z in [-13.0,-5.0,3.0,11.0]:_add_architecture_detail(root,"CastleWeaponRack",keep_center+Vector3(22.0,armory_y,z),Vector3(.86,.86,.86),null,Vector3(0,-PI*.5,0),68.0)
+    for position in [Vector3(-20,0,13),Vector3(-16,0,15),Vector3(3,0,-14)]:_add_architecture_detail(root,"FurnitureBarrel",keep_center+Vector3(position.x,armory_y,position.z),Vector3(.86,.86,.86),null,Vector3.ZERO,58.0)
+    for x in [-19.0,-11.5,-4.0]:
+        _visual_box(root,Vector3(1.8,2.1,.28),keep_center+Vector3(x,armory_y+3.0,-20.58),stone)
+        _visual_box(root,Vector3(.22,2.75,.22),keep_center+Vector3(x,armory_y+2.9,-20.35),gold).rotation.z=.22
+    _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(-6.0,armory_y+6.0,2.0),Vector3(.90,.90,.90),null,Vector3.ZERO,72.0)
+    _add_castle_room_light(root,keep_center+Vector3(-6.0,armory_y+5.7,2.0))
 
-    # Fourth floor: royal solar with beds, chests, rugs and heraldry.
+    # Fourth floor: royal solar with four-poster beds, desks, chests, rugs and heraldry.
     var solar_y := 24.21
     for x in [-17.0, 3.0]:
         _solid_box(root, Vector3(8.0, 0.65, 4.8), keep_center + Vector3(x, solar_y + 0.42, -10.0), timber)
         _visual_box(root, Vector3(7.3, 0.24, 4.0), keep_center + Vector3(x, solar_y + 0.88, -10.0), royal)
+        for post_x in [-3.55,3.55]:
+            for post_z in [-1.85,1.85]:_visual_box(root,Vector3(.24,5.5,.24),keep_center+Vector3(x+post_x,solar_y+2.75,-10.0+post_z),gold)
+        _visual_box(root,Vector3(7.4,.22,4.0),keep_center+Vector3(x,solar_y+5.35,-10.0),royal)
     for x in [-20.0, -10.0, 0.0, 10.0, 20.0]:
         _visual_box(root, Vector3(3.8, 5.6, 0.18), keep_center + Vector3(x, solar_y + 3.8, 20.92), royal)
+        _add_broken_crown_crest(root,keep_center+Vector3(x,solar_y+3.55,20.78),.72,gold)
     _visual_box(root, Vector3(18.0, 0.10, 9.0), keep_center + Vector3(-7.0, solar_y + 0.16, 5.0), royal)
     for pos in [Vector3(-22, 0.7, 14), Vector3(6, 0.7, 13), Vector3(20, 0.7, -12)]:
         _solid_box(root, Vector3(3.6, 1.4, 2.4), keep_center + Vector3(pos.x, solar_y + pos.y, pos.z), timber)
+    _solid_box(root,Vector3(6.0,.34,2.5),keep_center+Vector3(-8.0,solar_y+1.0,11.0),timber)
+    for x in [-10.4,-5.6]:
+        for z in [10.0,12.0]:_visual_box(root,Vector3(.20,.88,.20),keep_center+Vector3(x,solar_y+.44,z),timber)
+    _add_architecture_detail(root,"FurnitureChair",keep_center+Vector3(-8.0,solar_y,8.8),Vector3(.80,.80,.80),timber,Vector3.ZERO,64.0)
+    for x in [-21.5,15.0]:_add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(x,solar_y,-20.0),Vector3(1.15,1.15,1.15),timber,Vector3.ZERO,66.0)
+    _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(-2.0,solar_y+6.0,5.0),Vector3(1.0,1.0,1.0),null,Vector3.ZERO,72.0)
+    _add_castle_room_light(root,keep_center+Vector3(-2.0,solar_y+5.7,5.0))
 
 
 func _add_arch_crown(root:Node3D,center:Vector3,radius:float,depth:float,material:Material)->void:
@@ -1685,31 +2259,36 @@ func _build_ponds(root: Node3D, ponds: Array, terrain_result: Dictionary) -> voi
         root.add_child(instance)
 
 
-func _build_waterfalls(root: Node3D, sites: Array) -> void:
+func _build_waterfalls(root:Node3D,sites:Array,terrain_result:Dictionary,profile:Dictionary)->void:
+    var river_sampler:Callable=terrain_result.get("river_height_sampler",terrain_result.height_sampler)
+    var water_lift:float=float(profile.get("river_water_lift",1.35))
     for site in sites:
         var point: Vector2 = site.get("position", Vector2.ZERO)
         var width: float = site.get("width", 70.0)
         var drop: float = site.get("drop", 3.0)
-        var upper_grade := 2.4 + point.x * 0.00042 + sin(point.x * 0.003) * 0.08
-        if point.x > -1125.0:
-            upper_grade += 3.2
-        if point.x > 2075.0:
-            upper_grade += 2.6
-        var water_top := upper_grade - 0.6
+        var water_top:float=(river_sampler.call(point.x,point.y) as Vector3).y+water_lift
+        var river_info:=_nearest_corridor_segment(point,profile.get("river_corridors",[]))
+        var tangent:Vector2=river_info.get("direction",Vector2(1.0,0.0))
+        var alignment:float=-atan2(tangent.y,tangent.x)
         var cascade_mesh := BoxMesh.new()
         cascade_mesh.size = Vector3(0.45, drop, width)
         var cascade := MeshInstance3D.new()
         cascade.name = "%s_Cascade" % site.get("name", "Waterfall")
         cascade.mesh = cascade_mesh
         cascade.position = Vector3(point.x, water_top - drop * 0.5, point.y)
+        cascade.rotation.y=alignment
         cascade.material_override = _make_water_material()
+        cascade.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
         root.add_child(cascade)
         var foam_mesh := BoxMesh.new()
         foam_mesh.size = Vector3(5.0, 0.16, width * 0.92)
         var foam := MeshInstance3D.new()
         foam.mesh = foam_mesh
-        foam.position = Vector3(point.x - 2.4, water_top - drop + 0.12, point.y)
+        var downstream:=tangent.normalized()*2.4
+        foam.position=Vector3(point.x+downstream.x,water_top-drop+0.12,point.y+downstream.y)
+        foam.rotation.y=alignment
         foam.material_override = _make_material(Color(0.76, 0.91, 0.94, 0.88), 0.24)
+        foam.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
         root.add_child(foam)
 
 
@@ -1725,10 +2304,6 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
     ]
     var grouped_transforms:Array=[[],[],[],[]]
     var grouped_rocks:Array=[[],[],[],[]]
-    var collision_body:=StaticBody3D.new()
-    collision_body.name="MineableRockCollision"
-    collision_body.collision_layer=1
-    root.add_child(collision_body)
     var collision_registry:Array=root.get_meta("collision_prop_registry",[])
     var mineable_registry:Array=root.get_meta("mineable_rock_registry",[])
     var rock_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
@@ -1768,14 +2343,6 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
             "active":true,
             "hits":0,
         }
-        var collision:=CollisionShape3D.new()
-        var shape:=SphereShape3D.new()
-        shape.radius=maxf(.70,scale_factor*.72)
-        collision.shape=shape
-        collision.position=rock_data.position
-        collision_body.add_child(collision)
-        rock_data["collision_shape"]=collision
-        rock_data["direct_collision"]=true
         collision_registry.append(rock_data)
         mineable_registry.append(rock_data)
         grouped_rocks[ore_index].append(rock_data)
@@ -2030,7 +2597,7 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
     # Each accepted instance contains seven separately offset grass clumps.
     # The former 36k baseline oversampled the same visible area and spent
     # several seconds on corridor queries during every launch.
-    for i in range(24000):
+    for i in range(36000):
         var point:=Vector2(
             grass_rng.randf_range(-world_size*.455,world_size*.455),
             grass_rng.randf_range(-world_size*.455,world_size*.455)
@@ -2049,6 +2616,48 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
         var transform:=Transform3D(basis,ground+Vector3.UP*.018)
         if grass_rng.randf()<.16:dry.append(transform)
         else:green.append(transform)
+
+    # Irregular roadside meadow pockets ensure the player's main sightline is
+    # never a bare texture plane. Offsets, omissions and scale vary on both
+    # sides so these read as natural verge growth rather than planted rows.
+    for road_index in range(profile.get("road_corridors",[]).size()):
+        var road:Dictionary=profile.get("road_corridors",[])[road_index]
+        var road_points:Array=_subdivide_polyline(road.get("points",[]),5)
+        if road_points.size()<2:continue
+        var half_width:=float(road.get("width",15.0))*.48
+        var distance_to_next:=11.0+float((road_index*17)%19)
+        var pocket_index:=0
+        for segment_index in range(road_points.size()-1):
+            var a:Vector2=road_points[segment_index]
+            var b:Vector2=road_points[segment_index+1]
+            var segment:=b-a
+            var length:=segment.length()
+            if length<.01:continue
+            var tangent:=segment/length
+            var normal:=Vector2(-tangent.y,tangent.x)
+            while distance_to_next<length:
+                var center:=a+tangent*distance_to_next
+                var pattern:=road_index*911+pocket_index*73+segment_index*29
+                for raw_side in [-1.0,1.0]:
+                    var side:=float(raw_side)
+                    if (pattern+(0 if side<0.0 else 3))%8==0:continue
+                    var along_jitter:=sin(float(pattern)*.619+side)*8.5
+                    var lateral:=half_width+5.5+absf(sin(float(pattern)*.371+side*2.1))*12.0
+                    var point:=center+tangent*along_jitter+normal*side*lateral
+                    if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
+                    if _is_near_bridge_site(point,profile.get("ford_sites",[]),78.0):continue
+                    if _is_on_stone_walkway(point,profile):continue
+                    var ground:Vector3=sampler.call(point.x,point.y)
+                    if ground.y<=float(terrain_result.water_level)+.7:continue
+                    var scale_value:=.94+float(abs(pattern)%7)*.07
+                    var yaw:=float(pattern)*.413
+                    var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*1.18,scale_value*1.12,scale_value))
+                    var transform:=Transform3D(basis,ground+Vector3.UP*.018)
+                    if _is_dry_biome(point,world_size) or pattern%9==0:dry.append(transform)
+                    else:green.append(transform)
+                pocket_index+=1
+                distance_to_next+=26.0+absf(sin(float(pattern)*.287))*17.0
+            distance_to_next-=length
 
     # Travel-area meadows are larger than the old 96 m circle and fade through
     # their outer third. This removes the obvious "grass stops here" boundary.
@@ -2166,7 +2775,7 @@ func _make_scattered_grass_patch_mesh(source_mesh:Mesh)->ArrayMesh:
         var yaw:float=patch[1]
         var scale_value:float=patch[2]
         var transform:=Transform3D(
-            Basis(Vector3.UP,yaw).scaled(Vector3(scale_value,scale_value,scale_value)),
+            Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*1.26,scale_value*1.65,scale_value*1.26)),
             offset
         )
         for surface_index in range(source_mesh.get_surface_count()):
@@ -2253,10 +2862,6 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
     var light_transforms:Array[Transform3D]=[]
     var branch_transforms:Array[Transform3D]=[]
     var collision_registry:Array=root.get_meta("collision_prop_registry",[])
-    var collision_body:=StaticBody3D.new()
-    collision_body.name="BushCollision"
-    collision_body.collision_layer=1
-    root.add_child(collision_body)
     var raw_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     # Each shrub is one batched branching frame plus a cluster of individual
     # angular leaf bunches. This keeps the silhouette open and woody instead
@@ -2273,7 +2878,7 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
             continue
         if _is_near_bridge_site(point, profile.get("ford_sites", []), 76.0):
             continue
-        if point.distance_to(profile.get("spawn_site", {}).get("position", Vector2.ZERO)) < 24.0:
+        if _is_on_stone_walkway(point,profile):
             continue
         var ground: Vector3 = raw_sampler.call(x, z)
         var s:=1.10+float(i%7)*.12
@@ -2285,13 +2890,7 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
         branch_transforms.append(shrub_transform)
         if i%4==0:light_transforms.append(shrub_transform)
         else:dark_transforms.append(shrub_transform)
-        var collision:=CollisionShape3D.new()
-        var shape:=SphereShape3D.new()
-        shape.radius=maxf(.62,1.02*s)
-        collision.shape=shape
-        collision.position=ground+Vector3(0,.62*s,0)
-        collision_body.add_child(collision)
-        collision_registry.append({"kind":"bush","position":collision.position,"radius":shape.radius,"active":true,"direct_collision":true})
+        collision_registry.append({"kind":"bush","position":ground+Vector3(0,.62*s,0),"radius":maxf(.62,1.02*s),"active":true})
     # Curved, irregular hedges give open fields readable boundaries and
     # mid-sized silhouettes. They intentionally leave gaps rather than acting
     # as invisible walls across travel routes.
@@ -2322,13 +2921,7 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
             branch_transforms.append(shrub_transform)
             if (hedge_index+site_index)%4==0:light_transforms.append(shrub_transform)
             else:dark_transforms.append(shrub_transform)
-            var hedge_collision:=CollisionShape3D.new()
-            var hedge_shape:=SphereShape3D.new()
-            hedge_shape.radius=maxf(.72,1.04*s)
-            hedge_collision.shape=hedge_shape
-            hedge_collision.position=ground+Vector3(0,.66*s,0)
-            collision_body.add_child(hedge_collision)
-            collision_registry.append({"kind":"bush","position":hedge_collision.position,"radius":hedge_shape.radius,"active":true,"direct_collision":true})
+            collision_registry.append({"kind":"bush","position":ground+Vector3(0,.66*s,0),"radius":maxf(.72,1.04*s),"active":true})
     root.set_meta("collision_prop_registry",collision_registry)
     _add_multimesh_batch(root,branch_mesh,branch_transforms,Color(.24,.12,.055,1.0),false)
     _add_multimesh_batch(root,leaf_mesh,dark_transforms,Color(.12,.31,.085,1.0))
@@ -2440,6 +3033,82 @@ func _build_wetland_vegetation(root:Node3D,profile:Dictionary,terrain_result:Dic
     _add_material_multimesh(root,stem_mesh,transforms,stem_material,false,360.0,300.0)
     _add_material_multimesh(root,head_mesh,transforms,head_material,false,390.0,300.0)
     root.set_meta("wetland_cluster_count",transforms.size())
+
+
+func _build_riverbank_ground_detail(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+    # Low alluvial stones and occasional driftwood break up the shoreline at
+    # player height. They are spatially batched and intentionally absent from
+    # bridges and road approaches, so this detail does not cost traversal or
+    # turn the whole bank into an obstacle course.
+    var stone_mesh:=SphereMesh.new()
+    stone_mesh.radius=1.0
+    stone_mesh.height=1.35
+    stone_mesh.radial_segments=7
+    stone_mesh.rings=4
+    var branch_mesh:=CylinderMesh.new()
+    branch_mesh.top_radius=1.0
+    branch_mesh.bottom_radius=.82
+    branch_mesh.height=1.0
+    branch_mesh.radial_segments=7
+    var cool_stones:Array[Transform3D]=[]
+    var warm_stones:Array[Transform3D]=[]
+    var driftwood:Array[Transform3D]=[]
+    var raw_sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var river_sampler:Callable=terrain_result.get("river_height_sampler",terrain_result.height_sampler)
+    var water_lift:float=float(profile.get("river_water_lift",1.35))
+    var bank_drop:float=float(profile.get("river_bank_drop",1.15))
+    var rng:=RandomNumberGenerator.new()
+    rng.seed=740321
+    for river_index in range(profile.get("river_corridors",[]).size()):
+        var river:Dictionary=profile.get("river_corridors",[])[river_index]
+        var points:Array=_subdivide_polyline(river.get("points",[]),1)
+        if points.size()<3:continue
+        var authored_width:=float(river.get("width",48.0))
+        for point_index in range(2,points.size()-2,3):
+            var point:Vector2=points[point_index]
+            var tangent:=_polyline_tangent(points,point_index)
+            if tangent.length_squared()<.001:continue
+            tangent=tangent.normalized()
+            var normal:=Vector2(-tangent.y,tangent.x)
+            var progress:=float(point_index)/maxf(1.0,float(points.size()-1))
+            var half_water:=maxf(8.0,_corridor_width_at(river,progress,authored_width)*.84)*.5
+            for raw_side in [-1.0,1.0]:
+                var side:=float(raw_side)
+                # Leave irregular open reaches. Natural banks form patches;
+                # they do not repeat a prop at every sample on both sides.
+                if (point_index+river_index*5+(0 if side<0.0 else 2))%8 in [0,1]:continue
+                var along_jitter:=rng.randf_range(-6.5,6.5)
+                var bank_offset:=half_water+rng.randf_range(2.1,8.1)
+                var bank_point:=point+normal*bank_offset*side+tangent*along_jitter
+                if _is_near_bridge_site(bank_point,profile.get("ford_sites",[]),62.0):continue
+                if _is_too_close_to_corridors(bank_point,profile.get("road_corridors",[]),4.5):continue
+                if _near_other_river(bank_point,str(river.get("name","River")),profile.get("river_corridors",[])):continue
+                var water_y:float=(river_sampler.call(bank_point.x,bank_point.y) as Vector3).y+water_lift
+                var raw_y:float=(raw_sampler.call(bank_point.x,bank_point.y) as Vector3).y
+                var across:=clampf((bank_offset-half_water)/8.0,0.0,1.0)
+                var bank_y:=lerpf(water_y+bank_drop*.12,clampf(raw_y+.06,water_y+bank_drop*.55,water_y+bank_drop),across)
+                var scale_value:=rng.randf_range(.25,.72)
+                var stone_basis:=Basis.from_euler(Vector3(rng.randf_range(-.10,.10),rng.randf_range(-PI,PI),rng.randf_range(-.10,.10)))
+                stone_basis=stone_basis.scaled(Vector3(scale_value*rng.randf_range(1.15,1.85),scale_value*rng.randf_range(.32,.56),scale_value))
+                var stone_transform:=Transform3D(stone_basis,Vector3(bank_point.x,bank_y+scale_value*.18,bank_point.y))
+                if (point_index+river_index)%3==0:warm_stones.append(stone_transform)
+                else:cool_stones.append(stone_transform)
+                if (point_index+river_index*3)%13==0:
+                    var branch_point:=bank_point+tangent*rng.randf_range(1.0,3.0)
+                    var branch_length:=rng.randf_range(2.2,4.6)
+                    var branch_radius:=rng.randf_range(.09,.16)
+                    var branch_basis:=Basis(Vector3.UP,rng.randf_range(-.35,.35))
+                    branch_basis=branch_basis*Basis(Vector3.RIGHT,PI*.5)
+                    branch_basis=branch_basis.scaled(Vector3(branch_radius,branch_length,branch_radius))
+                    driftwood.append(Transform3D(branch_basis,Vector3(branch_point.x,bank_y+.13,branch_point.y)))
+    var cool_material:=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.66,.65,.60),1.0,.32)
+    var warm_material:=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.68,.57,.43),1.0,.32)
+    var wood_material:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.52,.40,.28),1.0,.55)
+    _add_material_multimesh(root,stone_mesh,cool_stones,cool_material,false,310.0,300.0)
+    _add_material_multimesh(root,stone_mesh,warm_stones,warm_material,false,310.0,300.0)
+    _add_material_multimesh(root,branch_mesh,driftwood,wood_material,false,260.0,300.0)
+    root.set_meta("riverbank_stone_count",cool_stones.size()+warm_stones.size())
+    root.set_meta("riverbank_driftwood_count",driftwood.size())
 
 
 func _build_field_boundaries(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
@@ -2683,8 +3352,7 @@ func _build_forest_composition(root:Node3D,profile:Dictionary,terrain_result:Dic
             var yaw:=rng.randf_range(-PI,PI)
             var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value,scale_value,scale_value))
             deadwood_transforms.append(Transform3D(basis,ground+Vector3.UP*.015))
-            _add_static_collision_box(root,Vector3(4.2,.62,.74)*scale_value,ground+Vector3.UP*.31*scale_value,Vector3(0,yaw,0))
-            collision_registry.append({"kind":"deadwood","position":ground+Vector3.UP*.31*scale_value,"radius":2.1*scale_value,"active":true,"direct_collision":true})
+            collision_registry.append({"kind":"deadwood","position":ground+Vector3.UP*.31*scale_value,"radius":2.1*scale_value,"active":true})
             deadwood_target-=1
 
         # Most blossoms live inside sunlit glades. A smaller number feather
@@ -2937,6 +3605,8 @@ func _build_flower_meadows(root: Node3D, profile: Dictionary, terrain_result: Di
                 continue
             if _is_too_close_to_corridors(point, profile.get("road_corridors", []), 2.0):
                 continue
+            if _is_on_stone_walkway(point,profile):
+                continue
             var ground: Vector3 = raw_sampler.call(point.x, point.y)
             var s := 0.75 + float(i % 4) * 0.12
             var stem_height:=.36+float(i%4)*.045
@@ -2969,7 +3639,7 @@ func _build_flowering_shrubs(root:Node3D,profile:Dictionary,terrain_result:Dicti
         var x:=world_size*(fmod(float(i*173),1361.0)/1361.0-.5)*.86
         var z:=world_size*(fmod(float(i*317),1367.0)/1367.0-.5)*.86
         var point:=Vector2(x,z)
-        if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),48.0) or _is_too_close_to_corridors(point,profile.get("road_corridors",[]),5.0) or _is_near_bridge_site(point,profile.get("ford_sites",[]),76.0):continue
+        if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),48.0) or _is_too_close_to_corridors(point,profile.get("road_corridors",[]),5.0) or _is_near_bridge_site(point,profile.get("ford_sites",[]),76.0) or _is_on_stone_walkway(point,profile):continue
         var ground:Vector3=raw_sampler.call(x,z);var s:=.24+float(i%6)*.045;var yaw:=float(i)*2.39996323
         leaves.append(Transform3D(Basis(Vector3.UP,yaw).scaled(Vector3(s*1.55,s*.72,s*1.35)),ground+Vector3.UP*(s*.72)))
         for blossom in range(3):
@@ -3021,6 +3691,8 @@ func _add_town_markers(root: Node3D, profile: Dictionary, terrain_result: Dictio
 
 
 func _build_river_ribbons(root: Node3D, corridors: Array, terrain_result: Dictionary, profile: Dictionary) -> void:
+    var water_lift:float=float(profile.get("river_water_lift",1.35))
+    var bank_drop:float=float(profile.get("river_bank_drop",1.15))
     for corridor_index in range(corridors.size()):
         var corridor: Dictionary = corridors[corridor_index]
         var controlled: bool = profile.get("controlled_aqueduct", false)
@@ -3042,17 +3714,22 @@ func _build_river_ribbons(root: Node3D, corridors: Array, terrain_result: Dictio
         # Leave a narrow wet shelf rather than the broad brown "coast" that
         # made the river read as a small stream inside an oversized trench.
         var width: float = maxf(8.0, authored_width * 0.84)
+        var width_profile:Array[float]=[]
+        for point_index in range(points.size()):
+            var progress:=float(point_index)/maxf(1.0,float(points.size()-1))
+            width_profile.append(maxf(8.0,_corridor_width_at(corridor,progress,authored_width)*.84))
         var river_sampler: Callable = terrain_result.get("river_height_sampler", terrain_result.height_sampler)
         var mesh: ArrayMesh = _build_corridor_ribbon_mesh(
             points,
             river_sampler,
             width,
             terrain_result.water_level + 0.82,
-            2.35 if controlled else 0.0,
+            water_lift if controlled else 0.0,
             not controlled,
             [],
             false,
-            Callable()
+            Callable(),
+            width_profile
         )
         if mesh == null:
             continue
@@ -3061,71 +3738,159 @@ func _build_river_ribbons(root: Node3D, corridors: Array, terrain_result: Dictio
         river.name = "%s_Water" % corridor.get("name", "River")
         river.mesh = mesh
         river.material_override = _make_water_material()
+        # Transparent river surfaces must never cast a second, detached shape
+        # onto the bed. That shadow made correctly submerged channel terrain
+        # look like empty air beneath a floating blue sheet.
+        river.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
         root.add_child(river)
-        # Keep the support transition local. The former grid-sized strip could
-        # climb tens of metres up a hillside as a visibly different green wall.
-        var grid_step:float=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",320)))
-        var bank_outer:=width*.5+grid_step*1.65+10.0
-        _build_smooth_river_banks(root, points, width, bank_outer, terrain_result, str(corridor.get("name", "River")), corridors)
+        # Only a narrow render-only shoreline remains. The actual terrain now
+        # supplies the full grass bank, so there is no broad duplicate surface
+        # to form a pale polygon band, invisible underside or collision wall.
+        var bank_outer:=width*.5+7.0
+        # Water must reach its receiving lake, but shoreline strips stop at the
+        # lake edge so narrow earth ribbons do not continue across open water.
+        var bank_points:Array=points.duplicate()
+        var bank_width_profile:Array[float]=width_profile.duplicate()
+        var lake_transition_clearance:=bank_outer*.68
+        while bank_points.size()>2 and _point_inside_pond_water(bank_points[0],profile.get("pond_sites",[]),lake_transition_clearance):
+            bank_points.pop_front();bank_width_profile.pop_front()
+        while bank_points.size()>2 and _point_inside_pond_water(bank_points[-1],profile.get("pond_sites",[]),lake_transition_clearance):
+            bank_points.pop_back();bank_width_profile.pop_back()
+        _build_smooth_river_banks(root,bank_points,width,bank_outer,terrain_result,str(corridor.get("name","River")),corridors,bank_width_profile,water_lift,bank_drop)
+    _build_shaped_river_joins(root,corridors,terrain_result,water_lift)
 
 
-func _build_smooth_river_banks(root:Node3D,points:Array,water_width:float,outer_distance:float,terrain_result:Dictionary,river_name:String,all_corridors:Array)->void:
+func _build_shaped_river_joins(root:Node3D,corridors:Array,terrain_result:Dictionary,water_lift:float)->void:
+    var junction_points:Array[Vector2]=[]
+    for corridor_index in range(corridors.size()):
+        var points:Array=corridors[corridor_index].get("points",[])
+        if points.is_empty():continue
+        for endpoint in [Vector2(points[0]),Vector2(points[-1])]:
+            for other_index in range(corridors.size()):
+                if other_index==corridor_index:continue
+                if _distance_to_polyline(endpoint,corridors[other_index].get("points",[]))>3.0:continue
+                var duplicate:=false
+                for existing in junction_points:
+                    if existing.distance_to(endpoint)<8.0:duplicate=true;break
+                if not duplicate:junction_points.append(endpoint)
+                break
+    var sampler:Callable=terrain_result.get("river_height_sampler",terrain_result.height_sampler)
+    for junction_index in range(junction_points.size()):
+        var junction:=junction_points[junction_index]
+        var incidents:Array[Dictionary]=[]
+        for corridor in corridors:
+            var points:Array=corridor.get("points",[])
+            for point_index in range(points.size()):
+                if Vector2(points[point_index]).distance_to(junction)>3.0:continue
+                var progress:=float(point_index)/maxf(1.0,float(points.size()-1))
+                var visible_width:=_corridor_width_at(corridor,progress,48.0)*.84
+                if point_index>0:_append_river_incident(incidents,(Vector2(points[point_index-1])-junction).normalized(),visible_width)
+                if point_index+1<points.size():_append_river_incident(incidents,(Vector2(points[point_index+1])-junction).normalized(),visible_width)
+                break
+        if incidents.size()<2:continue
+        var outline:Array[Vector2]=[]
+        for incident in incidents:
+            var direction:Vector2=incident.direction
+            var half_width:float=float(incident.width)*.5
+            var reach:=maxf(18.0,float(incident.width)*.38)
+            var center:=junction+direction*reach
+            var normal:=Vector2(-direction.y,direction.x)
+            outline.append(center+normal*half_width)
+            outline.append(center-normal*half_width)
+        outline.sort_custom(func(a:Vector2,b:Vector2)->bool:
+            return (a-junction).angle()<(b-junction).angle()
+        )
+        var center3:Vector3=sampler.call(junction.x,junction.y);center3.y+=water_lift+.02
+        var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
+        for outline_index in range(outline.size()):
+            var a2:=outline[outline_index]
+            var b2:=outline[(outline_index+1)%outline.size()]
+            var a3:Vector3=sampler.call(a2.x,a2.y);a3.y+=water_lift+.02
+            var b3:Vector3=sampler.call(b2.x,b2.y);b3.y+=water_lift+.02
+            st.set_uv(Vector2(.5,.5));st.add_vertex(center3)
+            st.set_uv(Vector2(.5+(b2.x-junction.x)/128.0,.5+(b2.y-junction.y)/128.0));st.add_vertex(b3)
+            st.set_uv(Vector2(.5+(a2.x-junction.x)/128.0,.5+(a2.y-junction.y)/128.0));st.add_vertex(a3)
+        st.generate_normals()
+        var join:=MeshInstance3D.new();join.name="RiverJoin_%d"%junction_index
+        join.mesh=st.commit();join.material_override=_make_water_material();join.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+        root.add_child(join)
+
+
+func _append_river_incident(incidents:Array[Dictionary],direction:Vector2,width:float)->void:
+    if direction.length_squared()<.001:return
+    for existing in incidents:
+        if Vector2(existing.direction).dot(direction)>.985:
+            existing.width=maxf(float(existing.width),width)
+            return
+    incidents.append({"direction":direction,"width":width})
+
+
+func _point_inside_pond_water(point:Vector2,ponds:Array,clearance:float=0.0)->bool:
+    for pond in ponds:
+        var center:Vector2=pond.get("position",Vector2.ZERO)
+        var offset:=point-center
+        var angle:=atan2(offset.y,offset.x)
+        var irregularity:=1.0+sin(angle*3.0+center.x*.0017)*.11+sin(angle*7.0+center.y*.0011)*.055
+        var visible_radius:=float(pond.get("radius",70.0))*1.18*irregularity
+        if offset.length()<visible_radius+clearance:return true
+    return false
+
+
+func _build_smooth_river_banks(root:Node3D,points:Array,water_width:float,_outer_distance:float,terrain_result:Dictionary,river_name:String,all_corridors:Array,width_profile:Array[float]=[],water_lift:float=1.35,_bank_drop:float=1.15)->void:
     if points.size()<2:return
     var river_sampler:Callable=terrain_result.get("river_height_sampler",terrain_result.height_sampler)
     var raw_sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
-    var land_sampler:Callable=terrain_result.get("land_surface_sampler",raw_sampler)
-    # Start just outside the water ribbon.  The previous overlap hid the soil
-    # shelf beneath the transparent water and made this edge look green.
-    var inner_distance:=water_width*.5+.12
-    # A compact shelf reads as a natural exposed bank.  A wider strip looked
-    # like a second field laid beside the river when viewed from eye level.
-    var shore_distance:=water_width*.5+8.0
+    # The only added geometry is a compact damp/alluvial contact strip. Grass,
+    # slope and collision all come from TerrainMesh itself.
     for bank_side in [-1.0,1.0]:
         var side:=float(bank_side)
         var inner_vertices:Array[Vector3]=[]
         var shore_vertices:Array[Vector3]=[]
-        var outer_vertices:Array[Vector3]=[]
         for i in range(points.size()):
             var point:Vector2=points[i]
             var tangent:=_polyline_tangent(points,i)
             if tangent.length_squared()<=.0001:continue
             var normal:=Vector2(-tangent.y,tangent.x).normalized()*side
+            var local_water_width:=width_profile[i] if i<width_profile.size() else water_width
+            # Start slightly under the water surface and a fraction inside the
+            # ribbon so transparent water overlaps land by a few centimetres.
+            # This removes the bright/dark seam without widening the river.
+            var inner_distance:=maxf(1.0,local_water_width*.5-.48)
+            # Bank widths breathe gently along the river. A perfectly constant
+            # green/brown ribbon looked manufactured even on a curved channel.
+            var bank_variation:=sin(float(i)*.61+float(river_name.length())*.37)*.72+sin(float(i)*.19+side*1.3)*.38
+            var shore_distance:=local_water_width*.5+5.2+bank_variation*.70
             var inner2:=point+normal*inner_distance
             var shore2:=point+normal*shore_distance
-            var outer2:=point+normal*outer_distance
             var inner_ground:Vector3=river_sampler.call(inner2.x,inner2.y)
             var shore_ground:Vector3=raw_sampler.call(shore2.x,shore2.y)
-            var outer_ground:Vector3=land_sampler.call(outer2.x,outer2.y)
             # The visible water ribbon is authored against the profile water
             # level.  Pinning the first bank row to that same datum closes the
             # occasional gap created by the lower channel-bed sampler.
-            # Controlled rivers are rendered 2.35 m above river_sampler, not
+            # Controlled rivers use the authored lift above river_sampler, not
             # against the profile's global water datum. The old global datum
             # submerged this entire soil strip beneath the graded river and
             # exposed the hidden green terrain support instead.
-            var rendered_water_y:=inner_ground.y+2.35
-            # Begin the soil shelf slightly submerged. This lets the hero wade
-            # at accessible banks and prevents a hard brown wall at the water.
-            var inner_y:=rendered_water_y-.08
-            # Keep the exposed alluvial lip compact; hills begin after it.
-            var shore_y:=clampf(shore_ground.y+.08,rendered_water_y+.14,rendered_water_y+.30)
-            var max_bank_rise:=maxf(2.0,(outer_distance-shore_distance)*.48)
-            var outer_y:=clampf(outer_ground.y+.06,shore_y+.06,shore_y+max_bank_rise)
+            var rendered_water_y:=inner_ground.y+water_lift
+            # Begin the soil shelf slightly submerged. Water overlaps this row
+            # instead of ending beside it, which seals the former river-long
+            # air slit at oblique viewing angles.
+            var inner_y:=rendered_water_y-.035
+            # Track the real terrain within a few centimetres. These meshes
+            # have no collision, so keeping the visual and physical surfaces
+            # coincident prevents sunk feet and removes phantom bank blockers.
+            var shore_y:=maxf(shore_ground.y+.022,rendered_water_y-.024)
             inner_vertices.append(Vector3(inner2.x,inner_y,inner2.y))
             shore_vertices.append(Vector3(shore2.x,shore_y,shore2.y))
-            outer_vertices.append(Vector3(outer2.x,outer_y,outer2.y))
         if inner_vertices.size()<2:continue
         var side_name:="Left" if side<0.0 else "Right"
-        _add_river_bank_strip(root,points,inner_vertices,shore_vertices,river_name,side_name+" Shore",all_corridors,_make_river_bank_material())
-        # The global heightfield is intentionally lowered beneath a complete
-        # grid-diagonal envelope to prevent steep terrain triangles cutting
-        # through water. Reconstruct the authored land here as a separate,
-        # collision-backed turf slope. It begins after the narrow soil shelf,
-        # so it does not become the broad brown coast used by older passes.
-        _add_river_bank_strip(root,points,shore_vertices,outer_vertices,river_name,side_name+" Turf Slope",all_corridors,_make_river_slope_material(),false)
+        # One continuous material crosses water-darkened soil, alluvium and
+        # turf. Noise distorts both transitions and the outer edge fades into
+        # TerrainMesh, so there is no ruler-straight material boundary.
+        _add_river_bank_strip(root,points,inner_vertices,shore_vertices,river_name,side_name+" Natural Shore Blend",all_corridors,_make_river_shore_blend_material())
 
 
-func _add_river_bank_strip(root:Node3D,points:Array,inner_vertices:Array[Vector3],outer_vertices:Array[Vector3],river_name:String,strip_name:String,all_corridors:Array,material:Material,add_collision:bool=true)->void:
+func _add_river_bank_strip(root:Node3D,points:Array,inner_vertices:Array[Vector3],outer_vertices:Array[Vector3],river_name:String,strip_name:String,all_corridors:Array,material:Material,add_collision:bool=false)->void:
     # World-spanning strips defeated frustum culling and submitted every bank
     # triangle while the player could only see a short reach. Local chunks
     # keep bounds useful and retain continuous UV distance along the river.
@@ -3136,8 +3901,12 @@ func _add_river_bank_strip(root:Node3D,points:Array,inner_vertices:Array[Vector3
         var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
         var emitted:=0
         for i in range(chunk_start,chunk_end):
-            var segment_mid:=Vector2(points[i]).lerp(Vector2(points[i+1]),.5)
-            if _near_other_river(segment_mid,river_name,all_corridors):continue
+            # Remove only the part of a bank that actually enters another
+            # channel. The former centerline test removed both sides at once,
+            # leaving large rectangular turf holes at every confluence.
+            var strip_mid3:=(inner_vertices[i]+outer_vertices[i]+inner_vertices[i+1]+outer_vertices[i+1])*.25
+            var strip_mid:=Vector2(strip_mid3.x,strip_mid3.z)
+            if _bank_strip_inside_other_river(strip_mid,river_name,all_corridors):continue
             var uv0:=float(i)/maxf(1.0,float(inner_vertices.size()-1))*18.0
             var uv1:=float(i+1)/maxf(1.0,float(inner_vertices.size()-1))*18.0
             st.set_uv(Vector2(uv0,0));st.add_vertex(inner_vertices[i]-chunk_origin)
@@ -3160,10 +3929,21 @@ func _add_river_bank_strip(root:Node3D,points:Array,inner_vertices:Array[Vector3
         if add_collision:bank.create_trimesh_collision()
 
 
+func _bank_strip_inside_other_river(point:Vector2,current_name:String,corridors:Array)->bool:
+    for other in corridors:
+        if str(other.get("name","River"))==current_name:continue
+        var water_clearance:=float(other.get("width",48.0))*.42+1.2
+        if _distance_to_polyline(point,other.get("points",[]))<water_clearance:return true
+    return false
+
+
 func _near_other_river(point:Vector2,current_name:String,corridors:Array)->bool:
     for other in corridors:
         if str(other.get("name","River"))==current_name:continue
-        var mouth_clearance:=float(other.get("width",48.0))*.58+7.0
+        # Leave a broad shared floodplain at confluences. Narrow per-ribbon
+        # bank strips crossing one another produced brown/green rails through
+        # the water even though the channel beds themselves joined correctly.
+        var mouth_clearance:=float(other.get("width",48.0))*.58+12.0
         if _distance_to_polyline(point,other.get("points",[]))<mouth_clearance:return true
     return false
 
@@ -3216,6 +3996,27 @@ func _build_road_ribbons(root: Node3D, corridors: Array, terrain_result: Diction
             continue
         var bridge_gaps := _road_bridge_gaps(corridor, profile)
         var width: float = corridor.get("width", 26.0) * 0.48
+        var route_class:=str(corridor.get("route_class", "secondary"))
+        # A compacted, slightly wider shoulder grounds the road in the terrain
+        # and removes the hard printed-on edge. It shares every bridge gap and
+        # sits below the travel surface, so routing and collision stay intact.
+        var shoulder_mesh:=_build_corridor_ribbon_mesh(
+            points,
+            road_ground_sampler,
+            width+(2.7 if route_class=="major" else 1.8),
+            0.0,
+            0.075,
+            false,
+            bridge_gaps,
+            true
+        )
+        if shoulder_mesh:
+            var shoulder:=MeshInstance3D.new()
+            shoulder.name="%s Earthen Shoulders"%str(corridor.get("name","Road"))
+            shoulder.mesh=shoulder_mesh
+            shoulder.material_override=_make_road_shoulder_material(route_class)
+            shoulder.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+            root.add_child(shoulder)
         var mesh: ArrayMesh = _build_corridor_ribbon_mesh(
             points,
             road_ground_sampler,
@@ -3230,8 +4031,9 @@ func _build_road_ribbons(root: Node3D, corridors: Array, terrain_result: Diction
             continue
 
         var road: MeshInstance3D = MeshInstance3D.new()
+        road.name = str(corridor.get("name", "Road"))
         road.mesh = mesh
-        road.material_override = _make_road_material()
+        road.material_override = _make_road_material(route_class)
         root.add_child(road)
 
 
@@ -3270,9 +4072,11 @@ func _build_road_junctions(root:Node3D,corridors:Array,terrain_result:Dictionary
                 if not duplicate:candidates.append(point)
     for center in candidates:
         var radius:=7.5
+        var junction_class:="secondary"
         for corridor in corridors:
             if _distance_to_polyline(center,corridor.get("points",[]))<10.0:
                 radius=maxf(radius,float(corridor.get("width",15.0))*.48*.5+3.0)
+                if str(corridor.get("route_class","secondary"))=="major":junction_class="major"
         var segments:=40;var center3:Vector3=road_ground_sampler.call(center.x,center.y);center3.y+=.205
         var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
         for i in range(segments):
@@ -3280,7 +4084,7 @@ func _build_road_junctions(root:Node3D,corridors:Array,terrain_result:Dictionary
             var pa2:=center+Vector2(cos(a),sin(a))*radius;var pb2:=center+Vector2(cos(b),sin(b))*radius
             var pa:Vector3=road_ground_sampler.call(pa2.x,pa2.y);var pb:Vector3=road_ground_sampler.call(pb2.x,pb2.y);pa.y+=.205;pb.y+=.205
             st.set_uv(Vector2(.5,.5));st.add_vertex(center3);st.set_uv(Vector2(.5+cos(b)*.5,.5+sin(b)*.5));st.add_vertex(pb);st.set_uv(Vector2(.5+cos(a)*.5,.5+sin(a)*.5));st.add_vertex(pa)
-        st.generate_normals();var junction:=MeshInstance3D.new();junction.name="RoadJunction";junction.mesh=st.commit();junction.material_override=_make_road_material();root.add_child(junction)
+        st.generate_normals();var junction:=MeshInstance3D.new();junction.name="RoadJunction";junction.mesh=st.commit();junction.material_override=_make_road_material(junction_class);root.add_child(junction)
 
 
 func _build_bridges(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
@@ -3298,8 +4102,6 @@ func _build_bridges(root: Node3D, profile: Dictionary, terrain_result: Dictionar
             var river_points: Array = river.get("points", [])
             if river_points.size() < 2:
                 continue
-            var river_width: float = river.get("width", 52.0)
-
             for road_idx in range(road_points.size() - 1):
                 var ra: Vector2 = road_points[road_idx]
                 var rb: Vector2 = road_points[road_idx + 1]
@@ -3309,6 +4111,12 @@ func _build_bridges(root: Node3D, profile: Dictionary, terrain_result: Dictionar
                     var hit: Variant = _segment_intersection(ra, rb, va, vb)
                     if hit == null:
                         continue
+                    var river_segment:=vb-va
+                    var local_t:=0.5
+                    if river_segment.length_squared()>.0001:
+                        local_t=clampf((Vector2(hit)-va).dot(river_segment)/river_segment.length_squared(),0.0,1.0)
+                    var river_progress:float=(float(river_idx)+local_t)/maxf(1.0,float(river_points.size()-1))
+                    var river_width:=_corridor_width_at(river,river_progress,52.0)
                     _register_bridge_crossing(crossings, hit, rb - ra, road_width, river_width)
 
     # Named crossing sites remain the authoritative fallback when a road and a
@@ -3387,13 +4195,21 @@ func _nearest_corridor_segment(point: Vector2, corridors: Array) -> Dictionary:
             var distance := point.distance_to(a + direction * t)
             if distance < best_distance:
                 best_distance = distance
+                var corridor_progress:float=(float(i)+t)/maxf(1.0,float(points.size()-1))
                 best = {
                     "distance": distance,
                     "direction": direction.normalized(),
-                    "width": float(corridor.get("width", 16.0)),
+                    "width": _corridor_width_at(corridor,corridor_progress,16.0),
                     "closest_point":a+direction*t,
                 }
     return best
+
+
+func _corridor_width_at(corridor:Dictionary,progress:float,fallback:float)->float:
+    var authored_width:=float(corridor.get("width",fallback))
+    var source_width:=float(corridor.get("source_width",authored_width))
+    var mouth_width:=float(corridor.get("mouth_width",authored_width))
+    return lerpf(source_width,mouth_width,clampf(progress,0.0,1.0))
 
 
 func _clear_house_from_roads(point:Vector2,footprint_radius:float,roads:Array)->Vector2:
@@ -3531,6 +4347,7 @@ func _add_town_cluster(root: Node3D, center2: Vector2, center3: Vector3, radius:
 func _build_forests(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
     var forest_regions:Array=profile.get("forest_regions",[])
     var clearing_total:=0
+    var forest_entries:Array[Dictionary]=[]
     for region_index in range(forest_regions.size()):
         var region:Dictionary=forest_regions[region_index]
         var center: Vector2 = region.get("center", Vector2.ZERO)
@@ -3578,7 +4395,15 @@ func _build_forests(root: Node3D, profile: Dictionary, terrain_result: Dictionar
                 "position": pos2,
                 "scale": 0.78 + float(i % 11) * 0.105,
             })
-        _add_forest_batch(root, accepted, terrain_result)
+        # Preserve each region's old local variation while allowing every
+        # region to share the same spatial MultiMesh chunks.
+        for accepted_index in range(accepted.size()):
+            var entry:Dictionary=accepted[accepted_index]
+            entry["yaw"]=float(accepted_index)*2.39996323
+            entry["style"]=accepted_index%5
+            entry["species"]="birch" if accepted_index%8==0 else ("maple" if accepted_index%11==1 else "oak")
+            forest_entries.append(entry)
+    _add_forest_batch(root,forest_entries,terrain_result)
     root.set_meta("forest_clearing_count",clearing_total)
 
 
@@ -3897,8 +4722,8 @@ func _add_forest_batch(root: Node3D, entries: Array, terrain_result: Dictionary)
         tree_ground.append(ground)
         tree_scales.append(scale_factor)
 
-        var yaw := float(i) * 2.39996323
-        var tree_style:=i%5
+        var yaw:float=float(entry.get("yaw",float(i)*2.39996323))
+        var tree_style:int=int(entry.get("style",i%5))
         var stretch:=1.0+float(tree_style-2)*.035
         var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_factor*stretch,scale_factor*(1.0+float(tree_style%2)*.035),scale_factor/stretch))
         var species:=str(entry.get("species",""))
@@ -4017,6 +4842,15 @@ func _find_named_mesh_resource(node:Node,target:String)->Mesh:
     return null
 
 
+func _get_architecture_detail_mesh(mesh_name:String)->Mesh:
+    if _architecture_detail_mesh_cache.has(mesh_name):return _architecture_detail_mesh_cache[mesh_name]
+    var source:=ARCHITECTURE_DETAIL_KIT_SCENE.instantiate()
+    var mesh:=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    _architecture_detail_mesh_cache[mesh_name]=mesh
+    return mesh
+
+
 func _cylinder_between_transform(start:Vector3,finish:Vector3,radius:float)->Transform3D:
     var delta:=finish-start
     var length:=maxf(.01,delta.length())
@@ -4047,7 +4881,7 @@ func _add_bridge(root: Node3D, point: Vector2, road_dir: Vector2, road_width: fl
     root.add_child(bridge_root)
 
     # A single continuous deck grade joins the banks without large steps.
-    var deck_material := _make_material(Color(0.34, 0.235, 0.13, 1.0), 0.98).duplicate() as StandardMaterial3D
+    var deck_material := _make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(0.62, 0.48, 0.31, 1.0),1.0,2.6).duplicate() as StandardMaterial3D
     deck_material.cull_mode = BaseMaterial3D.CULL_DISABLED
     var seam_material := _make_material(Color(0.17, 0.105, 0.055, 1.0), 1.0)
     var deck_mesh := _build_bridge_ramp_mesh(deck_start2, deck_end2, side_normal, deck_width, deck_width, deck_start_y, deck_end_y)
@@ -4061,8 +4895,8 @@ func _add_bridge(root: Node3D, point: Vector2, road_dir: Vector2, road_width: fl
 
     # Visible structure beneath the deck keeps the crossing from reading as a
     # floating ribbon. Long timber stringers carry the span into stone piers.
-    var support_stone := _make_material(Color(0.255, 0.265, 0.25, 1.0), 1.0)
-    var support_timber := _make_material(Color(0.19, 0.115, 0.058, 1.0), 0.99)
+    var support_stone := _make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(0.68, 0.69, 0.65, 1.0),1.0,1.15)
+    var support_timber := _make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(0.43, 0.30, 0.17, 1.0),1.0,2.0)
     var average_deck_y := (deck_start_y + deck_end_y) * 0.5
     for lateral_fraction in [-0.34, 0.0, 0.34]:
         var stringer := MeshInstance3D.new()
@@ -4145,7 +4979,7 @@ func _add_bridge(root: Node3D, point: Vector2, road_dir: Vector2, road_width: fl
         seam.material_override = seam_material
         bridge_root.add_child(seam)
 
-    var rail_material := _make_material(Color(0.22, 0.135, 0.07, 1.0), 0.99)
+    var rail_material := _make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(0.48, 0.33, 0.18, 1.0),1.0,2.0)
     for side in [-1.0, 1.0]:
         for half in [-0.25, 0.25]:
             var along: float = float(half) * span
@@ -4175,7 +5009,7 @@ func _add_bridge(root: Node3D, point: Vector2, road_dir: Vector2, road_width: fl
             post.material_override = rail_material
             bridge_root.add_child(post)
 
-    var stone_material := _make_material(Color(0.29, 0.285, 0.26, 1.0), 1.0)
+    var stone_material := support_stone
     var raw_height_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     for end_sign in [-1.0, 1.0]:
         var end2: Vector2 = point + tangent * (span * 0.5 * float(end_sign))
@@ -4246,7 +5080,38 @@ func _build_bridge_ramp_mesh(inner2: Vector2, outer2: Vector2, side_normal: Vect
     return st.commit()
 
 
-func _build_corridor_ribbon_mesh(points: Array, height_sampler: Callable, width: float, fixed_y: float, y_lift: float, force_flat: bool, exclusion_sites: Array = [], taper_edges: bool = false, edge_height_sampler: Callable = Callable()) -> ArrayMesh:
+func _add_walkable_ramp_collision(ramp:MeshInstance3D,start2:Vector2,end2:Vector2,width:float,start_y:float,end_y:float)->void:
+    # Concave triangle collision is face-direction dependent. Alternating
+    # castle flights therefore worked in one direction and let the hero pass
+    # through the next. A thin oriented box provides one continuous, two-sided
+    # physical slope for both houses and castle stairs.
+    var run2:=end2-start2
+    var run_length:=run2.length()
+    if run_length<.05:return
+    var forward:=Vector3(run2.x,end_y-start_y,run2.y).normalized()
+    var across:=Vector3(-run2.y/run_length,0.0,run2.x/run_length)
+    var normal:=across.cross(forward).normalized()
+    if normal.y<0.0:
+        across=-across
+        normal=-normal
+    var slope_length:=Vector3(run2.x,end_y-start_y,run2.y).length()
+    var thickness:=.24
+    var body:=StaticBody3D.new()
+    body.name="WalkableStairSlopeCollision"
+    body.collision_layer=1
+    body.add_to_group("walkable_building_stair")
+    body.basis=Basis(across,normal,forward)
+    body.position=Vector3((start2.x+end2.x)*.5,(start_y+end_y)*.5,(start2.y+end2.y)*.5)-normal*thickness*.5
+    var collision:=CollisionShape3D.new()
+    collision.name="ContinuousStairSlope"
+    var shape:=BoxShape3D.new()
+    shape.size=Vector3(width,thickness,slope_length)
+    collision.shape=shape
+    body.add_child(collision)
+    ramp.add_child(body)
+
+
+func _build_corridor_ribbon_mesh(points: Array, height_sampler: Callable, width: float, fixed_y: float, y_lift: float, force_flat: bool, exclusion_sites: Array = [], taper_edges: bool = false, edge_height_sampler: Callable = Callable(), width_profile: Array[float] = []) -> ArrayMesh:
     if points.size() < 2:
         return null
 
@@ -4262,8 +5127,9 @@ func _build_corridor_ribbon_mesh(points: Array, height_sampler: Callable, width:
         if tangent.length_squared() <= 0.0001:
             continue
         var normal := Vector2(-tangent.y, tangent.x).normalized()
-        var left2: Vector2 = point + normal * (width * 0.5)
-        var right2: Vector2 = point - normal * (width * 0.5)
+        var local_width:=width_profile[i] if i<width_profile.size() else width
+        var left2: Vector2 = point + normal * (local_width * 0.5)
+        var right2: Vector2 = point - normal * (local_width * 0.5)
 
         var left3: Vector3 = height_sampler.call(left2.x, left2.y)
         var center3: Vector3 = height_sampler.call(point.x, point.y)
@@ -4473,11 +5339,16 @@ func _prepare_corridor_spatial_cache(profile:Dictionary)->void:
         var buckets:Dictionary={}
         for corridor in corridors:
             var points:Array=corridor.get("points",[])
-            var width:=float(corridor.get("width",24.0))
-            var padding:=width*.5+80.0
+            var maximum_width:=maxf(
+                float(corridor.get("source_width",corridor.get("width",24.0))),
+                float(corridor.get("mouth_width",corridor.get("width",24.0)))
+            )
+            var padding:=maximum_width*.5+80.0
             for index in range(points.size()-1):
                 var a:Vector2=points[index]
                 var b:Vector2=points[index+1]
+                var segment_progress:float=(float(index)+.5)/maxf(1.0,float(points.size()-1))
+                var width:=_corridor_width_at(corridor,segment_progress,24.0)
                 var min_bucket:=Vector2i(
                     floori((minf(a.x,b.x)-padding)/CORRIDOR_BUCKET_SIZE),
                     floori((minf(a.y,b.y)-padding)/CORRIDOR_BUCKET_SIZE)
@@ -4530,6 +5401,8 @@ func _tree_overlaps_authored_site(point:Vector2,profile:Dictionary,canopy_radius
     sites.append_array(profile.get("camp_sites",[]))
     var spawn_site:Dictionary=profile.get("spawn_site",{})
     if not spawn_site.is_empty():sites.append(spawn_site)
+    for map_site_value in profile.get("map_sites",[]):
+        if map_site_value is Dictionary and map_site_value.get("usable_ground",false):sites.append(map_site_value)
     for site_value in sites:
         if not site_value is Dictionary:continue
         var site:Dictionary=site_value
@@ -4542,6 +5415,17 @@ func _tree_overlaps_authored_site(point:Vector2,profile:Dictionary,canopy_radius
 
 
 func _is_on_stone_walkway(point:Vector2,profile:Dictionary)->bool:
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if spawn_site.get("starter",false):
+        var spawn_center:Vector2=spawn_site.get("position",Vector2.ZERO)
+        # Keep the authored settlement pad free of procedural bushes, flowers
+        # and grass. Its buildings, crofts and civic green supply intentional
+        # detail; random cover here would poke through floors and obscure roads.
+        if point.distance_to(spawn_center)<=92.0:return true
+    for map_site_value in profile.get("map_sites",[]):
+        if not map_site_value is Dictionary:continue
+        var map_site:Dictionary=map_site_value
+        if map_site.get("usable_ground",false) and point.distance_to(map_site.get("position",Vector2.ZERO))<=float(map_site.get("radius",24.0))+5.0:return true
     for site_value in profile.get("town_sites",[]):
         if not site_value is Dictionary:continue
         var site:Dictionary=site_value
@@ -4601,10 +5485,15 @@ func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float:
     return point.distance_to(a + ab * t)
 
 
-func _make_road_material() -> StandardMaterial3D:
-    if _shared_materials.has("road"):return _shared_materials.road
+func _make_road_material(route_class:String="secondary") -> StandardMaterial3D:
+    var normalized_class:="major" if route_class=="major" else "secondary"
+    var key:="road_"+normalized_class
+    if _shared_materials.has(key):return _shared_materials[key]
     var material := StandardMaterial3D.new()
-    material.albedo_color = Color(0.70, 0.67, 0.62, 1.0)
+    # Major roads are broader, warmer compacted routes. Secondary settlement
+    # spurs retain a darker earth tone so hierarchy reads while moving without
+    # introducing another texture asset or material-heavy detail layer.
+    material.albedo_color = Color(0.84, 0.78, 0.66, 1.0) if normalized_class=="major" else Color(0.63, 0.59, 0.53, 1.0)
     material.albedo_texture = load("res://assets/terrain/medieval_dirt_road_v1.png")
     material.uv1_scale = Vector3.ONE
     material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
@@ -4612,7 +5501,23 @@ func _make_road_material() -> StandardMaterial3D:
     material.cull_mode = BaseMaterial3D.CULL_DISABLED
     material.vertex_color_use_as_albedo = false
     material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-    _shared_materials.road=material
+    _shared_materials[key]=material
+    return material
+
+
+func _make_road_shoulder_material(route_class:String="secondary")->StandardMaterial3D:
+    var normalized_class:="major" if route_class=="major" else "secondary"
+    var key:="road_shoulder_"+normalized_class
+    if _shared_materials.has(key):return _shared_materials[key]
+    var tint:=Color(.74,.67,.54,1.0) if normalized_class=="major" else Color(.58,.54,.45,1.0)
+    var material:=StandardMaterial3D.new()
+    material.albedo_color=tint
+    material.albedo_texture=load("res://assets/terrain/medieval_dirt_road_v1.png")
+    material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+    material.roughness=1.0
+    material.cull_mode=BaseMaterial3D.CULL_DISABLED
+    material.specular_mode=BaseMaterial3D.SPECULAR_DISABLED
+    _shared_materials[key]=material
     return material
 
 
@@ -4735,10 +5640,10 @@ void fragment() {
 
     vec2 distortion = NORMAL.xz * mix(0.003, 0.011, depth_mix);
     vec3 refracted = textureLod(screen_texture, SCREEN_UV + distortion, depth_mix * 0.24).rgb;
-    vec3 shallow_water = vec3(0.018, 0.205, 0.29);
-    vec3 deep_water = vec3(0.004, 0.052, 0.125);
+    vec3 shallow_water = vec3(0.016, 0.105, 0.135);
+    vec3 deep_water = vec3(0.004, 0.028, 0.058);
     vec3 water_tint = mix(shallow_water, deep_water, depth_mix);
-    vec3 transmitted = mix(refracted * vec3(0.52, 0.72, 0.77), water_tint, 0.74 + depth_mix * 0.12);
+    vec3 transmitted = mix(refracted * vec3(0.34, 0.52, 0.55), water_tint, 0.93 + depth_mix * 0.045);
     float caustic_a = sin(world_position.x * 0.092 + world_position.z * 0.138 - TIME * 1.18);
     float caustic_b = sin(world_position.x * -0.127 + world_position.z * 0.104 - TIME * 0.83);
     float caustics = pow(max(0.0, caustic_a * caustic_b), 3.0) * (1.0 - depth_mix);
@@ -4751,16 +5656,22 @@ void fragment() {
     float bank_edge = smoothstep(0.47, 0.50, abs(UV.x - 0.5)) * 0.14;
     float foam_noise = sin(world_position.x * 0.113 + world_position.z * 0.067 - TIME * 0.9) * 0.5 + 0.5;
     float foam = clamp(bank_edge * foam_noise * 0.38, 0.0, 0.38);
-    vec3 reflected_sky = vec3(0.13, 0.34, 0.47);
-    vec3 final_color = mix(transmitted, reflected_sky, fresnel * 0.38 + flow_glint * 0.035);
+    vec3 reflected_sky = vec3(0.075, 0.21, 0.29);
+    vec3 final_color = mix(transmitted, reflected_sky, fresnel * 0.23 + flow_glint * 0.020);
     final_color = mix(final_color, vec3(0.025, 0.12, 0.13), bank_edge * (1.0 - foam) * 0.16);
     final_color = mix(final_color, vec3(0.76, 0.86, 0.84), foam);
 
     ALBEDO = final_color;
-    ROUGHNESS = clamp(0.075 + foam * 0.18 + (small_ripple * 0.5 + 0.5) * 0.035, 0.07, 0.28);
+    ROUGHNESS = clamp(0.14 + foam * 0.18 + (small_ripple * 0.5 + 0.5) * 0.045, 0.13, 0.34);
     METALLIC = 0.0;
-    SPECULAR = 0.92;
-    ALPHA = clamp(0.90 + depth_mix * 0.06 + fresnel * 0.025 + foam * 0.025, 0.90, 0.985);
+    SPECULAR = 0.68;
+    // Fade the liquid into the submerged wet-soil strip over its outer few
+    // metres. The geometry still overlaps, so this soft edge cannot reveal an
+    // air gap even at a low camera angle.
+    float edge_distance = abs(UV.x - 0.5);
+    float shoreline_cover = 1.0 - smoothstep(0.405, 0.50, edge_distance);
+    float shoreline_alpha = mix(0.72, 1.0, shoreline_cover);
+    ALPHA = clamp(0.975 + depth_mix * 0.015 + fresnel * 0.008 + foam * 0.01, 0.975, 0.995) * shoreline_alpha;
 }
 """
     material.shader = shader
@@ -4768,17 +5679,33 @@ void fragment() {
     return material
 
 
-func _make_river_bank_material() -> StandardMaterial3D:
-    if _shared_materials.has("river_bank"):return _shared_materials.river_bank
-    var material := StandardMaterial3D.new()
-    # The project environment has a cool green grade; use a warmer multiplier
-    # so the soil texture still reads brown in the final lit scene.
-    material.albedo_color = Color(.98,.66,.34,1.0)
+func _make_river_wet_bank_material()->StandardMaterial3D:
+    if _shared_materials.has("river_wet_bank"):return _shared_materials.river_wet_bank
+    var material:=StandardMaterial3D.new()
+    material.albedo_color=Color(.72,.71,.63,1.0)
     var texture:=load("res://assets/terrain/woodland_soil_v1.png") as Texture2D
     if texture:material.albedo_texture=texture
     material.uv1_triplanar=true
     material.uv1_world_triplanar=true
-    material.uv1_scale=Vector3(.045,.045,.045)
+    material.uv1_scale=Vector3.ONE*.085
+    material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+    material.roughness=.92
+    material.specular_mode=BaseMaterial3D.SPECULAR_SCHLICK_GGX
+    _shared_materials.river_wet_bank=material
+    return material
+
+
+func _make_river_bank_material() -> StandardMaterial3D:
+    if _shared_materials.has("river_bank"):return _shared_materials.river_bank
+    var material := StandardMaterial3D.new()
+    # This is a compact gravel-and-earth shelf, not a broad red stripe. The
+    # mottled stone texture keeps the edge readable without painting it.
+    material.albedo_color = Color(.67,.60,.49,1.0)
+    var texture:=load("res://assets/terrain/highland_stone_v1.png") as Texture2D
+    if texture:material.albedo_texture=texture
+    material.uv1_triplanar=true
+    material.uv1_world_triplanar=true
+    material.uv1_scale=Vector3(.088,.088,.088)
     material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
     material.roughness = 1.0
     material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
@@ -4786,21 +5713,99 @@ func _make_river_bank_material() -> StandardMaterial3D:
     return material
 
 
-func _make_river_slope_material()->StandardMaterial3D:
+func _make_river_slope_material()->Material:
     if _shared_materials.has("river_slope"):return _shared_materials.river_slope
-    var material:=StandardMaterial3D.new()
-    # This is ordinary turf rising behind the small soil shelf, not more
-    # shoreline.  Keeping it green prevents the bank colour climbing hills.
-    material.albedo_color=Color(.52,.72,.42,1.0)
-    var texture:=load("res://assets/terrain/meadow_soil_realistic_v3.png") as Texture2D
-    if texture:material.albedo_texture=texture
-    material.uv1_triplanar=true
-    material.uv1_world_triplanar=true
-    material.uv1_scale=Vector3.ONE*.052
-    material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-    material.roughness=1.0
-    material.specular_mode=BaseMaterial3D.SPECULAR_DISABLED
+    var material:=ShaderMaterial.new()
+    var shader:=Shader.new()
+    # Match the terrain's grass/soil vocabulary with broad world-space noise.
+    # A constant meadow photograph on this strip was the obvious pale ribbon
+    # that made every riverbank look pasted onto the land.
+    shader.code="""
+shader_type spatial;
+render_mode cull_disabled, specular_disabled;
+
+uniform sampler2D grass_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D soil_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+varying vec3 world_position;
+
+float bank_hash(vec2 p) {
+    p=fract(p*vec2(127.1,311.7));
+    p+=dot(p,p+34.5);
+    return fract(p.x*p.y);
+}
+
+float bank_noise(vec2 p) {
+    vec2 i=floor(p);vec2 f=fract(p);f=f*f*(3.0-2.0*f);
+    return mix(mix(bank_hash(i),bank_hash(i+vec2(1,0)),f.x),mix(bank_hash(i+vec2(0,1)),bank_hash(i+vec2(1,1)),f.x),f.y);
+}
+
+void vertex(){world_position=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;}
+void fragment(){
+    vec2 p=world_position.xz;
+    vec2 uv=p*.085;
+    vec2 rotated=vec2(p.x*.057+p.y*.063,-p.x*.063+p.y*.057)+vec2(7.31,2.17);
+    float broad=bank_noise(p*.014);
+    float clumps=bank_noise(vec2(p.x*.052+p.y*.019,-p.x*.019+p.y*.052)+vec2(19,7));
+    vec3 grass=mix(texture(grass_texture,uv).rgb,texture(grass_texture,rotated).rgb,smoothstep(.22,.78,clumps));
+    vec3 soil=texture(soil_texture,uv*.82+vec2(.17,.31)).rgb;
+    float soil_mix=smoothstep(.70,.94,broad)*.22;
+    vec3 color=mix(grass,soil,soil_mix)*mix(.90,1.06,broad);
+    color*=vec3(.96,.93,.84);
+    ALBEDO=color;ROUGHNESS=.98;
+}
+"""
+    material.shader=shader
+    material.set_shader_parameter("grass_texture",load("res://assets/terrain/meadow_soil_realistic_v3.png"))
+    material.set_shader_parameter("soil_texture",load("res://assets/terrain/woodland_soil_v1.png"))
     _shared_materials.river_slope=material
+    return material
+
+
+func _make_river_shore_blend_material()->ShaderMaterial:
+    if _shared_materials.has("river_shore_blend"):return _shared_materials.river_shore_blend
+    var material:=ShaderMaterial.new()
+    var shader:=Shader.new()
+    shader.code="""
+shader_type spatial;
+render_mode blend_mix, depth_prepass_alpha, cull_disabled, specular_disabled;
+
+uniform sampler2D grass_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D soil_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D stone_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+varying vec3 world_position;
+
+float shore_hash(vec2 p){
+    p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);
+}
+float shore_noise(vec2 p){
+    vec2 i=floor(p);vec2 f=fract(p);f=f*f*(3.0-2.0*f);
+    return mix(mix(shore_hash(i),shore_hash(i+vec2(1,0)),f.x),mix(shore_hash(i+vec2(0,1)),shore_hash(i+vec2(1,1)),f.x),f.y);
+}
+
+void vertex(){world_position=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;}
+void fragment(){
+    vec2 p=world_position.xz;
+    float small_noise=shore_noise(p*.21+vec2(7.0,19.0));
+    float broad_noise=shore_noise(vec2(p.x*.047+p.y*.019,-p.x*.019+p.y*.047)+vec2(31.0,5.0));
+    float warped=clamp(UV.y+(small_noise-.5)*.14+(broad_noise-.5)*.20,0.0,1.0);
+    vec2 uv=p*.085;
+    vec3 soil=texture(soil_texture,uv*.82+vec2(.17,.31)).rgb*vec3(.86,.86,.78);
+    vec3 gravel=texture(stone_texture,uv*.68+vec2(.43,.11)).rgb*vec3(.86,.84,.76);
+    vec3 grass=texture(grass_texture,uv).rgb*vec3(1.0,.99,.94);
+    vec3 wet_soil=soil*mix(vec3(.62,.62,.55),vec3(.76,.71,.58),broad_noise);
+    vec3 color=mix(wet_soil,mix(soil,gravel,.52),smoothstep(.12,.56,warped));
+    color=mix(color,grass,smoothstep(.46,.91,warped));
+    ALBEDO=color;
+    ROUGHNESS=mix(.84,.98,warped);
+    // Reveal the exact underlying terrain over an irregular outer metre.
+    ALPHA=1.0-smoothstep(.73,1.0,warped);
+}
+"""
+    material.shader=shader
+    material.set_shader_parameter("grass_texture",load("res://assets/terrain/meadow_soil_realistic_v3.png"))
+    material.set_shader_parameter("soil_texture",load("res://assets/terrain/woodland_soil_v1.png"))
+    material.set_shader_parameter("stone_texture",load("res://assets/terrain/highland_stone_v1.png"))
+    _shared_materials.river_shore_blend=material
     return material
 
 
@@ -4898,8 +5903,8 @@ func _build_roadside_verge_clusters(root:Node3D,profile:Dictionary,terrain_resul
         var points:Array=_subdivide_polyline(road.get("points",[]),5)
         if points.size()<2:continue
         var road_half_width:=float(road.get("width",15.0))*.48
-        var spacing:=48.0+float((road_index*11)%17)
-        var distance_to_next:=24.0+float((road_index*13)%19)
+        var spacing:=34.0+float((road_index*11)%13)
+        var distance_to_next:=17.0+float((road_index*13)%14)
         var sample_index:=0
         for segment_index in range(points.size()-1):
             var a:Vector2=points[segment_index]
@@ -4927,7 +5932,7 @@ func _build_roadside_verge_clusters(root:Node3D,profile:Dictionary,terrain_resul
                 if clear_of_exclusions:
                     var ground:Vector3=sampler.call(point.x,point.y)
                     if ground.y>float(terrain_result.water_level)+.9:
-                        var scale_value:=.76+float(abs(pattern)%7)*.055
+                        var scale_value:=1.02+float(abs(pattern)%7)*.075
                         var maximum_delta:=0.0
                         for footprint_value in [Vector2(-2.2,0),Vector2(2.2,0),Vector2(0,-1.15),Vector2(0,1.15)]:
                             var footprint:Vector2=footprint_value
@@ -5002,7 +6007,7 @@ func _build_wayfinding_landmarks(root: Node3D, profile: Dictionary, terrain_resu
     root.add_child(signpost)
     _solid_box(signpost, Vector3(0.38, 4.5, 0.38), Vector3(0.0, 2.25, 0.0), timber)
     _solid_box(signpost, Vector3(5.2, 1.55, 0.26), Vector3(0.0, 3.45, 0.30), carved_wood)
-    _add_front_sign_label(signpost, "HIGHFIELD  ↑\nWESTMERE  ←   →  EASTREACH\nSOUTHBANK  ↓", Vector3(0.0, 3.45, 0.445), 34, 0.0075)
+    _add_front_sign_label(signpost, "HIGHFIELD  NORTH\nWESTMERE  WEST   EASTREACH  EAST\nSOUTHBANK / CROWNSPIRE  SOUTH", Vector3(0.0, 3.45, 0.445), 29, 0.0075)
 
 
 func _add_front_sign_label(root: Node3D, text: String, center: Vector3, font_size: int, pixel_size: float) -> void:

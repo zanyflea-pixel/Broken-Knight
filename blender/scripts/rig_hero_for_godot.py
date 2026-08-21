@@ -425,36 +425,41 @@ def make_idle(arm):
 def walk_pose(phase):
     # phase 0/4: contacts, 1/5: down, 2/6: passing, 3/7: up.
     table = [
-        (+27, -25, +10, +34, +16, -24, -28, -38, -0.026),
-        (+21, -18, +18, +42, +12, -20, -32, -35, -0.043),
-        (-2, +5, +45, +15, -7, -4, -39, -31, -0.028),
-        (-22, +24, +36, +8, -20, +12, -34, -39, +0.008),
-        (-25, +27, +34, +10, -24, +16, -38, -28, -0.026),
-        (-18, +21, +42, +18, -20, +12, -35, -32, -0.043),
-        (+5, -2, +15, +45, -4, -7, -31, -39, -0.028),
-        (+24, -22, +8, +36, +12, -20, -39, -34, +0.008),
+        (+25, -25, +7, +8, +18, -22, -28, -34, -0.004),
+        (+18, -17, +16, +22, +13, -17, -31, -32, -0.014),
+        (+2, +3, +44, +10, -4, +4, -36, -28, -0.006),
+        (-20, +20, +30, +8, -20, +18, -31, -35, +0.005),
+        (-25, +25, +8, +7, -22, +18, -34, -28, -0.004),
+        (-17, +18, +22, +16, -17, +13, -32, -31, -0.014),
+        (+3, +2, +10, +44, +4, -4, -28, -36, -0.006),
+        (+20, -20, +8, +30, +18, -20, -35, -31, +0.005),
     ][phase]
     lt, rt, ls, rs, la, ra, lfa, rfa, bob = table
     shift = (-0.010, -0.016, -0.008, 0.008, 0.010, 0.016, 0.008, -0.008)[phase]
-    pelvis_yaw = (-4.5, -3.0, -0.5, 2.7, 4.5, 3.0, 0.5, -2.7)[phase]
-    pelvis_side = (1.8, 2.8, 1.2, -1.2, -1.8, -2.8, -1.2, 1.2)[phase]
-    chest_yaw = -0.78 * pelvis_yaw
-    toe_left = (12.0, 21.0, 11.0, 1.0, 0.0, 0.0, 0.0, 5.0)[phase]
-    toe_right = (0.0, 0.0, 0.0, 5.0, 12.0, 21.0, 11.0, 1.0)[phase]
+    pelvis_yaw = (-4.0, -2.7, -0.4, 2.5, 4.0, 2.7, 0.4, -2.5)[phase]
+    pelvis_side = (1.5, 2.4, 0.9, -1.0, -1.5, -2.4, -0.9, 1.0)[phase]
+    chest_yaw = -0.72 * pelvis_yaw
+    foot_left = (-45.0, -35.0, -12.0, 8.0, 12.0, 5.0, -2.0, -18.0)[phase]
+    foot_right = (12.0, 5.0, -2.0, -18.0, -45.0, -35.0, -12.0, 8.0)[phase]
+    toe_left = (18.0, 24.0, 8.0, 0.0, 0.0, 0.0, 0.0, 8.0)[phase]
+    toe_right = (0.0, 0.0, 0.0, 8.0, 18.0, 24.0, 8.0, 0.0)[phase]
     return {
         # Root bone local Y follows the character's world-up axis.
         "root": {"loc": (0, bob, 0)},
-        "pelvis": {"loc": (shift, 0.0, 0.0), "rot": (3.8, pelvis_yaw, pelvis_side)},
-        "spine": {"rot": (3.0, -0.30 * pelvis_yaw, -0.38 * pelvis_side)},
-        "chest": {"rot": (2.3, chest_yaw, -0.40 * pelvis_side)},
-        "neck": {"rot": (-2.0, -0.16 * chest_yaw, 0.18 * pelvis_side)},
-        "head": {"rot": (-1.7, 0.10 * chest_yaw, -0.14 * pelvis_side)},
+        # A normal walk is almost upright.  The old accumulated pelvis/spine/
+        # chest pitch made the hero look as though he was constantly falling
+        # forward, while the head counter-rotation exaggerated the effect.
+        "pelvis": {"loc": (shift, 0.0, 0.0), "rot": (1.4, pelvis_yaw, pelvis_side)},
+        "spine": {"rot": (1.1, -0.30 * pelvis_yaw, -0.34 * pelvis_side)},
+        "chest": {"rot": (0.6, chest_yaw, -0.34 * pelvis_side)},
+        "neck": {"rot": (-0.7, -0.16 * chest_yaw, 0.16 * pelvis_side)},
+        "head": {"rot": (-0.9, 0.10 * chest_yaw, -0.12 * pelvis_side)},
         "thigh.L": {"rot": (lt, 0.0, 0.0)},
         "thigh.R": {"rot": (rt, 0.0, 0.0)},
         "shin.L": {"rot": (ls, 0.0, 0.0)},
         "shin.R": {"rot": (rs, 0.0, 0.0)},
-        "foot.L": {"rot": (-lt - 0.42 * ls, 0.0, -0.7 + 0.12 * pelvis_side)},
-        "foot.R": {"rot": (-rt - 0.42 * rs, 0.0, 0.7 + 0.12 * pelvis_side)},
+        "foot.L": {"rot": (foot_left, 0.0, -0.6 + 0.10 * pelvis_side)},
+        "foot.R": {"rot": (foot_right, 0.0, 0.6 + 0.10 * pelvis_side)},
         "toe.L": {"rot": (toe_left, 0.0, 0.0)},
         "toe.R": {"rot": (toe_right, 0.0, 0.0)},
         "clavicle.L": {"rot": (0.11 * la, -0.08 * chest_yaw, -0.8)},
@@ -710,11 +715,11 @@ def make_jump(arm):
     arm.animation_data.action = action
     anticipation = {
         "root": {"loc": (0.0, -0.092, -0.018)},
-        "pelvis": {"rot": (11.0, -1.5, -0.5)},
-        "spine": {"rot": (9.0, 1.0, 0.4)},
-        "chest": {"rot": (5.0, 1.0, -0.4)},
-        "neck": {"rot": (-4.0, -0.5, 0.2)},
-        "head": {"rot": (-6.0, -0.8, -0.2)},
+        "pelvis": {"rot": (8.0, -1.5, -0.5)},
+        "spine": {"rot": (5.5, 1.0, 0.4)},
+        "chest": {"rot": (2.5, 1.0, -0.4)},
+        "neck": {"rot": (-2.0, -0.5, 0.2)},
+        "head": {"rot": (-2.5, -0.8, -0.2)},
         "thigh.L": {"rot": (-27.0, 0.0, -2.5)},
         "thigh.R": {"rot": (-25.0, 0.0, 2.5)},
         "shin.L": {"rot": (54.0, 0.0, 0.0)},
@@ -802,11 +807,11 @@ def make_jump(arm):
     descend = dict(apex)
     descend.update({
         "root": {"loc": (0.0, 0.028, 0.064)},
-        "pelvis": {"rot": (7.0, 1.0, 0.3)},
-        "spine": {"rot": (5.0, -1.0, -0.2)},
-        "chest": {"rot": (2.0, -1.0, 0.2)},
-        "neck": {"rot": (-3.0, 0.5, -0.1)},
-        "head": {"rot": (-4.0, 0.8, 0.1)},
+        "pelvis": {"rot": (3.5, 1.0, 0.3)},
+        "spine": {"rot": (2.5, -1.0, -0.2)},
+        "chest": {"rot": (1.0, -1.0, 0.2)},
+        "neck": {"rot": (-1.5, 0.5, -0.1)},
+        "head": {"rot": (-2.0, 0.8, 0.1)},
         "thigh.L": {"rot": (-12.0, 0.0, -2.0)},
         "thigh.R": {"rot": (-15.0, 0.0, 2.0)},
         "shin.L": {"rot": (27.0, 0.0, 0.0)},
@@ -833,9 +838,9 @@ def make_land(arm):
     arm.animation_data.action = action
     impact = {
         "root": {"loc": (0.0, -0.052, 0.022)},
-        "pelvis": {"rot": (8.0, 1.0, 0.3)},
-        "spine": {"rot": (6.0, -1.0, -0.2)},
-        "chest": {"rot": (3.0, -1.0, 0.2)},
+        "pelvis": {"rot": (5.0, 1.0, 0.3)},
+        "spine": {"rot": (3.0, -1.0, -0.2)},
+        "chest": {"rot": (1.5, -1.0, 0.2)},
         "neck": {"rot": (-2.0, 0.5, -0.1)},
         "head": {"rot": (-2.5, 0.8, 0.1)},
         "thigh.L": {"rot": (-15.0, 0.0, -2.2)},
@@ -853,11 +858,11 @@ def make_land(arm):
     compression = dict(impact)
     compression.update({
         "root": {"loc": (0.0, -0.122, 0.0)},
-        "pelvis": {"rot": (14.0, -1.0, -0.4)},
-        "spine": {"rot": (11.0, 1.0, 0.3)},
-        "chest": {"rot": (7.0, 1.0, -0.3)},
-        "neck": {"rot": (-4.0, -0.5, 0.1)},
-        "head": {"rot": (-5.0, -0.8, -0.1)},
+        "pelvis": {"rot": (10.0, -1.0, -0.4)},
+        "spine": {"rot": (7.0, 1.0, 0.3)},
+        "chest": {"rot": (4.0, 1.0, -0.3)},
+        "neck": {"rot": (-3.0, -0.5, 0.1)},
+        "head": {"rot": (-3.5, -0.8, -0.1)},
         "thigh.L": {"rot": (-30.0, 0.0, -2.5)},
         "thigh.R": {"rot": (-27.0, 0.0, 2.5)},
         "shin.L": {"rot": (61.0, 0.0, 0.0)},

@@ -90,7 +90,9 @@ function Invoke-ProjectChecks {
         "verify_hero_visual_animation.gd",
         "verify_hero_glb.gd",
         "verify_royal_weapon_assets.gd",
+        "verify_equipment_fit_parity.gd",
         "verify_admin_combat_modes.gd",
+        "verify_branding.gd",
         "verify_cave_dragon_asset.gd",
         "verify_imp_enemy.gd"
     )) {
@@ -129,9 +131,14 @@ function Save-Checkpoint {
     }
 
     Invoke-Checked git @("add", "--all")
-    $canonicalHeroGlb = "godot/assets/hero/hero_base_body.glb"
-    if (Test-Path -LiteralPath (Join-Path $projectRoot $canonicalHeroGlb) -PathType Leaf) {
-        Invoke-Checked git @("add", "--renormalize", "--", $canonicalHeroGlb)
+    $canonicalHeroGlbs = @(
+        "godot/assets/hero/hero_full_continuous_body.glb",
+        "godot/assets/hero/hero_base_body.glb"
+    )
+    foreach ($canonicalHeroGlb in $canonicalHeroGlbs) {
+        if (Test-Path -LiteralPath (Join-Path $projectRoot $canonicalHeroGlb) -PathType Leaf) {
+            Invoke-Checked git @("add", "--renormalize", "--", $canonicalHeroGlb)
+        }
     }
     $staged = @(& git diff --cached --name-only)
     if ($staged.Count -eq 0) {

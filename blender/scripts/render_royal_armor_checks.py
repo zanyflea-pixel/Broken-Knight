@@ -4,7 +4,10 @@ import bpy
 from mathutils import Vector
 
 ROOT=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
-OUT=os.path.join(ROOT,"blender","previews","royal_armor")
+OUT=os.path.abspath(os.environ.get(
+    "BK_ARMOR_PREVIEW_OUT",
+    os.path.join(ROOT,"blender","previews","royal_armor"),
+))
 os.makedirs(OUT,exist_ok=True)
 scene=bpy.context.scene
 material_check=os.environ.get("BK_ARMOR_MATERIAL_CHECK")=="1"
@@ -47,6 +50,13 @@ floor.data.materials.append(floor_mat)
 bpy.ops.object.camera_add();camera=bpy.context.object;camera.data.lens=70;scene.camera=camera
 arm=bpy.data.objects["HeroRig"]
 staff_check=os.environ.get("BK_STAFF_CHECK")=="1"
+# The canonical source stores equipment hidden because the runtime starts the
+# hero unequipped.  Armor reviews must explicitly reveal it; otherwise this
+# script silently renders only the body and gives a false visual result.
+for obj in scene.objects:
+    if obj.name.startswith("RoyalArmor_"):
+        obj.hide_render=False
+        obj.hide_viewport=False
 if not staff_check:
     for obj in scene.objects:
         if obj.name.startswith("RoyalStaff_"):
@@ -71,11 +81,20 @@ def aim(location,target=(0,0,1.06)):
     camera.rotation_euler=(Vector(target)-camera.location).to_track_quat("-Z","Y").to_euler()
 
 views=(("front",(0,-4.50,1.05)),("threequarter",(3.35,-3.62,1.10)),("side",(4.65,0,1.08)),("back",(0,4.50,1.05)))
+target_override=None
 if material_check:
     views=(("material_front",(0,-4.50,1.05)),("material_threequarter",(3.35,-3.62,1.10)))
 if os.environ.get("BK_ARMOR_CLOSEUP")=="1":
     scene.render.resolution_x=900;scene.render.resolution_y=900
     views=(("material_closeup",(0,-2.45,1.33)),)
+if os.environ.get("BK_ARMOR_HAND_DETAIL")=="1":
+    scene.render.resolution_x=900;scene.render.resolution_y=900
+    views=(("hand_detail",(1.38,-1.55,1.24)),)
+    target_override=(0.57,-0.23,1.12)
+if os.environ.get("BK_ARMOR_FEET_DETAIL")=="1":
+    scene.render.resolution_x=900;scene.render.resolution_y=900
+    views=(("feet_detail",(1.50,-1.85,0.38)),)
+    target_override=(0.18,-0.05,0.23)
 if os.environ.get("BK_ARMOR_BACK_ONLY")=="1":views=(("back",(0,3.4,1.0)),)
 if os.environ.get("BK_ARMOR_SIDE_ONLY")=="1":views=(("side",(3.4,0,1.0)),)
 if os.environ.get("BK_ARMOR_FRONT_ONLY")=="1":views=(("front",(0,-4.2,1.05)),)
@@ -162,7 +181,7 @@ if os.environ.get("BK_SKIN_CHECK")=="1":
 for pose_name,action_name,frame in poses:
     arm.animation_data.action=bpy.data.actions[action_name];scene.frame_set(frame)
     for label,location in views:
-        aim(location,(0,0,1.35) if label=="material_closeup" else (0,0,1.06))
+        aim(location,target_override or ((0,0,1.35) if label=="material_closeup" else (0,0,1.06)))
         suffix=label if pose_name=="idle" else f"{pose_name}_{label}"
         scene.render.filepath=os.path.join(OUT,f"royal_armor_{suffix}.png")
         bpy.ops.render.render(write_still=True)

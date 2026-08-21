@@ -8,9 +8,9 @@ func _init()->void:
 func _run()->void:
     var failures:Array[String]=[]
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     await physics_frame
     var profile:Dictionary=main.get("_active_profile")
     var world_result:Dictionary=main.get("_world_result")

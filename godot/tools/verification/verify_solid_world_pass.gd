@@ -18,17 +18,19 @@ func _shape_hits(world:World3D,position:Vector3,radius:float=.12)->int:
 func _run()->void:
     var failures:Array[String]=[]
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     await physics_frame
     var props:Node3D=main.get_node("WorldRoot/PropsRoot")
     var town:Node3D=main.get_node("WorldRoot/TownRoot")
+    var player:CharacterBody3D=main.get_node("Player")
+    var director:Node=main.get_node("GameplayDirector")
     var bush_body:=props.get_node_or_null("BushCollision") as StaticBody3D
     var rock_body:=props.get_node_or_null("MineableRockCollision") as StaticBody3D
     var detail_body:=town.get_node_or_null("TownDetailCollision") as StaticBody3D
-    if bush_body==null or bush_body.get_child_count()<1000:failures.append("permanent bush collision body missing")
-    if rock_body==null or rock_body.get_child_count()<500:failures.append("permanent rock collision body missing")
+    if bush_body!=null:failures.append("redundant permanent bush collision body remains")
+    if rock_body!=null:failures.append("redundant permanent rock collision body remains")
     if detail_body==null or int(detail_body.get_meta("detail_shape_count",0))<100:failures.append("town visual detail collision missing")
     var bush_registry:Array=props.get_meta("collision_prop_registry",[])
     var bush:Dictionary={}
@@ -36,9 +38,21 @@ func _run()->void:
         if prop.get("kind","")=="bush":
             bush=prop
             break
-    if bush.is_empty() or _shape_hits(main.get_world_3d(),bush.position)<1:failures.append("bush physics query passed through")
+    if bush.is_empty():
+        failures.append("bush collision registry missing")
+    else:
+        player.global_position=bush.position
+        director.call("_refresh_local_prop_collisions",true)
+        await physics_frame
+        if _shape_hits(main.get_world_3d(),bush.position)<1:failures.append("streamed bush physics query passed through")
     var rock_registry:Array=props.get_meta("mineable_rock_registry",[])
-    if rock_registry.is_empty() or _shape_hits(main.get_world_3d(),rock_registry[0].position)<1:failures.append("ore rock physics query passed through")
+    if rock_registry.is_empty():
+        failures.append("ore rock registry missing")
+    else:
+        player.global_position=rock_registry[0].position
+        director.call("_refresh_local_prop_collisions",true)
+        await physics_frame
+        if _shape_hits(main.get_world_3d(),rock_registry[0].position)<1:failures.append("streamed ore rock physics query passed through")
     var ore_families:Dictionary={}
     for rock in rock_registry:ore_families[str(rock.get("ore_id",""))]=true
     if ore_families.size()!=4:failures.append("four distinct ore-rock families were not built")
@@ -51,8 +65,8 @@ func _run()->void:
     var lamp_ground:Vector3=main.get("_world_result").terrain_height_sampler.call(lamp_point.x,lamp_point.y)
     if _shape_hits(main.get_world_3d(),lamp_ground+Vector3.UP*1.8)<1:failures.append("capital boulevard lamp remained non-solid")
     print("SOLID_WORLD|bush_shapes=%d|rock_shapes=%d|ore_families=%d|town_detail_shapes=%d|failures=%d"%[
-        bush_body.get_child_count() if bush_body else 0,
-        rock_body.get_child_count() if rock_body else 0,
+        0 if bush_body==null else bush_body.get_child_count(),
+        0 if rock_body==null else rock_body.get_child_count(),
         ore_families.size(),
         int(detail_body.get_meta("detail_shape_count",0)) if detail_body else 0,
         failures.size(),

@@ -8,7 +8,10 @@ from mathutils import Vector
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-RIGGED = os.path.join(ROOT, "blender", "BrokenKnight_Hero_Master.blend")
+RIGGED = os.path.abspath(os.environ.get(
+    "BK_ARMOR_OUTPUT_BLEND",
+    os.path.join(ROOT, "blender", "BrokenKnight_Hero_Master.blend"),
+))
 PREFIX = "RoyalArmor_"
 
 
@@ -1834,7 +1837,7 @@ def add_apex_arms(arm, steel, cobalt, bright, dark, brass, mail, leather):
 
         fitted_body_piece_by_group(
             "hands",f"ApexGauntlet{suffix}",steel,(hand,),
-            .730,.925,outward=.012,thickness=.004,minimum_weight=.150,
+            1.055,1.235,outward=.012,thickness=.004,minimum_weight=.080,
         )
         # The fitted gauntlet is the backhand plate.  Separate bordered panels
         # and bead-like knuckles became detached spikes in flexed walk poses.

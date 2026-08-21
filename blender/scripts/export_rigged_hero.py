@@ -20,11 +20,18 @@ for action in list(bpy.data.actions):
         bpy.data.actions.remove(action, do_unlink=True)
 
 flat_colors = {
-    "Skin": (0.48, 0.29, 0.20, 1),
+    "Skin": (0.42, 0.215, 0.140, 1),
     "HairBrown": (0.055, 0.020, 0.009, 1),
     "PlainLoincloth": (0.22, 0.105, 0.050, 1),
     "LoinCord": (0.105, 0.040, 0.014, 1),
     "BodyHairBrown": (0.032, 0.012, 0.006, 1),
+    "HeroSkin.ProfessionalWIP": (0.43, 0.245, 0.165, 1),
+    "HeroSkin.ProfessionalNeckBlend": (0.43, 0.245, 0.165, 1),
+    "HeroHair.ProfessionalWIP": (0.030, 0.010, 0.004, 1),
+    "HeroBrows.ProfessionalWIP": (0.020, 0.006, 0.002, 1),
+    "EyeSclera.ProfessionalWIP": (0.58, 0.52, 0.44, 1),
+    "Iris.ProfessionalWIP": (0.055, 0.028, 0.010, 1),
+    "Pupil.ProfessionalWIP": (0.002, 0.001, 0.0005, 1),
 }
 
 for material in bpy.data.materials:
@@ -33,6 +40,10 @@ for material in bpy.data.materials:
     # Preserve the authored cobalt engraving maps; flattening this material
     # erased the filigree, normal relief, and roughness variation in Godot.
     if material.name == "Royal Cobalt Filigree Plate":
+        continue
+    # Keep the project-owned skin micro-albedo embedded in the GLB. Other
+    # materials remain flattened for predictable Godot import.
+    if material.name == "HeroSkin.ProfessionalWIP":
         continue
     base = flat_colors.get(material.name, tuple(material.diffuse_color))
     nodes = material.node_tree.nodes
@@ -62,6 +73,14 @@ for modifier in body.modifiers:
     if modifier.type == "SUBSURF":
         modifier.levels = 1
         modifier.render_levels = 1
+bpy.ops.object.mode_set(mode="OBJECT") if bpy.context.object and bpy.context.object.mode != "OBJECT" else None
+for obj in list(bpy.context.scene.objects):
+    if obj.type != "CURVE":
+        continue
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.convert(target="MESH")
+    obj.select_set(False)
 bpy.ops.object.select_all(action="DESELECT")
 for obj in bpy.context.scene.objects:
     if obj.type in {"MESH", "ARMATURE"}:

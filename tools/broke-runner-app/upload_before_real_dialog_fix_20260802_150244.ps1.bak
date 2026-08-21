@@ -1,0 +1,357 @@
+param(
+    [string]$ProjectRoot = "C:\Users\Jimmy\Desktop\Broken Knight",
+    [string]$VideoPath = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+$OutputDir=Join-Path $ProjectRoot "Powershell output"
+$TestFile=Join-Path $OutputDir "test.txt"
+$LogFile=Join-Path $OutputDir "ai-runner.log"
+
+function Report([string]$m){Add-Content -LiteralPath $TestFile -Value $m -Encoding UTF8}
+function Log([string]$m){Add-Content -LiteralPath $LogFile -Value ("{0} | {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),$m) -Encoding UTF8}
+
+if(-not(Test-Path -LiteralPath $VideoPath -PathType Leaf)){
+    Report "UPLOAD_RESULT: FAILED - AVI missing"
+    exit 3
+}
+
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class BKForegroundV4 {
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+
+function Desc($root){
+    return $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+}
+function ById($root,[string]$id){
+    $c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c)
+}
+function Chat(){
+    foreach($p in @(Get-Process firefox -ErrorAction SilentlyContinue|Where-Object{$_.MainWindowHandle -ne 0})){
+        try{
+            $root=[System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+            $url=ById $root "urlbar-input"
+            if($url -and ([string]$url.Current.Name -match '^https://chatgpt\.com/')){
+                return [pscustomobject]@{Process=$p;Root=$root}
+            }
+        }catch{}
+    }
+    return $null
+}
+function Find-Dialog(){
+    $desktop=[System.Windows.Automation.AutomationElement]::RootElement
+    foreach($w in $desktop.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)){
+        try{
+            if($w.Current.IsOffscreen){continue}
+            if(ById $w "1148"){return $w}
+        }catch{}
+    }
+    return $null
+}
+function Wait-Dialog([int]$ms){
+    for($i=0;$i-lt[Math]::Ceiling($ms/150.0);$i++){
+        Start-Sleep -Milliseconds 150
+        $d=Find-Dialog
+        if($d){return $d}
+    }
+    return $null
+}
+function Wait-Closed([int]$ms){
+    for($i=0;$i-lt[Math]::Ceiling($ms/150.0);$i++){
+        Start-Sleep -Milliseconds 150
+        if(-not(Find-Dialog)){return $true}
+    }
+    return $false
+}
+function Get-Value($e){
+    try{
+        $vp=$null
+        if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$vp)){
+            return [string]([System.Windows.Automation.ValuePattern]$vp).Current.Value
+        }
+    }catch{}
+    return ""
+}
+function Writable($e){
+    try{
+        $vp=$null
+        if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$vp)){
+            return -not([System.Windows.Automation.ValuePattern]$vp).Current.IsReadOnly
+        }
+    }catch{}
+    return $false
+}
+function Set-Value($e,[string]$v){
+    try{
+        $vp=$null
+        if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$vp)){
+            $p=[System.Windows.Automation.ValuePattern]$vp
+            if(-not$p.Current.IsReadOnly){
+                $p.SetValue($v)
+                Start-Sleep -Milliseconds 150
+                return $true
+            }
+        }
+    }catch{}
+    return $false
+}
+function Open-Button($dialog){
+    $b=ById $dialog "1"
+    if($b){return $b}
+    foreach($e in (Desc $dialog)){
+        try{
+            if([string]$e.Current.ControlType.ProgrammaticName -match 'Button$' -and [string]$e.Current.Name -match '^(Open|Choose|Select)$'){
+                return $e
+            }
+        }catch{}
+    }
+    return $null
+}
+function Candidate-Fields($dialog,$open){
+    $candidates=@()
+    $openRect=$null
+    try{$openRect=$open.Current.BoundingRectangle}catch{}
+
+    foreach($e in (Desc $dialog)){
+        try{
+            if($e.Current.IsOffscreen){continue}
+            $type=[string]$e.Current.ControlType.ProgrammaticName
+            if($type -notmatch '(Edit|ComboBox)$'){continue}
+
+            $r=$e.Current.BoundingRectangle
+            if($r.Width -le 20 -or $r.Height -le 10){continue}
+
+            $score=0
+            $aid=[string]$e.Current.AutomationId
+            $name=[string]$e.Current.Name
+
+            if($aid -eq "1148"){$score+=900}
+            if($name -match '(?i)file.*name|name.*file'){$score+=700}
+            if($type -match 'Edit$'){$score+=200}
+            if(Writable $e){$score+=400}
+            if($e.Current.IsKeyboardFocusable){$score+=100}
+
+            # Strong geometric preference: filename field sits on the same bottom row as Open.
+            if($openRect){
+                $dy=[Math]::Abs(($r.Y+$r.Height/2)-($openRect.Y+$openRect.Height/2))
+                if($dy -lt 25){$score+=700}
+                elseif($dy -lt 60){$score+=350}
+                if($r.X -lt $openRect.X){$score+=150}
+            }
+
+            # Penalize obvious search/location boxes.
+            if($name -match '(?i)search|address|location'){$score-=1000}
+
+            $candidates += [pscustomobject]@{
+                Element=$e
+                Score=$score
+                Name=$name
+                Aid=$aid
+                Type=$type
+                X=[int]$r.X
+                Y=[int]$r.Y
+                W=[int]$r.Width
+                H=[int]$r.Height
+            }
+        }catch{}
+    }
+
+    return @($candidates|Sort-Object Score -Descending)
+}
+function Dump-Dialog($dialog,$open,$fields){
+    Report "UPLOAD_DIAGNOSTIC: dialog=$($dialog.Current.Name) class=$($dialog.Current.ClassName) hwnd=$($dialog.Current.NativeWindowHandle)"
+    if($open){
+        Report "UPLOAD_DIAGNOSTIC_OPEN: name=$($open.Current.Name) aid=$($open.Current.AutomationId) type=$($open.Current.ControlType.ProgrammaticName)"
+    }else{
+        Report "UPLOAD_DIAGNOSTIC_OPEN: NOT FOUND"
+    }
+
+    $i=0
+    foreach($f in ($fields|Select-Object -First 12)){
+        Report ("UPLOAD_DIAGNOSTIC_FIELD_{0}: score={1} type={2} name={3} aid={4} rect={5},{6},{7},{8} value={9}" -f
+            $i,$f.Score,$f.Type,$f.Name,$f.Aid,$f.X,$f.Y,$f.W,$f.H,(Get-Value $f.Element))
+        $i++
+    }
+}
+function Activate-Open($open){
+    if(-not$open){return $false}
+    try{
+        $inv=$null
+        if($open.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$inv)){
+            ([System.Windows.Automation.InvokePattern]$inv).Invoke()
+            return $true
+        }
+    }catch{}
+    try{
+        $open.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+        return $true
+    }catch{}
+    return $false
+}
+function Verify-Chat([string]$basename,[int]$seconds){
+    for($i=0;$i-lt($seconds*4);$i++){
+        Start-Sleep -Milliseconds 250
+        $c=Chat
+        if(-not$c){continue}
+        foreach($e in (Desc $c.Root)){
+            try{
+                $n=[string]$e.Current.Name
+                if($n -like "*$basename*"){return "ATTACHED"}
+                if($n -match '(?i)(unsupported|failed to upload|upload failed|file type)'){
+                    Report "UPLOAD_CHATGPT_MESSAGE: $n"
+                }
+            }catch{}
+        }
+    }
+    return "NOT_VERIFIED"
+}
+
+$chat=Chat
+if(-not$chat){
+    Report "UPLOAD_RESULT: FAILED - ChatGPT Firefox tab not found"
+    exit 4
+}
+
+$ws=New-Object -ComObject WScript.Shell
+[void]$ws.AppActivate($chat.Process.Id)
+Start-Sleep -Milliseconds 400
+
+$chat=Chat
+$plus=ById $chat.Root "composer-plus-btn"
+if(-not$plus){
+    Report "UPLOAD_RESULT: FAILED - composer plus button not found"
+    exit 5
+}
+
+$plus.SetFocus()
+[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+Start-Sleep -Milliseconds 400
+[System.Windows.Forms.SendKeys]::SendWait("{HOME}")
+Start-Sleep -Milliseconds 100
+[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+
+$dialog=Wait-Dialog 1800
+if(-not$dialog){
+    [System.Windows.Forms.SendKeys]::SendWait("{HOME}")
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    $dialog=Wait-Dialog 2200
+}
+if(-not$dialog){
+    Report "UPLOAD_RESULT: FAILED - Windows file chooser did not appear"
+    exit 10
+}
+
+Report "UPLOAD_FILE_CHOOSER: FOUND"
+
+$open=Open-Button $dialog
+$fields=Candidate-Fields $dialog $open
+Dump-Dialog $dialog $open $fields
+
+$basename=[IO.Path]::GetFileName($VideoPath)
+$inserted=$false
+
+foreach($f in $fields){
+    $e=$f.Element
+
+    # Try ValuePattern on the strongest candidate first.
+    if(Set-Value $e $VideoPath){
+        $v=Get-Value $e
+        Report "UPLOAD_FIELD_ATTEMPT: method=ValuePattern score=$($f.Score) readback=$v"
+        if($v -eq $VideoPath -or $v -like "*$basename*"){
+            $inserted=$true
+            break
+        }
+    }
+
+    # Focus/paste into the exact field.
+    try{
+        [System.Windows.Forms.Clipboard]::SetText($VideoPath)
+        $e.SetFocus()
+        Start-Sleep -Milliseconds 120
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        Start-Sleep -Milliseconds 60
+        [System.Windows.Forms.SendKeys]::SendWait("^v")
+        Start-Sleep -Milliseconds 180
+        $v=Get-Value $e
+        Report "UPLOAD_FIELD_ATTEMPT: method=Paste score=$($f.Score) readback=$v"
+        if($v -eq $VideoPath -or $v -like "*$basename*"){
+            $inserted=$true
+            break
+        }
+    }catch{}
+}
+
+# Final bounded keyboard fallback. We still record whether any field then contains the basename.
+if(-not$inserted){
+    try{
+        $hwnd=[IntPtr]([int64]$dialog.Current.NativeWindowHandle)
+        if($hwnd -ne [IntPtr]::Zero){[void][BKForegroundV4]::SetForegroundWindow($hwnd)}
+        [System.Windows.Forms.Clipboard]::SetText($VideoPath)
+        [System.Windows.Forms.SendKeys]::SendWait("%n")
+        Start-Sleep -Milliseconds 150
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        [System.Windows.Forms.SendKeys]::SendWait("^v")
+        Start-Sleep -Milliseconds 180
+
+        foreach($f in (Candidate-Fields $dialog $open)){
+            $v=Get-Value $f.Element
+            Report "UPLOAD_ALT_N_READBACK: score=$($f.Score) value=$v"
+            if($v -eq $VideoPath -or $v -like "*$basename*"){
+                $inserted=$true
+                break
+            }
+        }
+    }catch{}
+}
+
+if(-not$inserted){
+    Report "UPLOAD_RESULT: FAILED - path was not verified in any filename field"
+    exit 11
+}
+
+Report "UPLOAD_PATH_VERIFIED: $VideoPath"
+
+if(-not(Activate-Open $open)){
+    try{
+        [System.Windows.Forms.SendKeys]::SendWait("%o")
+    }catch{}
+}
+
+if(-not(Wait-Closed 3500)){
+    # Sometimes Enter is required after the path is verified.
+    try{[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")}catch{}
+    if(-not(Wait-Closed 1800)){
+        Report "UPLOAD_RESULT: FAILED - chooser stayed open after verified path and Open"
+        exit 12
+    }
+}
+
+Report "UPLOAD_SUBMITTED: $VideoPath"
+Log "APP_UPLOAD_SUBMITTED|$VideoPath"
+
+Start-Sleep -Seconds 1
+[void]$ws.AppActivate($chat.Process.Id)
+
+$verification=Verify-Chat $basename 12
+if($verification -eq "ATTACHED"){
+    Report "UPLOAD_VERIFIED: $basename"
+    Report "UPLOAD_RESULT: SUCCESS"
+    Log "APP_UPLOAD_VERIFIED|$VideoPath"
+    exit 0
+}
+
+Report "UPLOAD_RESULT: SUBMITTED_UNVERIFIED"
+Log "APP_UPLOAD_SUBMITTED_UNVERIFIED|$VideoPath"
+exit 0

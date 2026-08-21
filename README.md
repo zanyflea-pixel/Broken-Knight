@@ -7,18 +7,24 @@ the only playable build; the former browser prototype has been retired.
 
 ## Start
 
-- Project command center: `project.bat help`
+Read `START-HERE.md` first.
+
+Daily entry points:
+
+- Play the game: `play-godot-world.bat`
+- Open the Godot editor: `start-godot.ps1`
+- Open the canonical hero Blender file: `open-hero-blender.bat`
+
+Workflow guides:
+
 - World editing guide: `WORLD-BUILD-START-HERE.md`
 - World command: `world.bat` (`check`, `play`, `import`, `clean`, `perf`, `trees`, `grass`, `outcrops`, `verges`)
 - World performance and cache notes: `docs/world/PERFORMANCE.md`
-- Play: `play-godot-world.bat`
-- Open the Godot editor: `start-godot.ps1`
-- Open the current hero source: `open-hero-blender.bat`
-- Export the current hero to Godot: `export-hero-blender.bat`
 - Godot editing map: `godot/EDITING-GUIDE.md`
 - Blender file map: `blender/FILE-INDEX.md`
 - Hero animation list: `blender/ANIMATIONS.md`
 - Git and GitHub workflow: `docs/GITHUB-WORKFLOW.md`
+- Project command center: `project.bat help`
 
 ## Project layout
 

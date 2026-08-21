@@ -15,9 +15,13 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Broken Knight"
-run/main_scene="res://scenes/Main.tscn"
+run/main_scene="res://scenes/Boot.tscn"
 config/features=PackedStringArray("4.7")
-config/icon="res://assets/ui/broken_knight_icon.svg"
+boot_splash/bg_color=Color(0.004, 0.008, 0.014, 1)
+boot_splash/image="res://assets/branding/broken_knight_splash_v1.png"
+boot_splash/fullsize=false
+boot_splash/use_filter=true
+config/icon="res://assets/branding/broken_knight_icon_master_v1.png"
 
 [display]
 
@@ -25,6 +29,7 @@ window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/vsync/vsync_mode=0
 
 [rendering]
 

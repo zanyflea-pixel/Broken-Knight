@@ -120,6 +120,28 @@ def prism(name, outline, front_y, back_y, mat, parent, bevel=0.003):
     return mesh_object(name, vertices, faces, (mat,), bevel=bevel, parent=parent)
 
 
+def shield_surface_y(x, z):
+    """Approximate the authored heater crown at a point on its front field."""
+    radial = min(1.0, ((x / .33) ** 2 + ((z - .075) / .45) ** 2) ** .5)
+    return -.094 + .028 * radial
+
+
+def conforming_shield_relief(name, outline, mat, parent):
+    """Build a shallow crest that follows and intersects the shield field."""
+    count = len(outline)
+    front = [(x, shield_surface_y(x, z) - .0025, z) for x, z in outline]
+    # The rear face sits 0.8 mm inside the steel field.  That intentional
+    # overlap makes the repoussé read as one piece of armor and removes the
+    # coplanar faces that shimmered in Godot.
+    back = [(x, shield_surface_y(x, z) + .0008, z) for x, z in outline]
+    vertices = front + back
+    faces = [tuple(range(count)), tuple(range(count * 2 - 1, count - 1, -1))]
+    for index in range(count):
+        nxt = (index + 1) % count
+        faces.append((index, nxt, nxt + count, index + count))
+    return mesh_object(name, vertices, faces, (mat,), bevel=.0012, parent=parent)
+
+
 def build_blade(parent, steel, edge, cobalt):
     # Four-sided diamond sections create a continuous rigid blade with a real
     # medial ridge.  The blue fuller is assigned to faces of this same mesh.
@@ -259,8 +281,8 @@ def build_shield(materials):
         (-.060, .160), (0, .270), (.060, .160), (.120, .205),
         (.105, .125), (.145, .125), (.145, .235),
     ]
-    crest = prism("FlushRealmCrest", crest_outline, -.099, -.093, brass, root, .002)
-    crest["relief_depth_m"] = .006
+    crest = conforming_shield_relief("FlushRealmCrest", crest_outline, brass, root)
+    crest["relief_depth_m"] = .0033
     sphere("RoyalShield_SeatedBoss", (0, -.103, .040), (.074, .025, .074), edge, root, 36, 20)
     sphere("RoyalShield_BossCabochon", (0, -.130, .040), (.026, .008, .026), cobalt, root, 24, 14)
     for side in (-1, 1):
@@ -356,10 +378,10 @@ def render_preview(sword, shield, dark):
 
 
 clear_scene()
-steel = material("Vanguard Forged Steel", (.105, .135, .175, 1), .94, .29)
-edge = material("Vanguard Planished Edge", (.340, .390, .465, 1), .96, .23)
-cobalt = material("Vanguard Cobalt Enamel", (.018, .070, .210, 1), .72, .28)
-brass = material("Vanguard Gilt Brass", (.530, .270, .045, 1), .90, .28)
+steel = material("Vanguard Forged Steel", (.105, .135, .175, 1), .94, .38)
+edge = material("Vanguard Planished Edge", (.340, .390, .465, 1), .96, .36)
+cobalt = material("Vanguard Cobalt Enamel", (.018, .070, .210, 1), .72, .46)
+brass = material("Vanguard Gilt Brass", (.530, .270, .045, 1), .90, .48)
 leather = material("Vanguard Oxblood Leather", (.105, .025, .018, 1), .04, .76)
 dark = material("Vanguard Blackened Backing", (.010, .015, .024, 1), .82, .46)
 materials = (steel, edge, cobalt, brass, leather, dark)

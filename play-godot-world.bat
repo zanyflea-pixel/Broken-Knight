@@ -18,5 +18,5 @@ if not exist "%PROJECT%\project.godot" (
   exit /b 1
 )
 
-start "" "%GODOT%" --path "%PROJECT%" --scene "res://scenes/Main.tscn" --single-window
+start "" "%GODOT%" --path "%PROJECT%" --scene "res://scenes/Boot.tscn" --single-window
 endlocal

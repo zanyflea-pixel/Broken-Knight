@@ -31,7 +31,8 @@ function Test-WorldProfile {
 
 function Invoke-GodotCheck([string]$Script) {
     Write-Output "RUN|$Script"
-    & $godotConsole --headless --path $godotProject --script "res://tools/verification/$Script"
+    $resourcePath = if ($Script.StartsWith("res://")) { $Script } else { "res://tools/verification/$Script" }
+    & $godotConsole --headless --path $godotProject --script $resourcePath
     if ($LASTEXITCODE -ne 0) {
         throw "World verification failed: $Script"
     }
@@ -43,9 +44,16 @@ switch ($Action) {
         Test-WorldProfile
         foreach ($script in @(
             "verify_world_gameplay_pass.gd",
+            "verify_starter_region.gd",
             "verify_world_map_pass.gd",
             "verify_surface_collision_pass.gd",
             "verify_river_spatial_cache.gd",
+            "verify_river_cohesion.gd",
+            "res://tools/diagnostics/audit_watershed_integrity.gd",
+            "verify_bridge_placement.gd",
+            "verify_road_hierarchy.gd",
+            "verify_town_travel_logic.gd",
+            "verify_terrain_integrity.gd",
             "verify_castle_tree_pass.gd",
             "verify_highland_outcrop_pass.gd",
             "verify_roadside_verge_pass.gd",
@@ -121,5 +129,13 @@ switch ($Action) {
         Assert-File $godotConsole
         & $godotConsole --path $godotProject --rendering-method gl_compatibility --resolution 960x540 --script "res://tools/performance/benchmark_world_runtime.gd"
         if ($LASTEXITCODE -ne 0) { throw "World runtime benchmark failed." }
+        # The render benchmark moves the hero by assignment, so it cannot catch
+        # movement sampling, collision, or minimap rebuild hitches. Keep a real
+        # input-driven traversal budget beside it for every visual world pass.
+        & $godotConsole --path $godotProject --script "res://tools/performance/benchmark_actual_walking.gd"
+        if ($LASTEXITCODE -ne 0) { throw "Actual walking performance budget failed." }
+
+        & $godotConsole --path $godotProject --script "res://tools/performance/benchmark_desktop_walking.gd"
+        if ($LASTEXITCODE -ne 0) { throw "Desktop walking performance budget failed." }
     }
 }

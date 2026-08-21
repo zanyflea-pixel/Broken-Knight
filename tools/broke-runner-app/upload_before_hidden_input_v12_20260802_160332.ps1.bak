@@ -1,0 +1,605 @@
+param(
+    [string]$ProjectRoot = "C:\Users\Jimmy\Desktop\Broken Knight",
+    [string]$VideoPath = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+$OutputDir = Join-Path $ProjectRoot "Powershell output"
+$TestFile = Join-Path $OutputDir "test.txt"
+$LogFile = Join-Path $OutputDir "ai-runner.log"
+
+New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+
+function Report([string]$m) {
+    Add-Content -LiteralPath $TestFile -Value $m -Encoding UTF8
+}
+function Log([string]$m) {
+    Add-Content -LiteralPath $LogFile -Value ("{0} | {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),$m) -Encoding UTF8
+}
+
+try {
+    Report "UPLOAD_V12_STAGE: START"
+
+    if ([string]::IsNullOrWhiteSpace($VideoPath)) {
+        Report "UPLOAD_RESULT: FAILED - no file path supplied"
+        exit 2
+    }
+
+    $VideoPath = [IO.Path]::GetFullPath($VideoPath)
+
+    if (-not (Test-Path -LiteralPath $VideoPath -PathType Leaf)) {
+        Report "UPLOAD_RESULT: FAILED - file missing"
+        Report "UPLOAD_FILE_PATH: $VideoPath"
+        exit 3
+    }
+
+    $BaseName = [IO.Path]::GetFileName($VideoPath)
+
+    Report "UPLOAD_FILE_EXISTS: YES"
+    Report "UPLOAD_FILE_PATH: $VideoPath"
+    Report "UPLOAD_FILE_BYTES: $((Get-Item -LiteralPath $VideoPath).Length)"
+
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    Add-Type -AssemblyName System.Windows.Forms
+
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class BKV10RestoreNative {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+
+    function Descendants($root) {
+        return $root.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )
+    }
+
+    function Element-Info($e) {
+        if (-not $e) { return "<null>" }
+        try {
+            $r = $e.Current.BoundingRectangle
+            return ("type={0}|name={1}|aid={2}|class={3}|focusable={4}|offscreen={5}|rect={6},{7},{8},{9}" -f
+                [string]$e.Current.ControlType.ProgrammaticName,
+                [string]$e.Current.Name,
+                [string]$e.Current.AutomationId,
+                [string]$e.Current.ClassName,
+                $e.Current.IsKeyboardFocusable,
+                $e.Current.IsOffscreen,
+                [int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)
+        } catch {
+            return "<unavailable>"
+        }
+    }
+
+    function Report-Focus([string]$tag) {
+        try {
+            $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+            Report "UPLOAD_V12_FOCUS_${tag}: $(Element-Info $f)"
+        } catch {
+            Report "UPLOAD_V12_FOCUS_${tag}: ERROR $($_.Exception.Message)"
+        }
+    }
+
+    function Find-ByAutomationId($root,[string]$automationId) {
+        $condition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+            $automationId
+        )
+
+        return $root.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $condition
+        )
+    }
+
+    function Find-AllByAutomationId($root,[string]$automationId) {
+        $condition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+            $automationId
+        )
+
+        return @($root.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $condition
+        ))
+    }
+
+    function Supported-Pattern-Names($element) {
+        $names = @()
+        if (-not $element) { return "" }
+
+        try {
+            foreach ($pattern in $element.GetSupportedPatterns()) {
+                try { $names += [string]$pattern.ProgrammaticName } catch {}
+            }
+        } catch {}
+
+        return ($names -join ",")
+    }
+
+    function Parent-Info($element,[int]$maxDepth=5) {
+        if (-not $element) { return }
+
+        $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+        $current = $element
+
+        for ($i=0; $i -lt $maxDepth; $i++) {
+            try {
+                Report "UPLOAD_V12_PARENT_${i}: $(Element-Info $current)"
+                $current = $walker.GetParent($current)
+                if (-not $current) { break }
+            } catch {
+                break
+            }
+        }
+    }
+
+    function Get-ChatGPTWindow {
+        foreach ($proc in @(Get-Process firefox -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })) {
+            try {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
+                if (-not $root) { continue }
+
+                $urlBox = Find-ByAutomationId $root "urlbar-input"
+                if (-not $urlBox) { continue }
+
+                $url = [string]$urlBox.Current.Name
+                if ($url -match '^https://chatgpt\.com/') {
+                    return [pscustomobject]@{
+                        Process = $proc
+                        Root = $root
+                        Url = $url
+                    }
+                }
+            } catch {}
+        }
+
+        return $null
+    }
+
+    function Find-RealFileDialog {
+        $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+
+        foreach ($window in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            try {
+                if ($window.Current.IsOffscreen) { continue }
+
+                $field = Find-ByAutomationId $window "1148"
+                if (-not $field) { continue }
+
+                $class = [string]$window.Current.ClassName
+
+                # Never mistake the Firefox browser window itself for a chooser.
+                if ($class -eq "MozillaWindowClass") { continue }
+
+                return $window
+            } catch {}
+        }
+
+        return $null
+    }
+
+    function Wait-FileDialog([int]$milliseconds) {
+        $iterations = [Math]::Ceiling($milliseconds / 150.0)
+
+        for ($i=0; $i -lt $iterations; $i++) {
+            Start-Sleep -Milliseconds 150
+            $dialog = Find-RealFileDialog
+            if ($dialog) { return $dialog }
+        }
+
+        return $null
+    }
+
+    function Wait-DialogClosed([int]$milliseconds) {
+        $iterations = [Math]::Ceiling($milliseconds / 150.0)
+
+        for ($i=0; $i -lt $iterations; $i++) {
+            Start-Sleep -Milliseconds 150
+            if (-not (Find-RealFileDialog)) { return $true }
+        }
+
+        return $false
+    }
+
+    function Read-Value($element) {
+        if (-not $element) { return "" }
+
+        try {
+            $vp = $null
+            if ($element.TryGetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern,
+                [ref]$vp
+            )) {
+                return [string]([System.Windows.Automation.ValuePattern]$vp).Current.Value
+            }
+        } catch {}
+
+        foreach ($child in (Descendants $element)) {
+            try {
+                $vp = $null
+                if ($child.TryGetCurrentPattern(
+                    [System.Windows.Automation.ValuePattern]::Pattern,
+                    [ref]$vp
+                )) {
+                    $v = [string]([System.Windows.Automation.ValuePattern]$vp).Current.Value
+                    if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
+                }
+            } catch {}
+        }
+
+        return ""
+    }
+
+    function Fill-And-Submit($dialog,[string]$path) {
+        $field = Find-ByAutomationId $dialog "1148"
+
+        if (-not $field) {
+            Report "UPLOAD_RESULT: FAILED - file-name field 1148 missing"
+            return $false
+        }
+
+        $dialogHwnd = [IntPtr]([int64]$dialog.Current.NativeWindowHandle)
+        if ($dialogHwnd -ne [IntPtr]::Zero) {
+            [void][BKV10RestoreNative]::SetForegroundWindow($dialogHwnd)
+        }
+        Start-Sleep -Milliseconds 200
+
+        $filled = $false
+
+        # Exact method used by the old V10 uploader first.
+        try {
+            $vp = $null
+            if ($field.TryGetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern,
+                [ref]$vp
+            )) {
+                $pattern = [System.Windows.Automation.ValuePattern]$vp
+                if (-not $pattern.Current.IsReadOnly) {
+                    $pattern.SetValue($path)
+                    Start-Sleep -Milliseconds 180
+                    $filled = $true
+                    Report "UPLOAD_V12_FILL_METHOD: ValuePattern"
+                }
+            }
+        } catch {
+            Report "UPLOAD_V12_VALUEPATTERN_ERROR: $($_.Exception.Message)"
+        }
+
+        $readback = Read-Value $field
+        Report "UPLOAD_V12_FILENAME_READBACK_1: $readback"
+
+        if (
+            -not $filled -or
+            ([string]::IsNullOrWhiteSpace($readback))
+        ) {
+            # Windows common-dialog keyboard path. No mouse.
+            try {
+                [System.Windows.Forms.Clipboard]::SetText($path)
+                [System.Windows.Forms.SendKeys]::SendWait("%n")
+                Start-Sleep -Milliseconds 160
+                [System.Windows.Forms.SendKeys]::SendWait("^a")
+                Start-Sleep -Milliseconds 70
+                [System.Windows.Forms.SendKeys]::SendWait("^v")
+                Start-Sleep -Milliseconds 220
+                $filled = $true
+                Report "UPLOAD_V12_FILL_METHOD: AltN_Paste"
+            } catch {
+                Report "UPLOAD_V12_PASTE_ERROR: $($_.Exception.Message)"
+            }
+        }
+
+        $readback = Read-Value $field
+        Report "UPLOAD_V12_FILENAME_READBACK_2: $readback"
+
+        if (-not $filled) {
+            return $false
+        }
+
+        # Old V10 preferred the Open button's InvokePattern.
+        $openButton = Find-ByAutomationId $dialog "1"
+
+        if ($openButton) {
+            try {
+                $invoke = $null
+                if ($openButton.TryGetCurrentPattern(
+                    [System.Windows.Automation.InvokePattern]::Pattern,
+                    [ref]$invoke
+                )) {
+                    ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
+                    Report "UPLOAD_V12_SUBMIT_METHOD: Open_InvokePattern"
+
+                    if (Wait-DialogClosed 2500) {
+                        return $true
+                    }
+                }
+            } catch {
+                Report "UPLOAD_V12_OPEN_INVOKE_ERROR: $($_.Exception.Message)"
+            }
+        }
+
+        # Exact V10 fallback: Enter from the file-name field.
+        try {
+            $field = Find-ByAutomationId $dialog "1148"
+            if ($field) {
+                try { $field.SetFocus() } catch {}
+            }
+            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+            Report "UPLOAD_V12_SUBMIT_METHOD: Enter"
+
+            if (Wait-DialogClosed 2500) {
+                return $true
+            }
+        } catch {
+            Report "UPLOAD_V12_ENTER_ERROR: $($_.Exception.Message)"
+        }
+
+        # One final standard accelerator, still bounded.
+        try {
+            [System.Windows.Forms.SendKeys]::SendWait("%o")
+            Report "UPLOAD_V12_SUBMIT_METHOD: AltO"
+
+            if (Wait-DialogClosed 1800) {
+                return $true
+            }
+        } catch {}
+
+        return $false
+    }
+
+    function Verify-Attachment([string]$basename,[int]$seconds) {
+        for ($i=0; $i -lt ($seconds * 4); $i++) {
+            Start-Sleep -Milliseconds 250
+
+            $chat = Get-ChatGPTWindow
+            if (-not $chat) { continue }
+
+            foreach ($element in (Descendants $chat.Root)) {
+                try {
+                    $name = [string]$element.Current.Name
+
+                    if ($name -like "*$basename*") {
+                        return $true
+                    }
+
+                    if ($name -match '(?i)(unsupported|failed to upload|upload failed|could not upload)') {
+                        Report "UPLOAD_CHATGPT_MESSAGE: $name"
+                    }
+                } catch {}
+            }
+        }
+
+        return $false
+    }
+
+    Report "UPLOAD_V12_STAGE: FIND_CHATGPT"
+
+    $chat = Get-ChatGPTWindow
+
+    if (-not $chat) {
+        Report "UPLOAD_RESULT: FAILED - ChatGPT Firefox window not found"
+        exit 4
+    }
+
+    Report "UPLOAD_CHATGPT: FOUND"
+    Report "UPLOAD_CHATGPT_URL: $($chat.Url)"
+
+    $wshell = New-Object -ComObject WScript.Shell
+    [void]$wshell.AppActivate($chat.Process.Id)
+    Start-Sleep -Milliseconds 500
+
+    $chat = Get-ChatGPTWindow
+    $plus = Find-ByAutomationId $chat.Root "composer-plus-btn"
+
+    if (-not $plus) {
+        Report "UPLOAD_RESULT: FAILED - composer-plus-btn missing"
+        exit 5
+    }
+
+    Report "UPLOAD_V12_STAGE: OPEN_PLUS"
+
+    function Open-PlusMenu {
+        $current = Get-ChatGPTWindow
+        if (-not $current) { return $false }
+
+        $p = Find-ByAutomationId $current.Root "composer-plus-btn"
+        if (-not $p) { return $false }
+
+        try {
+            $p.SetFocus()
+            Start-Sleep -Milliseconds 120
+            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+            Start-Sleep -Milliseconds 450
+            return $true
+        } catch {
+            Report "UPLOAD_V12_PLUS_ERROR: $($_.Exception.Message)"
+            return $false
+        }
+    }
+
+    function Close-Menu {
+        try {
+            [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+            Start-Sleep -Milliseconds 250
+        } catch {}
+    }
+
+    function Reopen-And-Find1148 {
+        Close-Menu
+        if (-not (Open-PlusMenu)) { return $null }
+
+        $current = Get-ChatGPTWindow
+        if (-not $current) { return $null }
+
+        $items = Find-AllByAutomationId $current.Root "1148"
+        Report "UPLOAD_V12_1148_COUNT: $($items.Count)"
+
+        $n = 0
+        foreach ($item in $items) {
+            Report "UPLOAD_V12_1148_${n}: $(Element-Info $item)"
+            Report "UPLOAD_V12_1148_${n}_PATTERNS: $(Supported-Pattern-Names $item)"
+            $n++
+        }
+
+        # Test 41 put keyboard focus on an element with aid=1148 after Shift+Tab.
+        # Prefer a visible 1148 element near the composer.
+        foreach ($item in $items) {
+            try {
+                if (-not $item.Current.IsOffscreen) {
+                    return $item
+                }
+            } catch {}
+        }
+
+        if ($items.Count -gt 0) { return $items[0] }
+        return $null
+    }
+
+    $dialog = $null
+
+    # First reproduce Test 41 exactly and use SPACE on the 1148 target.
+    if (Open-PlusMenu) {
+        Report "UPLOAD_V12_SEQUENCE: OPEN_PLUS -> SHIFT_TAB"
+        [System.Windows.Forms.SendKeys]::SendWait("+{TAB}")
+        Start-Sleep -Milliseconds 160
+        Report-Focus "V12_AFTER_SHIFT_TAB"
+
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused) {
+            Report "UPLOAD_V12_FOCUSED_PATTERNS: $(Supported-Pattern-Names $focused)"
+            Parent-Info $focused 5
+        }
+
+        try {
+            [System.Windows.Forms.SendKeys]::SendWait(" ")
+            Report "UPLOAD_V12_ACTION: ShiftTabThenSpace"
+            $dialog = Wait-FileDialog 2200
+        } catch {
+            Report "UPLOAD_V12_SPACE_ERROR: $($_.Exception.Message)"
+        }
+    }
+
+    # If no chooser, directly locate the visible 1148 element and inspect/activate it.
+    if (-not $dialog) {
+        $target = Reopen-And-Find1148
+
+        if ($target) {
+            Report "UPLOAD_V12_TARGET_1148: $(Element-Info $target)"
+            Report "UPLOAD_V12_TARGET_PATTERNS: $(Supported-Pattern-Names $target)"
+            Parent-Info $target 5
+
+            try {
+                $invoke = $null
+                if ($target.TryGetCurrentPattern(
+                    [System.Windows.Automation.InvokePattern]::Pattern,
+                    [ref]$invoke
+                )) {
+                    ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
+                    Report "UPLOAD_V12_ACTION: 1148_InvokePattern"
+                    $dialog = Wait-FileDialog 2200
+                } else {
+                    Report "UPLOAD_V12_ACTION: 1148_InvokePattern_NOT_SUPPORTED"
+                }
+            } catch {
+                Report "UPLOAD_V12_1148_INVOKE_ERROR: $($_.Exception.Message)"
+            }
+        } else {
+            Report "UPLOAD_V12_TARGET_1148: NOT FOUND"
+        }
+    }
+
+    # Reacquire and try SetFocus + Space.
+    if (-not $dialog) {
+        $target = Reopen-And-Find1148
+
+        if ($target) {
+            try {
+                $target.SetFocus()
+                Start-Sleep -Milliseconds 140
+                Report-Focus "V12_1148_DIRECT_FOCUS"
+                [System.Windows.Forms.SendKeys]::SendWait(" ")
+                Report "UPLOAD_V12_ACTION: 1148_FocusSpace"
+                $dialog = Wait-FileDialog 2200
+            } catch {
+                Report "UPLOAD_V12_1148_FOCUS_SPACE_ERROR: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    # Final bounded attempt: direct target + Enter.
+    if (-not $dialog) {
+        $target = Reopen-And-Find1148
+
+        if ($target) {
+            try {
+                $target.SetFocus()
+                Start-Sleep -Milliseconds 140
+                Report-Focus "V12_1148_DIRECT_FOCUS_ENTER"
+                [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                Report "UPLOAD_V12_ACTION: 1148_FocusEnter"
+                $dialog = Wait-FileDialog 2200
+            } catch {
+                Report "UPLOAD_V12_1148_FOCUS_ENTER_ERROR: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if (-not $dialog) {
+        Close-Menu
+        Report "UPLOAD_RESULT: FAILED - hidden 1148 upload control did not open a Windows chooser"
+        Log "APP_UPLOAD_V12_FAILED|1148 activation did not produce chooser"
+        exit 10
+    }
+
+    Report "UPLOAD_FILE_CHOOSER: FOUND"
+    Report "UPLOAD_DIALOG_TITLE: $($dialog.Current.Name)"
+    Report "UPLOAD_DIALOG_CLASS: $($dialog.Current.ClassName)"
+    Report "UPLOAD_DIALOG_PID: $($dialog.Current.ProcessId)"
+
+    Report "UPLOAD_V12_STAGE: FILL_AND_SUBMIT"
+
+    if (-not (Fill-And-Submit $dialog $VideoPath)) {
+        Report "UPLOAD_RESULT: FAILED - chooser opened but file could not be submitted"
+        Log "APP_UPLOAD_V12_FAILED|submit failed"
+        exit 11
+    }
+
+    Report "UPLOAD_SUBMITTED: $VideoPath"
+    Log "APP_UPLOAD_V12_SUBMITTED|$VideoPath"
+
+    Start-Sleep -Seconds 1
+    [void]$wshell.AppActivate($chat.Process.Id)
+
+    Report "UPLOAD_V12_STAGE: VERIFY_CHATGPT"
+
+    if (Verify-Attachment $BaseName 12) {
+        Report "UPLOAD_VERIFIED: $BaseName"
+        Report "UPLOAD_RESULT: SUCCESS"
+        Log "APP_UPLOAD_V12_VERIFIED|$VideoPath"
+        exit 0
+    }
+
+    # The old V10 treated this as a valid bounded result because the chooser
+    # had already accepted the file.
+    Report "UPLOAD_RESULT: SUBMITTED_UNVERIFIED"
+    Log "APP_UPLOAD_V12_SUBMITTED_UNVERIFIED|$VideoPath"
+    exit 0
+
+} catch {
+    Report "UPLOAD_RESULT: CRASH"
+    Report "UPLOAD_EXCEPTION_TYPE: $($_.Exception.GetType().FullName)"
+    Report "UPLOAD_EXCEPTION_MESSAGE: $($_.Exception.Message)"
+    Report "UPLOAD_EXCEPTION_LINE: $($_.InvocationInfo.ScriptLineNumber)"
+    Report "UPLOAD_EXCEPTION_TEXT: $($_.InvocationInfo.Line)"
+    Log "APP_UPLOAD_V12_CRASH|$($_.Exception.Message)"
+    exit 99
+}

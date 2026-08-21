@@ -9,13 +9,28 @@ var _terrain_center := Vector2(INF, INF)
 var _pending_center:=Vector2.ZERO
 var _pending_heights:=PackedFloat32Array()
 var _pending_row:=-1
+var _pending_color_row:=-1
+var _terrain_image:Image
 const TERRAIN_RESOLUTION:=64
 var view_radius := 650.0
 var _redraw_accumulator := 0.0
+var _draw_profile_totals:Dictionary={}
+var _draw_profile_counts:Dictionary={}
+var _bridge_draw_cache:Array[Dictionary]=[]
+var _interaction_marker_cache:Array[Dictionary]=[]
+var _story_marker_cache:Array[Dictionary]=[]
+var _enemy_position_cache:Array[Vector3]=[]
+var _enemy_cache_accumulator:=0.0
+var _cached_layer_mode:=false
+var _draw_anchor:=Vector2(INF,INF)
 
 
 func _ready() -> void:
     texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+
+
+func enable_cached_layer_mode()->void:
+    _cached_layer_mode=true
 
 
 func configure(profile: Dictionary, player: Node3D, director: Node = null, height_sampler: Callable = Callable()) -> void:
@@ -23,6 +38,9 @@ func configure(profile: Dictionary, player: Node3D, director: Node = null, heigh
     _player = player
     _director = director
     _height_sampler = height_sampler
+    if _cached_layer_mode and is_instance_valid(_player):
+        _draw_anchor=Vector2(_player.global_position.x,_player.global_position.z)
+    _prepare_draw_caches()
     if is_instance_valid(_player):
         _begin_terrain_refresh(Vector2(_player.global_position.x,_player.global_position.z))
     queue_redraw()
@@ -31,16 +49,28 @@ func configure(profile: Dictionary, player: Node3D, director: Node = null, heigh
 func _process(delta: float) -> void:
     if not visible:
         return
+    if _cached_layer_mode:
+        if _pending_row>=0:_advance_terrain_refresh(1)
+        elif _pending_color_row>=0:_advance_terrain_color_refresh(2)
+        return
     if _pending_row>=0:
         # Spread height sampling across more frames. The finished image keeps
         # the same 64x64 detail, but walking no longer receives a burst of 384
         # terrain queries on each refresh frame.
         _advance_terrain_refresh(1)
+    elif _pending_color_row>=0:
+        # Shade a few rows per frame as well. Previously all 4,096 pixels were
+        # calculated and a new GPU texture was allocated on one movement frame.
+        _advance_terrain_color_refresh(2)
+    _enemy_cache_accumulator+=delta
+    if _enemy_cache_accumulator>=.25:
+        _enemy_cache_accumulator=0.0
+        _refresh_dynamic_marker_cache()
     _redraw_accumulator += delta
     if _redraw_accumulator < 0.125:
         return
     _redraw_accumulator = 0.0
-    if _pending_row<0 and is_instance_valid(_player) and not _inside_dungeon():
+    if _pending_row<0 and _pending_color_row<0 and is_instance_valid(_player) and not _inside_dungeon():
         var player_pos:=Vector2(_player.global_position.x,_player.global_position.z)
         if player_pos.distance_to(_terrain_center)>=64.0:_begin_terrain_refresh(player_pos)
     queue_redraw()
@@ -51,6 +81,8 @@ func _begin_terrain_refresh(center:Vector2)->void:
     _pending_center=center
     _pending_heights.resize(TERRAIN_RESOLUTION*TERRAIN_RESOLUTION)
     _pending_row=0
+    _pending_color_row=-1
+    _refresh_interaction_cache()
 
 
 func _advance_terrain_refresh(rows:int)->void:
@@ -62,16 +94,20 @@ func _advance_terrain_refresh(rows:int)->void:
             var world_point:=_pending_center+uv*view_radius
             _pending_heights[y*TERRAIN_RESOLUTION+x]=_height_sampler.call(world_point.x,world_point.y).y
     _pending_row=last_row
-    if _pending_row>=TERRAIN_RESOLUTION:_finish_terrain_refresh()
+    if _pending_row>=TERRAIN_RESOLUTION:
+        _pending_row=-1
+        _terrain_image=Image.create(TERRAIN_RESOLUTION,TERRAIN_RESOLUTION,false,Image.FORMAT_RGBA8)
+        _pending_color_row=0
 
 
-func _finish_terrain_refresh()->void:
-    var image:=Image.create(TERRAIN_RESOLUTION,TERRAIN_RESOLUTION,false,Image.FORMAT_RGBA8)
-    for y in range(TERRAIN_RESOLUTION):
+func _advance_terrain_color_refresh(rows:int)->void:
+    if _pending_color_row<0 or _terrain_image==null:return
+    var last_row:=mini(TERRAIN_RESOLUTION,_pending_color_row+rows)
+    for y in range(_pending_color_row,last_row):
         for x in range(TERRAIN_RESOLUTION):
             var uv := Vector2(float(x) / (TERRAIN_RESOLUTION - 1), float(y) / (TERRAIN_RESOLUTION - 1)) * 2.0 - Vector2.ONE
             if uv.length() > 1.0:
-                image.set_pixel(x, y, Color(0, 0, 0, 0))
+                _terrain_image.set_pixel(x, y, Color(0, 0, 0, 0))
                 continue
             var h := _pending_heights[y * TERRAIN_RESOLUTION + x]
             var left := _pending_heights[y * TERRAIN_RESOLUTION + maxi(0, x - 1)]
@@ -84,10 +120,19 @@ func _finish_terrain_refresh()->void:
             var color := _terrain_color(h, _pending_center + uv * view_radius)
             if floorf(h / 24.0) != floorf(right / 24.0) or floorf(h / 24.0) != floorf(down / 24.0):
                 shade *= 0.93
-            image.set_pixel(x, y, Color(color.r * shade, color.g * shade, color.b * shade, 0.97))
-    _terrain_texture = ImageTexture.create_from_image(image)
+            _terrain_image.set_pixel(x, y, Color(color.r * shade, color.g * shade, color.b * shade, 0.97))
+    _pending_color_row=last_row
+    if _pending_color_row>=TERRAIN_RESOLUTION:_finish_terrain_refresh()
+
+
+func _finish_terrain_refresh()->void:
+    if _terrain_texture==null:
+        _terrain_texture=ImageTexture.create_from_image(_terrain_image)
+    else:
+        _terrain_texture.update(_terrain_image)
     _terrain_center=_pending_center
-    _pending_row=-1
+    if _cached_layer_mode:_draw_anchor=_pending_center
+    _pending_color_row=-1
     queue_redraw()
 
 
@@ -121,40 +166,67 @@ func _draw() -> void:
         return
     var center := size * 0.5
     var radius := minf(size.x, size.y) * 0.455
-    draw_circle(center,radius+10,Color(.025,.030,.038,.98))
-    draw_circle(center,radius+7,Color(.64,.43,.16,1.0))
-    draw_circle(center,radius+3,Color(.13,.16,.19,1.0))
-    draw_circle(center,radius,Color(.42,.52,.28,1.0))
+    if not _cached_layer_mode:
+        draw_circle(center,radius+10,Color(.025,.030,.038,.98))
+        draw_circle(center,radius+7,Color(.64,.43,.16,1.0))
+        draw_circle(center,radius+3,Color(.13,.16,.19,1.0))
+        draw_circle(center,radius,Color(.42,.52,.28,1.0))
     if _inside_dungeon():
         _draw_dungeon_minimap(center,radius)
         draw_arc(center,radius,0,TAU,112,Color(.19,.11,.035),4.0,true)
         draw_arc(center,radius-6,0,TAU,112,Color(.76,.57,.24),1.5,true)
         return
     if _terrain_texture:
-        var player_pos:=Vector2(_player.global_position.x,_player.global_position.z)
+        var player_pos:=_draw_anchor if _cached_layer_mode and is_finite(_draw_anchor.x) else Vector2(_player.global_position.x,_player.global_position.z)
         var cache_offset:=(_terrain_center-player_pos)/view_radius*radius
         draw_texture_rect(_terrain_texture, Rect2(center - Vector2.ONE * radius + cache_offset, Vector2.ONE * radius * 2.0), false)
-    for ring in [0.33, 0.66, 1.0]:
-        draw_arc(center, radius * ring, 0, TAU, 72, Color(0.20, 0.13, 0.05, 0.22), 1.0)
-    _draw_local_forests(center, radius)
-    _corridors(_profile.get("river_corridors", []), center, radius, "river")
-    _corridors(_profile.get("road_corridors", []), center, radius, "road")
-    _corridors(_profile.get("trail_corridors", []), center, radius, "trail")
-    _draw_water_sites(center, radius)
-    _draw_waterfalls(center,radius)
-    _draw_bridges(center, radius)
-    _draw_settlements(center, radius)
-    _draw_caves_and_camps(center,radius)
-    _draw_interactions(center,radius)
-    _draw_enemies(center, radius)
-    _draw_player(center)
-    draw_arc(center, radius, 0, TAU, 112, Color(0.19, 0.11, 0.035), 4.0, true)
-    draw_arc(center, radius - 6, 0, TAU, 112, Color(0.76, 0.57, 0.24), 1.5, true)
-    _cardinal("N", center + Vector2(-5, -radius + 16))
-    _cardinal("E", center + Vector2(radius - 17, 5))
-    _cardinal("S", center + Vector2(-4, radius - 7))
-    _cardinal("W", center + Vector2(-radius + 8, 5))
-    _draw_scale_bar(center,radius)
+    if not _cached_layer_mode:
+        for ring in [0.33, 0.66, 1.0]:
+            draw_arc(center, radius * ring, 0, TAU, 72, Color(0.20, 0.13, 0.05, 0.22), 1.0)
+    _profile_draw_call("forests",func():_draw_local_forests(center,radius))
+    _profile_draw_call("rivers",func():_corridors(_profile.get("river_corridors",[]),center,radius,"river"))
+    _profile_draw_call("roads",func():_corridors(_profile.get("road_corridors",[]),center,radius,"road"))
+    _profile_draw_call("trails",func():_corridors(_profile.get("trail_corridors",[]),center,radius,"trail"))
+    _profile_draw_call("water",func():_draw_water_sites(center,radius))
+    _profile_draw_call("waterfalls",func():_draw_waterfalls(center,radius))
+    _profile_draw_call("bridges",func():_draw_bridges(center,radius))
+    _profile_draw_call("settlements",func():_draw_settlements(center,radius))
+    _profile_draw_call("map_sites",func():_draw_starter_map_sites(center,radius))
+    _profile_draw_call("caves_camps",func():_draw_caves_and_camps(center,radius))
+    _profile_draw_call("interactions",func():_draw_interactions(center,radius))
+    _profile_draw_call("story",func():_draw_story_markers(center,radius))
+    if not _cached_layer_mode:
+        _profile_draw_call("enemies",func():_draw_enemies(center,radius))
+        _draw_player(center)
+        draw_arc(center, radius, 0, TAU, 112, Color(0.19, 0.11, 0.035), 4.0, true)
+        draw_arc(center, radius - 6, 0, TAU, 112, Color(0.76, 0.57, 0.24), 1.5, true)
+        _cardinal("N", center + Vector2(-5, -radius + 16))
+        _cardinal("E", center + Vector2(radius - 17, 5))
+        _cardinal("S", center + Vector2(-4, radius - 7))
+        _cardinal("W", center + Vector2(-radius + 8, 5))
+        _draw_scale_bar(center,radius)
+
+
+func _profile_draw_call(label:String,callback:Callable)->void:
+    if OS.get_environment("BROKEN_KNIGHT_PROFILE_MINIMAP")!="1":
+        callback.call()
+        return
+    var started:=Time.get_ticks_usec()
+    callback.call()
+    _draw_profile_totals[label]=int(_draw_profile_totals.get(label,0))+Time.get_ticks_usec()-started
+    _draw_profile_counts[label]=int(_draw_profile_counts.get(label,0))+1
+
+
+func get_draw_profile()->Dictionary:
+    var result:Dictionary={}
+    for label in _draw_profile_totals:
+        result[label]=float(_draw_profile_totals[label])/float(maxi(1,int(_draw_profile_counts.get(label,0))))
+    return result
+
+
+func reset_draw_profile()->void:
+    _draw_profile_totals.clear()
+    _draw_profile_counts.clear()
 
 
 func _inside_dungeon()->bool:
@@ -167,7 +239,9 @@ func _draw_dungeon_minimap(center:Vector2,radius:float)->void:
     var base:=Vector2(8000,0)
     var title:="RIVERWATCH WELL"
     var half_size:=Vector2(42,66)
-    if player_pos.x>8310:
+    if player_pos.x>8600:
+        base=Vector2(8700,0);title="BARROWFEN OSSUARY";half_size=Vector2(54,88)
+    elif player_pos.x>8310:
         base=Vector2(8420,0);title="EAST CAVERN";half_size=Vector2(64,95)
     elif player_pos.x>8100:
         base=Vector2(8200,0);title="WEST CAVERN";half_size=Vector2(64,95)
@@ -175,7 +249,14 @@ func _draw_dungeon_minimap(center:Vector2,radius:float)->void:
     var room_rect:=Rect2(center-half_size*scale,half_size*2.0*scale)
     draw_rect(room_rect,Color(.21,.19,.16),true)
     draw_rect(room_rect,Color(.70,.55,.29),false,2.0)
-    if title!="RIVERWATCH WELL":
+    if title=="BARROWFEN OSSUARY":
+        for z in [50.0,15.0,-22.0,-58.0]:
+            var wall_y:float=center.y+(z-(player_pos.y-base.y))*scale
+            draw_line(Vector2(room_rect.position.x+3,wall_y),Vector2(room_rect.end.x-3,wall_y),Color(.58,.51,.35),2.0)
+        for chamber in [Vector2(-37,36),Vector2(38,-1),Vector2(-36,-38),Vector2(0,-74)]:
+            var chamber_point:=center+Vector2(chamber.x-(player_pos.x-base.x),chamber.y-(player_pos.y-base.y))*scale
+            draw_circle(chamber_point,4.0,Color(.30,.55,.62));draw_circle(chamber_point,4.0,Color(.82,.68,.30),false,1.0)
+    elif title!="RIVERWATCH WELL":
         for z in [52.0,14.0,-32.0,-72.0]:
             var room_center:=center+Vector2(0,(z-(player_pos.y-base.y))*scale)
             var room_size:=Vector2(half_size.x*1.62,16.0)*scale
@@ -212,46 +293,57 @@ func _draw_dungeon_minimap(center:Vector2,radius:float)->void:
 
 func _corridors(corridors: Array, center: Vector2, radius: float, kind: String) -> void:
     if kind=="river":
-        var river_segments:Array[Dictionary]=[]
         for corridor in corridors:
-            var points:Array[Vector2]=[]
-            for point in corridor.get("points",[]):points.append(_local_point(point,center,radius))
-            var pixels:=maxf(1.5,float(corridor.get("width",48.0))*.66/view_radius*radius)
-            for i in range(points.size()-1):
-                var clipped:=_clip_segment_to_circle(points[i],points[i+1],center,radius)
-                if not clipped.is_empty():river_segments.append({"a":clipped[0],"b":clipped[1],"width":pixels})
-        for segment in river_segments:draw_line(segment.a,segment.b,Color(.08,.20,.23,.98),float(segment.width)+3.0,true)
-        for segment in river_segments:draw_line(segment.a,segment.b,Color(.30,.69,.78,1.0),float(segment.width),true)
-        for segment in river_segments:draw_line(segment.a,segment.b,Color(.70,.90,.91,.42),maxf(1.0,float(segment.width)*.16),true)
+            var authored_width:=float(corridor.get("width",48.0))
+            var source_width:=float(corridor.get("source_width",authored_width))
+            var mouth_width:=float(corridor.get("mouth_width",authored_width))
+            var pixels:=maxf(1.5,lerpf(source_width,mouth_width,.5)*.66/view_radius*radius)
+            for run in _corridor_runs(corridor.get("points",[]),center,radius):
+                draw_polyline(run,Color(.08,.20,.23,.98),pixels+3.0,true)
+                draw_polyline(run,Color(.30,.69,.78,1.0),pixels,true)
+                draw_polyline(run,Color(.70,.90,.91,.42),maxf(1.0,pixels*.16),true)
+        return
+    if kind=="road":
+        for route_class in ["secondary","major"]:
+            for corridor in corridors:
+                if str(corridor.get("route_class","secondary"))!=route_class:continue
+                var physical_width:=float(corridor.get("width",14.0))*.48
+                var pixel_floor:=3.3 if route_class=="major" else 2.0
+                var pixels:=maxf(pixel_floor,physical_width/view_radius*radius)
+                var outline:=Color(.16,.075,.022,.98) if route_class=="major" else Color(.18,.11,.045,.92)
+                var fill:=Color(.92,.64,.25,1.0) if route_class=="major" else Color(.68,.47,.24,.97)
+                for run in _corridor_runs(corridor.get("points",[]),center,radius):
+                    draw_polyline(run,outline,pixels+(2.8 if route_class=="major" else 2.1),true)
+                    draw_polyline(run,fill,pixels,true)
+                    if route_class=="major":draw_polyline(run,Color(.99,.83,.48,.52),maxf(1.0,pixels*.20),true)
         return
     for corridor in corridors:
-        var points: Array[Vector2] = []
-        for point in corridor.get("points", []):
-            points.append(_local_point(point, center, radius))
-        var authored_width: float = corridor.get("width", 12.0)
-        var physical_width := authored_width
-        if kind == "river":
-            physical_width *= 0.66
-        elif kind == "road":
-            physical_width *= 0.48
-        elif kind == "trail":
-            physical_width *= 0.48
-        var pixels := maxf(1.5, physical_width / view_radius * radius)
-        for i in range(points.size() - 1):
-            var clipped := _clip_segment_to_circle(points[i], points[i + 1], center, radius)
-            if clipped.is_empty():
-                continue
-            var a: Vector2 = clipped[0]
-            var b: Vector2 = clipped[1]
-            if kind == "river":
-                draw_line(a, b, Color(0.08, 0.20, 0.23, 0.98), pixels + 3.0, true)
-                draw_line(a, b, Color(0.30, 0.69, 0.78, 1.0), pixels, true)
-                draw_line(a, b, Color(0.70, 0.90, 0.91, 0.42), maxf(1.0, pixels * 0.16), true)
-            elif kind == "road":
-                draw_line(a, b, Color(0.19, 0.10, 0.035, 0.96), pixels + 2.5, true)
-                draw_line(a, b, Color(0.88, 0.61, 0.25, 1.0), pixels, true)
-            else:
-                _draw_dashed_segment(a,b,Color(.24,.15,.065,.88),pixels,4.0,3.0)
+        var pixels:=maxf(1.5,float(corridor.get("width",5.0))*.48/view_radius*radius)
+        for run in _corridor_runs(corridor.get("points",[]),center,radius):
+            draw_polyline(run,Color(.13,.075,.025,.66),pixels+1.2,true)
+            draw_polyline(run,Color(.72,.52,.26,.82),maxf(1.0,pixels*.58),true)
+
+
+func _corridor_runs(world_points:Array,center:Vector2,radius:float)->Array[PackedVector2Array]:
+    var result:Array[PackedVector2Array]=[]
+    if world_points.size()<2:return result
+    var points:Array[Vector2]=[]
+    for point in world_points:points.append(_local_point(point,center,radius))
+    var current:=PackedVector2Array()
+    for index in range(points.size()-1):
+        var clipped:=_clip_segment_to_circle(points[index],points[index+1],center,radius)
+        if clipped.is_empty():
+            if current.size()>1:result.append(current)
+            current=PackedVector2Array()
+            continue
+        var a:Vector2=clipped[0]
+        var b:Vector2=clipped[1]
+        if current.is_empty() or not current[-1].is_equal_approx(a):
+            if current.size()>1:result.append(current)
+            current=PackedVector2Array([a])
+        current.append(b)
+    if current.size()>1:result.append(current)
+    return result
 
 
 func _draw_dashed_segment(a:Vector2,b:Vector2,color:Color,width:float,dash_length:float,gap_length:float)->void:
@@ -285,15 +377,40 @@ func _draw_local_forests(center: Vector2, radius: float) -> void:
         var region:Dictionary=_profile.get("forest_regions",[])[region_index]
         var region_center: Vector2 = region.get("center", Vector2.ZERO)
         var region_radius: float = region.get("radius", 300.0)
-        for i in range(28):
-            var angle:=float(i)*2.399963+float(region_index)*.43
-            var r:=region_radius*sqrt((float(i)+.4)/29.0)*(.78+sin(float(i)*1.71)*.13)
-            var p:=_local_point(region_center+Vector2(cos(angle),sin(angle))*r,center,radius)
-            if p.distance_to(center) < radius - 4:
-                var s:=1.7+float(i%4)*.35
-                draw_circle(p+Vector2(.7,.9),s*1.05,Color(.025,.065,.025,.35))
-                draw_circle(p,s,Color(.07+.015*float(i%3),.24+.027*float(i%4),.095,.90))
-                draw_circle(p-Vector2(.4,.5),s*.45,Color(.25,.40,.16,.52))
+        var region_pixel_radius:=region_radius/view_radius*radius
+        var p:=_local_point(region_center,center,radius)
+        if p.distance_to(center)>radius+region_pixel_radius:
+            continue
+
+        # One readable canopy footprint replaces hundreds of individual tree
+        # circles. Rebuilding those tiny commands every minimap tick was the
+        # largest source of walking-frame spikes after detailed world passes.
+        # Only submit a filled polygon when its whole radial footprint is
+        # inside the circular map. Projecting every outer vertex onto the map
+        # edge produced invalid polygons; triangulating each wedge avoided the
+        # error but multiplied canvas commands during a walking refresh.
+        if p.distance_to(center)+region_pixel_radius<=radius-4.0:
+            var footprint:=PackedVector2Array()
+            for edge_index in range(18):
+                var angle:=TAU*float(edge_index)/18.0+float(region_index)*.31
+                var irregularity:=.86+sin(angle*3.0+float(region_index))*.10+sin(angle*7.0)*.04
+                footprint.append(p+Vector2(cos(angle),sin(angle))*region_pixel_radius*irregularity)
+            draw_colored_polygon(footprint,Color(.055,.205,.085,.68))
+            var closed_footprint:=footprint.duplicate()
+            closed_footprint.append(footprint[0])
+            draw_polyline(closed_footprint,Color(.035,.115,.050,.72),1.2,true)
+
+        # Sparse crowns keep forests legible as forests without turning the
+        # minimap into a recurring draw-command generator.
+        for tree_index in range(6):
+            var angle:=float(tree_index)*2.399963+float(region_index)*.43
+            var spread:=region_pixel_radius*sqrt((float(tree_index)+.5)/7.0)*.63
+            var tree_p:=p+Vector2(cos(angle),sin(angle))*spread
+            if tree_p.distance_to(center)>=radius-6.0:
+                continue
+            var tree_size:=1.45+float(tree_index%3)*.28
+            draw_circle(tree_p+Vector2(.45,.55),tree_size,Color(.015,.055,.022,.36))
+            draw_circle(tree_p,tree_size*.82,Color(.11,.35,.13,.88))
 
 
 func _draw_water_sites(center: Vector2, radius: float) -> void:
@@ -334,20 +451,13 @@ func _draw_caves_and_camps(center:Vector2,radius:float)->void:
 
 
 func _draw_bridges(center: Vector2, radius: float) -> void:
-    for bridge in _profile.get("ford_sites", []):
+    for bridge in _bridge_draw_cache:
         var world_point:Vector2=bridge.get("position",Vector2.ZERO)
         var p := _local_point(world_point, center, radius)
         if p.distance_to(center) < radius - 4:
-            var river_segment:=_nearest_corridor_segment(world_point,_profile.get("river_corridors",[]))
-            var road_segment:=_nearest_corridor_segment(world_point,_profile.get("road_corridors",[]))
-            var tangent:=Vector2(0,1)
-            if bridge.get("standalone",false) and not river_segment.is_empty():
-                var river_direction:Vector2=river_segment.direction
-                tangent=Vector2(-river_direction.y,river_direction.x).normalized()
-            elif not road_segment.is_empty():
-                tangent=road_segment.direction
+            var tangent:Vector2=bridge.get("tangent",Vector2(0,1))
             var normal:=Vector2(-tangent.y,tangent.x)
-            var half_span:=maxf(5.0,(float(river_segment.get("width",52.0))*.66+12.0)/view_radius*radius*.5)
+            var half_span:=maxf(5.0,float(bridge.get("span",46.0))/view_radius*radius*.5)
             var half_width:=3.0
             var corners:=PackedVector2Array([p-tangent*half_span-normal*half_width,p+tangent*half_span-normal*half_width,p+tangent*half_span+normal*half_width,p-tangent*half_span+normal*half_width])
             draw_colored_polygon(corners,Color(.25,.12,.035))
@@ -381,6 +491,8 @@ func _draw_settlements(center: Vector2, radius: float) -> void:
                     _draw_local_crownspire(site.get("position",Vector2.ZERO),center,radius)
                 else:
                     draw_rect(Rect2(p-Vector2(5,4),Vector2(10,8)),Color(.58,.15,.08,.96),true)
+            elif site.get("starter",false):
+                _draw_local_riverwatch(site,center,radius)
             else:
                 draw_circle(p,footprint,Color(.69,.50,.27,.20))
                 draw_arc(p,footprint,0,TAU,32,Color(.25,.13,.04,.48),1.0)
@@ -394,6 +506,48 @@ func _draw_settlements(center: Vector2, radius: float) -> void:
         else:
             var edge := center + (p - center).normalized() * (radius - 10)
             draw_colored_polygon(PackedVector2Array([edge + Vector2(0, -5), edge + Vector2(-4, 4), edge + Vector2(4, 4)]), Color(0.78, 0.25, 0.09))
+
+
+func _draw_local_riverwatch(site:Dictionary,center:Vector2,radius:float)->void:
+    var town_center:Vector2=site.get("position",Vector2.ZERO)
+    var center_px:=_local_point(town_center,center,radius)
+    var footprint:=maxf(7.0,float(site.get("radius",96.0))/view_radius*radius)
+    draw_circle(center_px,footprint,Color(.69,.50,.27,.16))
+    draw_arc(center_px,footprint,0,TAU,32,Color(.25,.13,.04,.43),1.0)
+    var offsets:=[Vector2(-40,-58),Vector2(-42,-20),Vector2(-42,78),Vector2(40,-57),Vector2(42,-22),Vector2(40,42),Vector2(42,80)]
+    for i in range(offsets.size()):
+        var house:=_local_point(town_center+offsets[i],center,radius)
+        var house_size:=Vector2(3.6+float(i%3)*.35,2.7+float(i%2)*.3)
+        draw_rect(Rect2(house-house_size*.5,house_size),Color(.55,.25,.075,.96),true)
+        draw_rect(Rect2(house-house_size*.5,house_size),Color(.20,.105,.03,.82),false,.7)
+    var green:=_local_point(town_center+Vector2(-34,30),center,radius)
+    draw_circle(green,2.8,Color(.66,.63,.52,.96))
+    draw_circle(green,1.3,Color(.20,.49,.57,.98))
+    for side in [-1.0,1.0]:
+        var field:=_local_point(town_center+Vector2(62.0*float(side),116),center,radius)
+        draw_rect(Rect2(field-Vector2(2.4,3.2),Vector2(4.8,6.4)),Color(.50,.43,.13,.74),true)
+        draw_rect(Rect2(field-Vector2(2.4,3.2),Vector2(4.8,6.4)),Color(.26,.18,.06,.72),false,.7)
+
+
+func _draw_starter_map_sites(center:Vector2,radius:float)->void:
+    for site_value in _profile.get("map_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var kind:=str(site.get("kind",""))
+        if kind!="waystation" and kind!="watchtower":continue
+        var world_point:Vector2=site.get("position",Vector2.ZERO)
+        var p:=_local_point(world_point,center,radius)
+        if p.distance_to(center)>=radius-8.0:continue
+        if kind=="waystation":
+            draw_rect(Rect2(p-Vector2(4.5,3.3),Vector2(9,6.6)),Color(.55,.27,.08,.96),true)
+            draw_rect(Rect2(p-Vector2(4.5,3.3),Vector2(9,6.6)),Color(.20,.10,.03,.96),false,1.0)
+            draw_line(p+Vector2(5,-6),p+Vector2(5,5),Color(.28,.16,.05,.96),1.4)
+            draw_colored_polygon(PackedVector2Array([p+Vector2(5,-6),p+Vector2(10,-4),p+Vector2(5,-1)]),Color(.75,.22,.07,.98))
+            if p.distance_to(center)>28.0:_small_label(str(site.get("name","Waystation")),p+Vector2(10,10))
+        else:
+            draw_rect(Rect2(p-Vector2(3,3),Vector2(6,6)),Color(.43,.35,.23,.98),true)
+            draw_colored_polygon(PackedVector2Array([p+Vector2(0,-7),p+Vector2(-5,-2),p+Vector2(5,-2)]),Color(.61,.17,.06,.98))
+            draw_circle(p+Vector2(0,-7),1.7,Color(1.0,.48,.08,.96))
 
 
 func _draw_local_crownspire(capital_center:Vector2,center:Vector2,radius:float)->void:
@@ -434,18 +588,18 @@ func _draw_local_crownspire(capital_center:Vector2,center:Vector2,radius:float)-
 
 
 func _draw_enemies(center: Vector2, radius: float) -> void:
-    if not is_instance_valid(_director):
-        return
-    for position in _director.get_minion_positions():
+    var shown:=0
+    for position in _enemy_position_cache:
         var p := _local_point(Vector2(position.x, position.z), center, radius)
         if p.distance_to(center) < radius:
             draw_circle(p, 3.5, Color(0.32, 0.02, 0.015))
             draw_circle(p, 2.2, Color(0.88, 0.08, 0.035))
+            shown+=1
+            if shown>=16:return
 
 
 func _draw_interactions(center:Vector2,radius:float)->void:
-    if not is_instance_valid(_director) or not _director.has_method("get_world_interaction_markers"):return
-    for marker in _director.get_world_interaction_markers():
+    for marker in _interaction_marker_cache:
         var position:Vector3=marker.position
         var p:=_local_point(Vector2(position.x,position.z),center,radius)
         if p.distance_to(center)>=radius-5.0:continue
@@ -455,6 +609,57 @@ func _draw_interactions(center:Vector2,radius:float)->void:
                 draw_line(p+Vector2(-4,4),p+Vector2(4,-4),Color(.25,.13,.04),1.4)
             "chop":draw_colored_polygon(PackedVector2Array([p+Vector2(0,-4),p+Vector2(-3,3),p+Vector2(3,3)]),Color(.16,.42,.12))
             "gather":draw_circle(p,2.2,Color(.54,.80,.28))
+
+
+func _draw_story_markers(center:Vector2,radius:float)->void:
+    for marker in _story_marker_cache:
+        var position:Vector3=marker.get("position",Vector3.ZERO)
+        var p:=_local_point(Vector2(position.x,position.z),center,radius)
+        if p.distance_to(center)>=radius-7.0:continue
+        var kind:=str(marker.get("kind","story_site"))
+        if kind=="story_objective":
+            var diamond:=PackedVector2Array([p+Vector2(0,-6),p+Vector2(5,0),p+Vector2(0,6),p+Vector2(-5,0)])
+            draw_colored_polygon(diamond,Color(1.0,.70,.10,.98));draw_polyline(diamond,Color(.18,.08,.02),1.3,true)
+        elif kind=="graveyard":
+            draw_line(p+Vector2(0,-4),p+Vector2(0,4),Color(.82,.80,.66),1.8);draw_line(p+Vector2(-3,-1),p+Vector2(3,-1),Color(.82,.80,.66),1.8)
+        elif kind=="dungeon":draw_arc(p,5,PI,TAU,14,Color(.20,.13,.05),2.5,true)
+        else:draw_rect(Rect2(p-Vector2(3.5,3),Vector2(7,6)),Color(.42,.23,.08),true)
+
+
+func _prepare_draw_caches()->void:
+    _bridge_draw_cache.clear()
+    for bridge_value in _profile.get("ford_sites",[]):
+        var bridge:Dictionary=bridge_value
+        var world_point:Vector2=bridge.get("position",Vector2.ZERO)
+        var river_segment:=_nearest_corridor_segment(world_point,_profile.get("river_corridors",[]))
+        var road_segment:=_nearest_corridor_segment(world_point,_profile.get("road_corridors",[]))
+        var tangent:=Vector2(0,1)
+        if bridge.get("standalone",false) and not river_segment.is_empty():
+            var river_direction:Vector2=river_segment.direction
+            tangent=Vector2(-river_direction.y,river_direction.x).normalized()
+        elif not road_segment.is_empty():
+            tangent=road_segment.direction
+        _bridge_draw_cache.append({
+            "position":world_point,
+            "tangent":tangent,
+            "span":float(river_segment.get("width",52.0))*.66+12.0,
+        })
+    _refresh_interaction_cache()
+    _refresh_dynamic_marker_cache()
+
+
+func _refresh_interaction_cache()->void:
+    if is_instance_valid(_director) and _director.has_method("get_world_interaction_markers"):
+        _interaction_marker_cache=_director.get_world_interaction_markers()
+    if is_instance_valid(_director) and _director.has_method("get_story_map_markers"):
+        _story_marker_cache=_director.get_story_map_markers()
+
+
+func _refresh_dynamic_marker_cache()->void:
+    if is_instance_valid(_director) and _director.has_method("get_minion_positions"):
+        _enemy_position_cache=_director.get_minion_positions()
+    if is_instance_valid(_director) and _director.has_method("get_story_map_markers"):
+        _story_marker_cache=_director.get_story_map_markers()
 
 
 func _draw_player(center: Vector2) -> void:
@@ -476,8 +681,12 @@ func _draw_player(center: Vector2) -> void:
 
 
 func _local_point(point: Vector2, center: Vector2, radius: float) -> Vector2:
-    var player_pos := Vector2(_player.global_position.x, _player.global_position.z)
+    var player_pos:=_draw_anchor if _cached_layer_mode and is_finite(_draw_anchor.x) else Vector2(_player.global_position.x,_player.global_position.z)
     return center + (point - player_pos) / view_radius * radius
+
+
+func get_draw_anchor()->Vector2:
+    return _draw_anchor
 
 
 func _player_map_heading() -> float:

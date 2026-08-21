@@ -16,9 +16,9 @@ func _check(condition: bool, label: String) -> void:
 func _run() -> void:
     var scene_resource := load("res://scenes/Main.tscn") as PackedScene
     var main := scene_resource.instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
-    await process_frame
+    await main.boot_world(Callable(),false,true)
 
     var player: Node = main.get_node("Player")
     var director: Node = main.get_node("GameplayDirector")

@@ -1,6 +1,7 @@
 extends Control
 
 @export var hero_path: NodePath = NodePath("../../Player")
+const BRAND_ICON: Texture2D = preload("res://assets/branding/broken_knight_icon_256_v1.png")
 
 var _hero: Node
 var _director: Node
@@ -83,8 +84,11 @@ func _draw_status_panel(state: Dictionary) -> void:
     var y := panel.position.y + pad
     var title := str(state.get("name", "Broken Knight"))
     var subtitle := str(state.get("title", "Frontline Adventurer"))
-    draw_string(ThemeDB.fallback_font, Vector2(x, y + 17.0 * scale_factor), title, HORIZONTAL_ALIGNMENT_LEFT, 190.0 * scale_factor, 18 * scale_factor, Color(0.96, 0.97, 1.0))
-    draw_string(ThemeDB.fallback_font, Vector2(x, y + 34.0 * scale_factor), subtitle, HORIZONTAL_ALIGNMENT_LEFT, 210.0 * scale_factor, 11 * scale_factor, Color(0.56, 0.66, 0.77))
+    var crest_size:=32.0*scale_factor
+    draw_texture_rect(BRAND_ICON,Rect2(Vector2(x,y-4.0*scale_factor),Vector2(crest_size,crest_size)),false)
+    var title_x:=x+crest_size+8.0*scale_factor
+    draw_string(ThemeDB.fallback_font, Vector2(title_x, y + 17.0 * scale_factor), title, HORIZONTAL_ALIGNMENT_LEFT, 152.0 * scale_factor, 18 * scale_factor, Color(0.96, 0.97, 1.0))
+    draw_string(ThemeDB.fallback_font, Vector2(title_x, y + 34.0 * scale_factor), subtitle, HORIZONTAL_ALIGNMENT_LEFT, 174.0 * scale_factor, 11 * scale_factor, Color(0.56, 0.66, 0.77))
 
     var gold_rect := Rect2(panel.end.x - 108.0 * scale_factor, y, 92.0 * scale_factor, 23.0 * scale_factor)
     _pill(gold_rect, "Gold %d" % int(state.get("gold", 0)), Color(0.95, 0.74, 0.30), scale_factor)
@@ -147,16 +151,31 @@ func _draw_controls() -> void:
 func _draw_quest_tracker(state: Dictionary) -> void:
     if not is_instance_valid(_director) or not _director.has_method("get_gameplay_state"): return
     var game: Dictionary = _director.get_gameplay_state()
-    var rect:=Rect2(Vector2(22,202),Vector2(286,92))
+    var rect:=Rect2(Vector2(22,202),Vector2(310,126))
     _panel(rect,Color(0.025,0.035,0.05,0.82),Color(0.43,0.35,0.22,0.75),8.0)
     draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,23),"ACTIVE BOUNTY",HORIZONTAL_ALIGNMENT_LEFT,250,12,Color(0.93,0.75,0.33))
-    draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,46),str(game.get("quest","Riverbank Menace")),HORIZONTAL_ALIGNMENT_LEFT,250,16,Color.WHITE)
+    draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,46),str(game.get("quest","Riverbank Menace")),HORIZONTAL_ALIGNMENT_LEFT,278,16,Color.WHITE)
+    var objective_lines:=_wrap_tracker_text(str(game.get("quest_description","")),46,2)
+    for i in range(objective_lines.size()):draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,65+float(i)*13),objective_lines[i],HORIZONTAL_ALIGNMENT_LEFT,278,10,Color(.82,.84,.79))
     var complete: bool = game.get("quest_complete",false)
     var detail := "COMPLETE - reward claimed" if complete else "Progress  %d / %d" % [game.get("quest_current",0),game.get("quest_goal",8)]
-    draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,70),detail,HORIZONTAL_ALIGNMENT_LEFT,250,12,Color(0.65,0.78,0.69) if complete else Color(0.75,0.79,0.85))
-    draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,85),"H:%d  Logs:%d  Ore:%d  Leather:%d" % [state.get("herbs",0),state.get("logs",0),state.get("ore",0),state.get("leather",0)],HORIZONTAL_ALIGNMENT_LEFT,250,10,Color(0.58,0.65,0.73))
+    draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,96),detail,HORIZONTAL_ALIGNMENT_LEFT,278,12,Color(0.65,0.78,0.69) if complete else Color(0.75,0.79,0.85))
+    draw_string(ThemeDB.fallback_font,rect.position+Vector2(14,114),"H:%d  Logs:%d  Ore:%d  Leather:%d" % [state.get("herbs",0),state.get("logs",0),state.get("ore",0),state.get("leather",0)],HORIZONTAL_ALIGNMENT_LEFT,278,10,Color(0.58,0.65,0.73))
     var interaction:=str(game.get("interaction",""))
-    if not interaction.is_empty():draw_string(ThemeDB.fallback_font,Vector2(22,316),interaction,HORIZONTAL_ALIGNMENT_LEFT,440,14,Color(1,.82,.36))
+    if not interaction.is_empty():draw_string(ThemeDB.fallback_font,Vector2(22,348),interaction,HORIZONTAL_ALIGNMENT_LEFT,470,14,Color(1,.82,.36))
+
+
+func _wrap_tracker_text(value:String,max_characters:int,max_lines:int)->Array[String]:
+    var lines:Array[String]=[];var current:=""
+    for word in value.split(" ",false):
+        var candidate:=word if current.is_empty() else "%s %s"%[current,word]
+        if candidate.length()>max_characters and not current.is_empty():
+            lines.append(current);current=word
+            if lines.size()>=max_lines:break
+        else:current=candidate
+    if lines.size()<max_lines and not current.is_empty():lines.append(current)
+    if lines.size()==max_lines and " ".join(lines).length()<value.length():lines[max_lines-1]="%s…"%lines[max_lines-1].left(maxi(0,max_characters-1))
+    return lines
 
 
 func _panel(rect: Rect2, fill: Color, border: Color, radius: float) -> void:

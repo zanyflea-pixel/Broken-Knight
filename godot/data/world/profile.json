@@ -3,36 +3,46 @@
   "layout_scale": 1.0,
   "grid_resolution": 320,
   "water_level": -1.4,
+  "river_water_lift": 1.35,
+  "river_bank_drop": 1.15,
   "controlled_aqueduct": true,
   "spawn_site": {
     "name": "Riverwatch",
     "position": [-420.0, 70.0],
-    "radius": 72.0
+    "radius": 96.0,
+    "ground_height": 5.4,
+    "ground_inner_ratio": 1.12,
+    "starter": true,
+    "role": "central river-crossing market",
+    "siting_reason": "stable meadow terrace beside the safest Kingsflow crossing and the regional road junction",
+    "connections": ["Westmere", "Highfield", "Eastreach", "Southbank", "Crownspire"]
   },
   "town_sites": [
-    { "name": "Westmere", "position": [-2500.0, -950.0], "radius": 145.0, "ground_height": 6.0 },
-    { "name": "Highfield", "position": [-550.0, 1680.0], "radius": 140.0, "ground_height": 8.0 },
-    { "name": "Eastreach", "position": [2380.0, 980.0], "radius": 150.0, "ground_height": 7.0 },
-    { "name": "Southbank", "position": [1180.0, -1460.0], "radius": 135.0, "ground_height": 6.0 },
-    { "name": "Crownspire", "position": [250.0, -2450.0], "radius": 265.0, "ground_height": 12.0, "capital": true }
+    { "name": "Westmere", "position": [-2500.0, -950.0], "radius": 145.0, "ground_height": 6.0, "role": "western heath and lake-trade town", "siting_reason": "dry western terrace serving the Kingsflow mouth, crofts, lake traffic and west woods", "connections": ["Riverwatch", "Crownspire"] },
+    { "name": "Highfield", "position": [-550.0, 1680.0], "radius": 140.0, "ground_height": 8.0, "role": "northern upland farm town", "siting_reason": "usable downs above the floodplain at the gateway to Northwood and the highlands", "connections": ["Riverwatch"] },
+    { "name": "Eastreach", "position": [2380.0, 980.0], "radius": 150.0, "ground_height": 7.0, "role": "eastern frontier market", "siting_reason": "dry shelf between the Eastreach tributary, forest resources and the eastern realmway", "connections": ["Riverwatch", "Southbank"] },
+    { "name": "Southbank", "position": [1180.0, -1460.0], "radius": 135.0, "ground_height": 6.0, "role": "southern terrace crossroads", "siting_reason": "dry terrace south of the Kingsflow linking the capital, eastern road and Redstone crossings", "connections": ["Riverwatch", "Eastreach", "Crownspire"] },
+    { "name": "Crownspire", "position": [250.0, -2450.0], "radius": 265.0, "ground_height": 24.0, "capital": true, "role": "fortified regional capital", "siting_reason": "defensible southern rise where the western highway and southern market road converge", "connections": ["Riverwatch", "Westmere", "Southbank"] }
   ],
   "camp_sites": [
     { "name": "Pine Camp", "position": [-1720.0, 1080.0], "radius": 45.0 },
     { "name": "Stone Camp", "position": [1760.0, -920.0], "radius": 45.0 }
   ],
   "map_sites": [
-    { "name": "Riverwatch Well", "kind": "well", "position": [-420.0, 70.0] },
-    { "name": "Highfield Windmill", "kind": "windmill", "position": [-435.0, 1590.0] },
-    { "name": "Greywatch Hill Fort", "kind": "ruin", "position": [-1700.0, 1720.0] },
+    { "name": "Riverwatch Well", "kind": "well", "position": [-454.0, 100.0] },
+    { "name": "Ferrywatch Post", "kind": "waystation", "position": [-300.0, -285.0], "radius": 42.0, "ground_height": 4.4, "usable_ground": true, "first_destination": true },
+    { "name": "Riverwatch Beacon", "kind": "watchtower", "position": [-266.0, -286.0], "radius": 12.0, "elevation_radius": 110.0, "elevation_role": "starter-region navigation landmark" },
+    { "name": "Highfield Windmill", "kind": "windmill", "position": [-435.0, 1590.0], "elevation_lift": 6.0, "elevation_inner": 34.0, "elevation_radius": 155.0, "elevation_role": "upland settlement landmark" },
+    { "name": "Greywatch Hill Fort", "kind": "ruin", "position": [-1700.0, 1720.0], "elevation_lift": 18.0, "elevation_inner": 68.0, "elevation_radius": 270.0, "elevation_role": "defensive overlook above the western trail" },
     { "name": "West Road Shrine", "kind": "shrine", "position": [-1337.0, -128.0] },
     { "name": "East Road Shrine", "kind": "shrine", "position": [1168.0, 545.0] },
     { "name": "South Road Shrine", "kind": "shrine", "position": [838.0, -878.0] },
-    { "name": "Crownspire Castle", "kind": "castle", "position": [250.0, -2542.0] }
+    { "name": "Crownspire Castle", "kind": "castle", "position": [250.0, -2542.0], "elevation_radius": 380.0, "elevation_role": "fortified capital plateau" }
   ],
   "landmark_sites": [
     { "name": "Old Oak Ring", "kind": "grove", "species": "oak", "position": [-760.0, 690.0], "radius": 44.0, "count": 13 },
     { "name": "Riverwatch East Copse", "kind": "grove", "species": "birch", "position": [90.0, 520.0], "radius": 48.0, "count": 14 },
-    { "name": "Riverwatch North Stones", "kind": "outcrop", "position": [-80.0, 880.0], "radius": 29.0, "count": 8, "rotation": 0.28 },
+    { "name": "Riverwatch North Stones", "kind": "outcrop", "position": [-80.0, 880.0], "radius": 29.0, "count": 8, "rotation": 0.28, "elevation_lift": 2.5, "elevation_inner": 34.0, "elevation_radius": 135.0, "elevation_role": "starter-meadow overlook" },
     { "name": "Riverwatch Field Hedge", "kind": "hedgerow", "position": [-120.0, 390.0], "radius": 92.0, "count": 34, "rotation": 0.18 },
     { "name": "East Meadow Hedge", "kind": "hedgerow", "position": [410.0, 520.0], "radius": 86.0, "count": 31, "rotation": -0.36 },
     { "name": "Eastreach Birch Stand", "kind": "grove", "species": "birch", "position": [760.0, 650.0], "radius": 52.0, "count": 15 },
@@ -41,11 +51,11 @@
     { "name": "Westmere Windbreak", "kind": "grove", "species": "maple", "position": [-2040.0, -1210.0], "radius": 50.0, "count": 14 },
     { "name": "Willow Pond Stand", "kind": "grove", "species": "willow", "position": [-970.0, 1150.0], "radius": 48.0, "count": 12, "river_clearance": 30.0 },
     { "name": "Westmere Field Hedge", "kind": "hedgerow", "position": [-1480.0, -610.0], "radius": 112.0, "count": 38, "rotation": 0.52 },
-    { "name": "Long Ridge Crown", "kind": "outcrop", "position": [150.0, 760.0], "radius": 28.0, "count": 8, "rotation": 0.45 },
-    { "name": "Westmere Shelf", "kind": "outcrop", "position": [-1750.0, -820.0], "radius": 34.0, "count": 9, "rotation": -0.35 },
-    { "name": "Eastreach Teeth", "kind": "outcrop", "position": [1540.0, 1120.0], "radius": 38.0, "count": 10, "rotation": 0.72 },
-    { "name": "Redstone Overlook", "kind": "outcrop", "position": [2180.0, -1450.0], "radius": 40.0, "count": 11, "rotation": 1.10 },
-    { "name": "Crownspire Approach Stones", "kind": "outcrop", "position": [-160.0, -1920.0], "radius": 31.0, "count": 8, "rotation": -0.18 },
+    { "name": "Long Ridge Crown", "kind": "outcrop", "position": [150.0, 760.0], "radius": 28.0, "count": 8, "rotation": 0.45, "elevation_lift": 7.0, "elevation_inner": 38.0, "elevation_radius": 175.0, "elevation_role": "central ridge overlook" },
+    { "name": "Westmere Shelf", "kind": "outcrop", "position": [-1750.0, -820.0], "radius": 34.0, "count": 9, "rotation": -0.35, "elevation_lift": 7.0, "elevation_inner": 44.0, "elevation_radius": 195.0, "elevation_role": "heath boundary marker" },
+    { "name": "Eastreach Teeth", "kind": "outcrop", "position": [1540.0, 1120.0], "radius": 38.0, "count": 10, "rotation": 0.72, "elevation_lift": 9.0, "elevation_inner": 48.0, "elevation_radius": 220.0, "elevation_role": "eastern regional boundary" },
+    { "name": "Redstone Overlook", "kind": "outcrop", "position": [2030.0, -1560.0], "radius": 40.0, "count": 11, "rotation": 1.10, "elevation_lift": 10.0, "elevation_inner": 46.0, "elevation_radius": 190.0, "elevation_role": "gorge overlook clear of the river crossing" },
+    { "name": "Crownspire Approach Stones", "kind": "outcrop", "position": [-160.0, -1920.0], "radius": 31.0, "count": 8, "rotation": -0.18, "elevation_lift": 3.5, "elevation_inner": 36.0, "elevation_radius": 155.0, "elevation_role": "capital approach marker" },
     { "name": "North Road Waystone", "kind": "waystone", "position": [-720.0, 1370.0], "radius": 10.0, "rotation": 0.20 },
     { "name": "Highfield Lower Hedge", "kind": "hedgerow", "position": [-820.0, 1160.0], "radius": 96.0, "count": 34, "rotation": -0.12 },
     { "name": "Eastern March Waystone", "kind": "waystone", "position": [1320.0, 760.0], "radius": 10.0, "rotation": -0.42 },
@@ -102,26 +112,31 @@
   "pond_sites": [
     { "name": "Willow Pond", "position": [-820.0, 1080.0], "radius": 92.0, "water_height": 1.15 },
     { "name": "Stoneglass Pond", "position": [1320.0, -1120.0], "radius": 76.0, "water_height": 1.35 },
-    { "name": "North Tarn", "position": [-520.0, 2860.0], "radius": 68.0, "water_height": 2.2 }
+    { "name": "North Tarn", "position": [-520.0, 2860.0], "radius": 68.0, "water_height": 3.85 },
+    { "name": "Westmere", "position": [-3260.0, -330.0], "radius": 240.0, "water_height": -0.28 }
   ],
   "waterfall_sites": [
     { "name": "Westfall", "position": [-1160.0, 300.0], "width": 76.0, "drop": 3.2 },
-    { "name": "Eastfall", "position": [2040.0, 330.0], "width": 72.0, "drop": 2.6 }
+    { "name": "Eastfall", "position": [2040.0, 330.0], "width": 48.0, "drop": 2.6 },
+    { "name": "Northwood Falls", "position": [-1170.0, 1800.0], "width": 38.0, "drop": 3.2 },
+    { "name": "Redstone Falls", "position": [2040.0, -740.0], "width": 40.0, "drop": 2.6 }
   ],
   "ocean_basins": [],
   "flat_regions": [],
   "landform_regions": [
     { "name": "Riverwatch Basin", "kind": "basin", "center": [-420.0, 120.0], "radius": 980.0, "aspect": 0.72, "angle": -0.08, "amplitude": 9.0 },
-    { "name": "Riverwatch Meadows", "kind": "rolling", "center": [-20.0, 560.0], "radius": 920.0, "aspect": 0.82, "angle": 0.18, "amplitude": 9.0, "wavelength": 260.0 },
-    { "name": "Western Approach Ridges", "kind": "rolling", "center": [-1280.0, -420.0], "radius": 960.0, "aspect": 0.76, "angle": -0.32, "amplitude": 11.0, "wavelength": 300.0 },
-    { "name": "Westmere Swales", "kind": "rolling", "center": [-2050.0, -850.0], "radius": 1050.0, "aspect": 0.78, "angle": 0.28, "amplitude": 13.0, "wavelength": 360.0 },
-    { "name": "Highfield Downs", "kind": "rolling", "center": [-480.0, 1700.0], "radius": 920.0, "aspect": 0.84, "angle": 0.12, "amplitude": 15.0, "wavelength": 310.0 },
+    { "name": "Riverwatch Meadows", "kind": "rolling", "center": [-20.0, 560.0], "radius": 920.0, "aspect": 0.82, "angle": 0.18, "amplitude": 7.0, "wavelength": 380.0 },
+    { "name": "Western Approach Ridges", "kind": "rolling", "center": [-1280.0, -420.0], "radius": 960.0, "aspect": 0.76, "angle": -0.32, "amplitude": 8.0, "wavelength": 430.0 },
+    { "name": "Westmere Swales", "kind": "rolling", "center": [-2050.0, -850.0], "radius": 1050.0, "aspect": 0.78, "angle": 0.28, "amplitude": 10.0, "wavelength": 470.0 },
+    { "name": "Highfield Downs", "kind": "rolling", "center": [-480.0, 1700.0], "radius": 920.0, "aspect": 0.84, "angle": 0.12, "amplitude": 11.0, "wavelength": 430.0 },
     { "name": "Eastreach Shelf", "kind": "upland", "center": [2200.0, 960.0], "radius": 980.0, "aspect": 0.72, "angle": 0.22, "amplitude": 18.0 },
-    { "name": "Southbank Terraces", "kind": "rolling", "center": [1180.0, -1470.0], "radius": 880.0, "aspect": 0.78, "angle": -0.38, "amplitude": 12.0, "wavelength": 280.0 },
+    { "name": "Southbank Terraces", "kind": "rolling", "center": [1180.0, -1470.0], "radius": 880.0, "aspect": 0.78, "angle": -0.38, "amplitude": 8.5, "wavelength": 410.0 },
     { "name": "Crownspire Rise", "kind": "upland", "center": [220.0, -2130.0], "radius": 1080.0, "aspect": 0.66, "angle": -0.10, "amplitude": 24.0 },
     { "name": "Northwood Vale", "kind": "valley", "center": [-1040.0, 2240.0], "length": 1850.0, "width": 430.0, "angle": 1.30, "amplitude": 16.0 },
     { "name": "Redstone Gorge", "kind": "valley", "center": [2490.0, -2020.0], "length": 1900.0, "width": 390.0, "angle": 1.34, "amplitude": 19.0 },
-    { "name": "Central Long Ridge", "kind": "ridge", "center": [510.0, 1060.0], "length": 1180.0, "width": 290.0, "angle": 0.66, "amplitude": 24.0 },
+    { "name": "Central Long Ridge", "kind": "ridge", "center": [430.0, 1080.0], "length": 1450.0, "width": 340.0, "angle": 0.66, "amplitude": 30.0 },
+    { "name": "Crownspire Highway Pass", "kind": "valley", "center": [-410.0, -1320.0], "length": 1740.0, "width": 470.0, "angle": -1.00, "amplitude": 7.0 },
+    { "name": "Greywatch Fort Spur", "kind": "upland", "center": [-1700.0, 1720.0], "radius": 520.0, "aspect": 0.66, "angle": 0.10, "amplitude": 10.0 },
     { "name": "Riverwatch Eastern Knolls", "kind": "knolls", "center": [720.0, 1120.0], "radius": 720.0, "aspect": 0.68, "angle": 0.18, "amplitude": 14.0, "count": 6 },
     { "name": "Westmere Moor Knolls", "kind": "knolls", "center": [-1880.0, -1530.0], "radius": 760.0, "aspect": 0.72, "angle": -0.44, "amplitude": 16.0, "count": 6 },
     { "name": "Eastreach Broken Hills", "kind": "knolls", "center": [1650.0, 1540.0], "radius": 820.0, "aspect": 0.66, "angle": 0.36, "amplitude": 17.0, "count": 7 },
@@ -140,51 +155,68 @@
   "river_corridors": [
     {
       "name": "Kingsflow River",
-      "width": 84.0,
+      "source_width": 76.0,
+      "mouth_width": 98.0,
+      "width": 98.0,
       "depth": 4.0,
-      "points": [[-3598.0, -250.0], [-3100.0, -430.0], [-2600.0, -180.0], [-2100.0, 260.0], [-1550.0, 420.0], [-1000.0, 250.0], [-450.0, -80.0], [100.0, -380.0], [650.0, -460.0], [1200.0, -210.0], [1750.0, 220.0], [2300.0, 420.0], [2850.0, 260.0], [3598.0, -120.0]]
+      "points": [[1750.0, 220.0], [1400.0, -60.0], [1200.0, -210.0], [650.0, -460.0], [100.0, -380.0], [-450.0, -80.0], [-1000.0, 250.0], [-1550.0, 420.0], [-2100.0, 260.0], [-2600.0, -180.0], [-3040.0, -315.0]]
     },
     {
       "name": "Northwood Tributary",
-      "width": 56.0,
+      "source_width": 22.0,
+      "mouth_width": 48.0,
+      "width": 48.0,
       "depth": 3.5,
-      "points": [[-520.0, 3598.0], [-620.0, 3320.0], [-760.0, 2820.0], [-920.0, 2330.0], [-1180.0, 1840.0], [-1320.0, 1320.0], [-1460.0, 850.0], [-1550.0, 420.0]]
+      "points": [[-570.0, 2805.0], [-700.0, 2580.0], [-920.0, 2330.0], [-1080.0, 2050.0], [-1180.0, 1840.0], [-1320.0, 1320.0], [-1460.0, 850.0], [-1550.0, 420.0]]
     },
     {
       "name": "Redstone Tributary",
+      "source_width": 24.0,
+      "mouth_width": 52.0,
       "width": 52.0,
       "depth": 3.4,
-      "points": [[2920.0, -3598.0], [2820.0, -3320.0], [2700.0, -2750.0], [2530.0, -2200.0], [2320.0, -1680.0], [2160.0, -1120.0], [1940.0, -430.0], [1750.0, 220.0]]
+      "points": [[3900.0, -3700.0], [3520.0, -3500.0], [3150.0, -3350.0], [2800.0, -3100.0], [2730.0, -2800.0], [2630.0, -2350.0], [2530.0, -2200.0], [2320.0, -1680.0], [2160.0, -1120.0], [1940.0, -430.0], [1650.0, -210.0], [1400.0, -60.0]]
+    },
+    {
+      "name": "Eastreach Tributary",
+      "source_width": 20.0,
+      "mouth_width": 46.0,
+      "width": 46.0,
+      "depth": 3.3,
+      "points": [[3800.0, 3000.0], [3490.0, 2760.0], [3250.0, 2480.0], [3020.0, 2200.0], [2840.0, 1830.0], [2670.0, 1400.0], [2570.0, 1010.0], [2460.0, 680.0], [2300.0, 420.0], [2050.0, 300.0], [1750.0, 220.0]]
     }
   ],
     "road_corridors": [
-      { "name": "Highfield Road", "width": 15.0, "points": [[-420.0, 70.0], [-455.0, 260.0], [-420.0, 520.0], [-470.0, 820.0], [-520.0, 1160.0], [-550.0, 1680.0]] },
-      { "name": "Eastreach Road", "width": 15.0, "points": [[-420.0, 70.0], [-120.0, 155.0], [260.0, 220.0], [720.0, 330.0], [1180.0, 520.0], [1760.0, 760.0], [2380.0, 980.0]] },
-      { "name": "Southbank Road", "width": 14.0, "points": [[-420.0, 70.0], [-120.0, 20.0], [220.0, -80.0], [480.0, -220.0], [623.0, -282.0], [650.0, -460.0], [677.0, -638.0], [820.0, -900.0], [1000.0, -1200.0], [1180.0, -1460.0]] },
-      { "name": "Westmere Road", "width": 14.0, "points": [[-420.0, 70.0], [-650.0, 180.0], [-820.0, 320.0], [-926.0, 414.0], [-1000.0, 250.0], [-1074.0, 86.0], [-1350.0, -110.0], [-1700.0, -380.0], [-2080.0, -650.0], [-2500.0, -950.0]] }
-      ,{ "name": "Crownspire Highway", "width": 18.0, "points": [[-1350.0, -110.0], [-1080.0, -390.0], [-720.0, -760.0], [-360.0, -1240.0], [-80.0, -1760.0], [250.0, -2180.0], [250.0, -2260.0], [250.0, -2450.0]] }
+      { "name": "Highfield Road", "route_class": "secondary", "purpose": "settlement spur between Riverwatch and Highfield", "destinations": ["Riverwatch", "Highfield"], "width": 14.0, "terrain_width": 165.0, "terrain_relief": 2.0, "points": [[-420.0, 70.0], [-420.0, 155.0], [-445.0, 260.0], [-420.0, 520.0], [-470.0, 820.0], [-520.0, 1160.0], [-550.0, 1680.0]] },
+      { "name": "Eastreach Road", "route_class": "major", "purpose": "eastern realmway between Riverwatch and Eastreach", "destinations": ["Riverwatch", "Eastreach"], "width": 20.0, "terrain_width": 225.0, "terrain_relief": 3.0, "points": [[-420.0, 70.0], [-335.0, 70.0], [-240.0, 92.0], [-120.0, 155.0], [260.0, 220.0], [720.0, 330.0], [1180.0, 520.0], [1760.0, 760.0], [2380.0, 980.0]] },
+      { "name": "Southbank Road", "route_class": "secondary", "purpose": "southern settlement spur from Riverwatch to Southbank", "destinations": ["Riverwatch", "Southbank"], "width": 16.0, "terrain_width": 175.0, "terrain_relief": 2.2, "points": [[-420.0, 70.0], [-400.0, 18.0], [-386.0, -42.0], [-420.0, -98.0], [-454.0, -154.0], [-420.0, -214.0], [-340.0, -250.0], [-250.0, -360.0], [-180.0, -460.0], [20.0, -540.0], [300.0, -600.0], [580.0, -650.0], [820.0, -900.0], [1000.0, -1200.0], [1180.0, -1460.0]] },
+      { "name": "Westmere Road", "route_class": "major", "purpose": "western realmway between Riverwatch and Westmere", "destinations": ["Riverwatch", "Westmere"], "width": 20.0, "terrain_width": 225.0, "terrain_relief": 3.2, "points": [[-420.0, 70.0], [-500.0, 95.0], [-575.0, 135.0], [-650.0, 210.0], [-760.0, 290.0], [-860.0, 330.0], [-940.0, 330.0], [-976.0, 303.0], [-1000.0, 250.0], [-1024.0, 197.0], [-1100.0, 120.0], [-1220.0, 20.0], [-1350.0, -110.0], [-1700.0, -380.0], [-2080.0, -650.0], [-2500.0, -950.0]] }
+      ,{ "name": "Crownspire Highway", "route_class": "major", "purpose": "capital highway from the western realmway to Crownspire", "destinations": ["Westmere Road", "Crownspire"], "width": 22.0, "terrain_width": 265.0, "terrain_relief": 6.5, "points": [[-1350.0, -110.0], [-1080.0, -390.0], [-720.0, -760.0], [-360.0, -1240.0], [-80.0, -1760.0], [250.0, -2180.0], [250.0, -2260.0], [250.0, -2450.0]] }
+      ,{ "name": "South Ford Road", "route_class": "secondary", "purpose": "regional bypass between Eastreach Road and Southbank Road across the South Ford", "destinations": ["Eastreach Road", "Southbank Road"], "width": 14.0, "terrain_width": 150.0, "terrain_relief": 1.8, "points": [[720.0, 330.0], [710.0, 190.0], [690.0, 20.0], [660.0, -170.0], [645.0, -330.0], [650.0, -460.0], [663.1, -512.7], [620.0, -575.0], [600.0, -670.0], [690.0, -790.0], [820.0, -900.0]] }
+      ,{ "name": "Crownspire Market Road", "route_class": "secondary", "purpose": "direct market road between Southbank terraces and the Crownspire capital gate", "destinations": ["Southbank", "Crownspire"], "width": 16.0, "terrain_width": 205.0, "terrain_relief": 4.2, "points": [[1180.0, -1460.0], [1060.0, -1660.0], [910.0, -1840.0], [730.0, -2020.0], [520.0, -2180.0], [340.0, -2320.0], [250.0, -2450.0]] }
     ],
     "ford_sites": [
-      { "name": "West Ford", "position": [-1000.0, 250.0], "radius": 62.0 },
-      { "name": "South Ford", "position": [650.0, -460.0], "radius": 62.0, "bank_guard": true },
-      { "name": "Western Wilds Bridge", "position": [-2350.0, 40.0], "radius": 62.0, "standalone": true, "bridge_width": 11.0 },
-      { "name": "Eastern Reach Bridge", "position": [2300.0, 420.0], "radius": 62.0, "standalone": true, "bridge_width": 11.0 },
-      { "name": "Northwood Crossing", "position": [-1050.0, 2085.0], "radius": 52.0, "standalone": true, "bridge_width": 9.5 },
-      { "name": "Redstone Crossing", "position": [2250.0, -1435.0], "radius": 52.0, "standalone": true, "bridge_width": 9.5 }
+      { "name": "Riverwatch Bridge", "position": [-420.0, -98.0], "radius": 62.0, "bank_guard": true, "purpose": "starter route from Riverwatch to Ferrywatch Post and Southbank" },
+      { "name": "West Ford", "position": [-1000.0, 250.0], "radius": 62.0, "purpose": "primary Westmere Road crossing" },
+      { "name": "South Ford", "position": [650.0, -460.0], "radius": 62.0, "bank_guard": true, "purpose": "South Ford Road crossing between Eastreach and Southbank" },
+      { "name": "Western Wilds Bridge", "position": [-2350.0, 40.0], "radius": 62.0, "standalone": true, "bridge_width": 11.0, "purpose": "access from Westmere Road to the western wilds and West Cavern" },
+      { "name": "Eastern Reach Bridge", "position": [2300.0, 420.0], "radius": 62.0, "standalone": true, "bridge_width": 11.0, "purpose": "access from Eastreach Road to the eastern heath" },
+      { "name": "Northwood Crossing", "position": [-1223.0, 1680.0], "radius": 52.0, "standalone": true, "bridge_width": 9.5, "purpose": "valley-floor crossing below Northwood Falls linking Highfield to North Tarn" },
+      { "name": "Redstone Crossing", "position": [2250.0, -1435.0], "radius": 52.0, "standalone": true, "bridge_width": 9.5, "purpose": "access from Southbank Road to Redstone Cavern" }
     ],
   "trail_corridors": [
-    { "name": "Riverwatch Trail", "width": 7.0, "points": [[-420.0, 70.0], [-500.0, -10.0], [-690.0, 70.0], [-860.0, 360.0], [-850.0, 700.0], [-820.0, 980.0]] },
-    { "name": "North Meadow Trail", "width": 6.5, "points": [[-435.0, 150.0], [-390.0, 150.0], [-210.0, 410.0], [40.0, 610.0], [300.0, 750.0], [520.0, 820.0]] },
-    { "name": "South Heath Trail", "width": 8.0, "points": [[650.0, -460.0], [540.0, -575.0], [380.0, -680.0], [690.0, -790.0], [820.0, -900.0]] },
-    { "name": "Willow Path", "width": 7.0, "points": [[-820.0, 980.0], [-720.0, 1180.0], [-540.0, 1450.0], [-260.0, 1650.0]] },
-    { "name": "Westmere Bridge Path", "width": 7.0, "points": [[-2500.0, -950.0], [-2490.0, -620.0], [-2410.0, -300.0], [-2312.5, -2.9]] },
-    { "name": "Western Wilds Path", "width": 7.0, "points": [[-2387.5, 82.9], [-2240.0, 360.0], [-2070.0, 690.0], [-1720.0, 1080.0]] },
-    { "name": "West Cavern Approach", "width": 8.0, "engineered_grade": true, "points": [[-1720.0, 1080.0], [-1990.0, 1200.0], [-2260.0, 1370.0], [-2470.0, 1450.0], [-2600.0, 1475.0], [-2680.0, 1510.0], [-2700.0, 1580.0], [-2700.0, 1650.0], [-2700.0, 1714.0]] },
-    { "name": "Eastreach Bridge Path", "width": 7.0, "points": [[2380.0, 980.0], [2330.0, 760.0], [2298.0, 477.0]] },
-    { "name": "Eastern Heath Path", "width": 7.0, "points": [[2302.0, 363.0], [2170.0, 60.0], [1960.0, -350.0], [1760.0, -920.0]] },
-    { "name": "Northwood Approach", "width": 6.5, "points": [[-550.0, 1680.0], [-720.0, 1810.0], [-880.0, 1950.0], [-1006.0, 2062.0]] },
-    { "name": "Southbank Crossing Path", "width": 6.5, "engineered_grade": true, "points": [[1180.0, -1460.0], [1510.0, -1480.0], [1840.0, -1470.0], [1900.0, -1320.0], [2050.0, -1250.0], [2180.0, -1320.0], [2207.0, -1447.0]] },
-    { "name": "Redstone Cavern Path", "width": 8.0, "engineered_grade": true, "points": [[2293.0, -1423.0], [2440.0, -1470.0], [2550.0, -1500.0], [2610.0, -1540.0], [2620.0, -1620.0], [2620.0, -1700.0], [2620.0, -1814.0]] },
-    { "name": "Greywatch Trail", "width": 6.2, "points": [[-1720.0, 1080.0], [-1685.0, 1250.0], [-1740.0, 1420.0], [-1715.0, 1580.0], [-1669.0, 1720.0]] }
+    { "name": "Riverwatch Trail", "route_class": "local", "purpose": "local access from Westmere Road to Willow Pond", "width": 6.5, "points": [[-650.0, 210.0], [-620.0, 300.0], [-690.0, 470.0], [-800.0, 700.0], [-820.0, 980.0]] },
+    { "name": "North Meadow Trail", "route_class": "local", "purpose": "local access from Riverwatch to the North Stones", "width": 5.5, "engineered_grade": true, "points": [[-435.0, 150.0], [-390.0, 150.0], [-210.0, 410.0], [-100.0, 650.0], [-80.0, 880.0]] },
+    { "name": "Willow Path", "route_class": "local", "purpose": "local connection from Willow Pond to Highfield Road", "width": 6.0, "engineered_grade": true, "points": [[-820.0, 980.0], [-720.0, 1180.0], [-540.0, 1450.0]] },
+    { "name": "Westmere Bridge Path", "route_class": "local", "purpose": "Westmere Road approach to the Western Wilds Bridge", "width": 6.0, "engineered_grade": true, "points": [[-2500.0, -950.0], [-2490.0, -620.0], [-2410.0, -300.0], [-2290.0, -230.0], [-2180.0, -150.0], [-2180.0, -80.0], [-2230.0, -30.0], [-2307.3, -2.7]] },
+    { "name": "Western Wilds Path", "route_class": "local", "purpose": "bridge approach from the Kingsflow to Pine Camp", "width": 6.0, "points": [[-2392.7, 82.7], [-2470.0, 160.0], [-2470.0, 250.0], [-2400.0, 340.0], [-2240.0, 500.0], [-2070.0, 690.0], [-1720.0, 1080.0]] },
+    { "name": "West Cavern Approach", "route_class": "local", "purpose": "engineered access from Pine Camp to West Cavern", "width": 6.5, "engineered_grade": true, "points": [[-1720.0, 1080.0], [-1990.0, 1200.0], [-2260.0, 1370.0], [-2470.0, 1450.0], [-2600.0, 1475.0], [-2680.0, 1510.0], [-2700.0, 1580.0], [-2700.0, 1650.0], [-2700.0, 1714.0]] },
+    { "name": "Eastreach Bridge Path", "route_class": "local", "purpose": "Eastreach approach to the Eastern Reach Bridge", "width": 6.0, "points": [[2380.0, 980.0], [2330.0, 760.0], [2276.5, 442.1]] },
+    { "name": "Eastern Heath Path", "route_class": "local", "purpose": "bridge access from Eastreach to Stone Camp", "width": 6.0, "points": [[2323.5, 397.9], [2170.0, 60.0], [1960.0, -350.0], [1760.0, -920.0]] },
+    { "name": "Northwood Approach", "route_class": "local", "purpose": "contour approach from Highfield to the crossing below Northwood Falls", "width": 5.5, "engineered_grade": true, "points": [[-550.0, 1680.0], [-760.0, 1660.0], [-980.0, 1660.0], [-1194.0, 1672.0]] },
+    { "name": "North Tarn Track", "route_class": "local", "purpose": "riverbank switchback climbing from Northwood Crossing to North Tarn", "width": 5.5, "engineered_grade": true, "points": [[-1252.0, 1688.0], [-1290.0, 1840.0], [-1260.0, 2010.0], [-1200.0, 2180.0], [-1110.0, 2350.0], [-1010.0, 2500.0], [-900.0, 2630.0], [-820.0, 2720.0], [-770.0, 2810.0], [-730.0, 2890.0], [-660.0, 2940.0], [-585.0, 2925.0]] },
+    { "name": "Southbank Crossing Path", "route_class": "local", "purpose": "engineered route from Southbank to Redstone Crossing", "width": 6.0, "engineered_grade": true, "points": [[1180.0, -1460.0], [1510.0, -1480.0], [1840.0, -1470.0], [1900.0, -1320.0], [2050.0, -1250.0], [2180.0, -1320.0], [2207.0, -1447.0]] },
+    { "name": "Redstone Cavern Path", "route_class": "local", "purpose": "engineered route from Redstone Crossing to Redstone Cavern", "width": 6.5, "engineered_grade": true, "points": [[2293.0, -1423.0], [2440.0, -1470.0], [2550.0, -1500.0], [2610.0, -1540.0], [2620.0, -1620.0], [2620.0, -1700.0], [2620.0, -1814.0]] },
+    { "name": "Greywatch Trail", "route_class": "local", "purpose": "local access from Pine Camp to Greywatch Hill Fort", "width": 5.5, "engineered_grade": true, "points": [[-1720.0, 1080.0], [-1685.0, 1250.0], [-1740.0, 1420.0], [-1715.0, 1580.0], [-1669.0, 1720.0]] }
   ]
 }

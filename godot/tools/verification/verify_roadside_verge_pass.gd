@@ -18,8 +18,9 @@ func _verify()->void:
         if surface_count<6:failures.append("verge asset does not retain six authored material surfaces")
         instance.free()
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     var props:=main.get_node("WorldRoot/PropsRoot")
     var cluster_count:=int(props.get_meta("roadside_verge_cluster_count",0))
     if cluster_count<80:failures.append("fewer than 80 rural road-verge clusters were accepted")

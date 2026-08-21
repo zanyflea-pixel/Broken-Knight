@@ -1,0 +1,142 @@
+[gd_scene load_steps=6 format=3 uid="uid://broken_knight_boot"]
+
+[ext_resource type="Script" path="res://scripts/Boot.gd" id="1_boot"]
+[ext_resource type="Texture2D" path="res://assets/branding/broken_knight_splash_v1.png" id="2_splash"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.027451, 0.0352941, 0.0470588, 0.97)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.501961, 0.388235, 0.184314, 0.95)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+shadow_color = Color(0, 0, 0, 0.55)
+shadow_size = 8
+shadow_offset = Vector2(0, 3)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_progress_background"]
+bg_color = Color(0.0627451, 0.0784314, 0.105882, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.160784, 0.184314, 0.223529, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_progress_fill"]
+bg_color = Color(0.807843, 0.603922, 0.247059, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="Boot" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_boot")
+
+[node name="Overlay" type="CanvasLayer" parent="."]
+layer = 100
+
+[node name="Background" type="ColorRect" parent="Overlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0156863, 0.0196078, 0.027451, 1)
+
+[node name="Splash" type="TextureRect" parent="Overlay"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -379.5
+offset_top = -297.5
+offset_right = 379.5
+offset_bottom = 201.5
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_splash")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Panel" type="Panel" parent="Overlay"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 210.0
+offset_top = -142.0
+offset_right = -210.0
+offset_bottom = -30.0
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="Overlay/Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 22.0
+offset_top = 15.0
+offset_right = -22.0
+offset_bottom = -15.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 7
+
+[node name="StatusRow" type="HBoxContainer" parent="Overlay/Panel/VBox"]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+
+[node name="Status" type="Label" parent="Overlay/Panel/VBox/StatusRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.909804, 0.929412, 0.960784, 1)
+theme_override_font_sizes/font_size = 16
+text = "Opening Broken Knight"
+horizontal_alignment = 0
+
+[node name="Spacer" type="Control" parent="Overlay/Panel/VBox/StatusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Percent" type="Label" parent="Overlay/Panel/VBox/StatusRow"]
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.956863, 0.792157, 0.435294, 1)
+theme_override_font_sizes/font_size = 16
+text = "2%"
+horizontal_alignment = 2
+
+[node name="Details" type="Label" parent="Overlay/Panel/VBox"]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.588235, 0.639216, 0.709804, 1)
+theme_override_font_sizes/font_size = 13
+text = "Starting the loading scene."
+horizontal_alignment = 0
+
+[node name="ProgressBar" type="ProgressBar" parent="Overlay/Panel/VBox"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_progress_background")
+theme_override_styles/fill = SubResource("StyleBoxFlat_progress_fill")
+value = 2.0
+show_percentage = false

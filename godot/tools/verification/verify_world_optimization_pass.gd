@@ -8,8 +8,9 @@ func _initialize()->void:
 func _verify()->void:
     var failures:Array[String]=[]
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     var terrain:=main.get_node("WorldRoot/TerrainRoot/TerrainMesh") as MeshInstance3D
     var profile:Dictionary=main.get("_active_profile")
     var expected_stride:=int(profile.get("grid_resolution",320))+1

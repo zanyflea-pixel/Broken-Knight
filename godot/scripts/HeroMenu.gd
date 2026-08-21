@@ -18,6 +18,16 @@ var portrait_item_variants:Dictionary={}
 var portrait_base_loin_nodes:Array[Node]=[]
 var portrait_animation_player:AnimationPlayer
 var portrait_skeleton:Skeleton3D
+var portrait_body_geometry:Array[GeometryInstance3D]=[]
+var portrait_hair_geometry:Array[GeometryInstance3D]=[]
+var portrait_face_detail_geometry:Array[GeometryInstance3D]=[]
+var portrait_equipment_model:Node3D
+var portrait_equipment_animation_player:AnimationPlayer
+var portrait_legacy_underbody:Array[GeometryInstance3D]=[]
+var portrait_equipment_skeleton:Skeleton3D
+var portrait_sword_root:Node3D
+var portrait_shield_root:Node3D
+var portrait_staff_root:Node3D
 
 
 func configure(hero_node:Node,gameplay_director:Node=null)->void:
@@ -62,7 +72,15 @@ func _ready()->void:
     margin.add_child(page)
 
     var header:=HBoxContainer.new()
+    header.add_theme_constant_override("separation",10)
     page.add_child(header)
+    var brand_icon:=TextureRect.new()
+    brand_icon.texture=preload("res://assets/branding/broken_knight_icon_256_v1.png")
+    brand_icon.custom_minimum_size=Vector2(38,38)
+    brand_icon.expand_mode=TextureRect.EXPAND_IGNORE_SIZE
+    brand_icon.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+    brand_icon.mouse_filter=Control.MOUSE_FILTER_IGNORE
+    header.add_child(brand_icon)
     var title:=Label.new()
     title.text="HERO & INVENTORY"
     title.add_theme_font_size_override("font_size",22)
@@ -180,6 +198,16 @@ func refresh()->void:
             for equipment_node in portrait_piece_roots[slot]:
                 equipment_node.visible=not state.slots.get(slot,{}).is_empty()
     var lower_armor_shown:bool=not state.slots.get("pants",{}).is_empty()
+    var head_armor_shown:bool=not state.slots.get("head",{}).is_empty()
+    var full_plate:bool=not state.slots.get("head",{}).is_empty() and not state.slots.get("chest",{}).is_empty() and not state.slots.get("shoulders",{}).is_empty() and not state.slots.get("hands",{}).is_empty() and not state.slots.get("feet",{}).is_empty() and lower_armor_shown
+    for geometry in portrait_body_geometry:
+        if is_instance_valid(geometry):geometry.visible=not full_plate
+    for geometry in portrait_legacy_underbody:
+        if is_instance_valid(geometry):geometry.visible=false
+    for geometry in portrait_face_detail_geometry:
+        if is_instance_valid(geometry):geometry.visible=not head_armor_shown
+    for geometry in portrait_hair_geometry:
+        if is_instance_valid(geometry):geometry.visible=not head_armor_shown
     for loin_node in portrait_base_loin_nodes:
         if is_instance_valid(loin_node):loin_node.visible=not lower_armor_shown
     for item_id in portrait_item_variants:
@@ -246,25 +274,39 @@ func _build_portrait(columns:HBoxContainer)->void:
     world.add_child(preview_env)
     _add_portrait_stage(world)
 
-    var scene:PackedScene=load("res://assets/hero/hero_base_body.glb")
+    var scene:PackedScene=load("res://assets/hero/hero_runtime_optimized_v1.glb")
     portrait_model=scene.instantiate() as Node3D
     world.add_child(portrait_model)
+    _apply_portrait_runtime_materials(portrait_model)
     portrait_model.position=Vector3(0,-.52,0)
     portrait_piece_roots={"head":[],"chest":[],"shoulders":[],"hands":[],"feet":[],"pants":[]}
     portrait_item_variants={}
     portrait_base_loin_nodes=[]
+    portrait_body_geometry=[]
+    portrait_hair_geometry=[]
+    portrait_legacy_underbody=[]
+    _collect_portrait_geometry(portrait_model,portrait_body_geometry)
     _collect_portrait_equipment(portrait_model)
     portrait_skeleton=_find_portrait_skeleton(portrait_model)
     portrait_animation_player=_find_portrait_animation_player(portrait_model)
+    # The canonical hero already contains the six armor slots.  Loading a
+    # second full hero here used to overlap two armor sets and doubled the
+    # portrait's skinned geometry, which caused shimmer and stale-asset drift.
+    portrait_equipment_model=null
+    portrait_equipment_animation_player=null
+    portrait_equipment_skeleton=null
     _apply_portrait_leg_mass()
     var axe_tool:=_add_portrait_axe()
     _add_portrait_aliases(axe_tool,["forester_axe","quest_forester_axe"])
     _add_portrait_tool("starter_pickaxe","res://assets/items/pickaxe.glb",.34,Vector3(.45,.76,.18),Vector3.ZERO)
     _add_portrait_tool("starter_fishing_pole","res://assets/items/fishing_pole.glb",.50,Vector3(.43,.76,.18))
-    var sword_tool:=_add_portrait_tool("royal_vanguard_sword","res://assets/equipment/royal_vanguard_sword.glb",1.0,Vector3(.375,1.175,.257),Vector3(-.12,.05,-.12))
+    var sword_tool:=_add_portrait_tool("royal_vanguard_sword","res://assets/equipment/royal_vanguard_sword.glb",1.0,Vector3.ZERO,Vector3(-.12,.05,-.12))
+    portrait_sword_root=sword_tool
     _add_portrait_aliases(sword_tool,["iron_sword"])
-    var shield_tool:=_add_portrait_tool("royal_vanguard_shield","res://assets/equipment/royal_vanguard_shield.glb",1.0,Vector3(-.333,1.178,.334),Vector3(-.08,-.14,.10))
+    var shield_tool:=_add_portrait_tool("royal_vanguard_shield","res://assets/equipment/royal_vanguard_shield.glb",1.0,Vector3.ZERO,Vector3(-.08,-.14,.10))
+    portrait_shield_root=shield_tool
     _add_portrait_aliases(shield_tool,["oak_shield"])
+    portrait_staff_root=_add_portrait_tool("royal_vanguard_staff","res://assets/equipment/royal_vanguard_staff.glb",1.0,Vector3.ZERO,Vector3.ZERO)
     _add_portrait_torch()
 
     var light:=DirectionalLight3D.new()
@@ -394,6 +436,78 @@ func _collect_portrait_equipment(node:Node)->void:
         node.visible=false
     for child in node.get_children():
         _collect_portrait_equipment(child)
+
+
+func _collect_portrait_geometry(node:Node,output:Array[GeometryInstance3D])->void:
+    # The full body hides under complete armor. The fully enclosed logo helmet
+    # also hides the face patch, eyes, brows, and normal scalp groom.
+    if node is GeometryInstance3D:
+        var node_name:=String(node.name)
+        if node_name=="ConnectedBody":output.append(node as GeometryInstance3D)
+        elif node_name=="ProfessionalHelmetFace":portrait_legacy_underbody.append(node as GeometryInstance3D)
+        elif node_name.begins_with("ProfessionalEyes") or node_name.begins_with("ProfessionalBrows"):portrait_face_detail_geometry.append(node as GeometryInstance3D)
+        elif node_name.begins_with("HeroHair"):portrait_hair_geometry.append(node as GeometryInstance3D)
+    for child in node.get_children():_collect_portrait_geometry(child,output)
+
+
+func _apply_portrait_runtime_materials(node:Node)->void:
+    if node is MeshInstance3D:
+        var mesh_node:=node as MeshInstance3D
+        var node_name:=String(mesh_node.name)
+        var material:=StandardMaterial3D.new()
+        material.roughness=.84
+        if node_name.begins_with("RoyalArmor_"):
+            _apply_portrait_royal_materials(mesh_node)
+        elif node_name=="ConnectedBody" or node_name=="ProfessionalHelmetFace":
+            material.albedo_color=Color(.64,.40,.30,1)
+            mesh_node.set_surface_override_material(0,material)
+        elif node_name=="ProfessionalBrows":
+            pass
+        elif node_name.begins_with("HeroHair"):
+            var imported:=mesh_node.mesh.surface_get_material(0) as BaseMaterial3D if mesh_node.mesh.get_surface_count()>0 else null
+            if imported==null or (imported.albedo_texture==null and imported.normal_texture==null):
+                material.albedo_color=Color(.11,.09,.08,1)
+                material.roughness=.78
+                mesh_node.set_surface_override_material(0,material)
+    for child in node.get_children():_apply_portrait_runtime_materials(child)
+
+
+func _apply_portrait_royal_materials(mesh_node:MeshInstance3D)->void:
+    if mesh_node.mesh==null:return
+    for surface in range(mesh_node.mesh.get_surface_count()):
+        var source:=mesh_node.mesh.surface_get_material(surface)
+        var name_value:=String(source.resource_name) if source!=null else ""
+        var material:=StandardMaterial3D.new()
+        material.cull_mode=BaseMaterial3D.CULL_DISABLED
+        material.shading_mode=BaseMaterial3D.SHADING_MODE_PER_PIXEL
+        match name_value:
+            "Royal Cobalt Filigree Plate":
+                material.albedo_color=Color(.07,.14,.28,1);material.metallic=.65;material.roughness=.46
+            "Royal Gilt Brass":material.albedo_color=Color(.70,.46,.15);material.metallic=.72;material.roughness=.42
+            "Royal Blackened Steel":material.albedo_color=Color(.065,.085,.13);material.metallic=.52;material.roughness=.58
+            "Helmet Interior":material.albedo_color=Color(.003,.005,.009);material.metallic=.04;material.roughness=.90
+            "Royal Blued Steel":material.albedo_color=Color(.08,.16,.30);material.metallic=.68;material.roughness=.44
+            "Royal Planished Edge Steel":material.albedo_color=Color(.16,.21,.30);material.metallic=.68;material.roughness=.42
+            "Riveted Mail":material.albedo_color=Color(.12,.16,.22);material.metallic=.58;material.roughness=.58
+            "Harness Leather":material.albedo_color=Color(.31,.18,.09);material.metallic=0;material.roughness=.84
+            "Ducal Crimson Horsehair":material.albedo_color=Color(.42,.045,.065);material.metallic=.06;material.roughness=.74
+            "Ducal Horsehair Shadow":material.albedo_color=Color(.16,.018,.03);material.metallic=.02;material.roughness=.82
+            _:continue
+        material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+        mesh_node.set_surface_override_material(surface,material)
+
+
+func _configure_portrait_equipment_carrier(node:Node)->void:
+    if node is GeometryInstance3D:
+        var geometry:=node as GeometryInstance3D
+        var node_name:=String(node.name)
+        if node_name.begins_with("RoyalArmor_") or node_name.begins_with("RoyalStaff_"):
+            geometry.visible=true
+        elif node_name=="ConnectedBody":
+            geometry.visible=false
+            portrait_legacy_underbody.append(geometry)
+        else:geometry.visible=false
+    for child in node.get_children():_configure_portrait_equipment_carrier(child)
 
 
 func _add_portrait_variant(item_id:String,node:Node)->void:
@@ -538,6 +652,34 @@ func _sync_portrait_pose(mainhand:String,offhand:String)->void:
     portrait_animation_player.play(target)
     portrait_animation_player.seek(0.0,true)
     portrait_animation_player.pause()
+    if is_instance_valid(portrait_equipment_animation_player) and portrait_equipment_animation_player.has_animation(target):
+        portrait_equipment_animation_player.play(target)
+        portrait_equipment_animation_player.seek(0.0,true)
+        portrait_equipment_animation_player.pause()
+    _position_portrait_weapons()
+
+
+func _portrait_bone_world_position(bone_name:String)->Vector3:
+    if not is_instance_valid(portrait_skeleton):return Vector3.ZERO
+    var bone:=portrait_skeleton.find_bone(bone_name)
+    if bone<0:return Vector3.ZERO
+    return portrait_skeleton.global_transform*portrait_skeleton.get_bone_global_pose(bone).origin
+
+
+func _position_portrait_weapons()->void:
+    if not is_instance_valid(portrait_model) or not is_instance_valid(portrait_skeleton):return
+    var forward:=portrait_model.global_basis.z.normalized()
+    var right:=portrait_model.global_basis.x.normalized()
+    var up:=portrait_model.global_basis.y.normalized()
+    if is_instance_valid(portrait_sword_root):
+        portrait_sword_root.global_position=_portrait_bone_world_position("hand.L")+up*.072
+        portrait_sword_root.global_basis=portrait_model.global_basis*Basis.from_euler(Vector3(-.12,.05,-.12))*Basis(Vector3.UP,PI*.5)
+    if is_instance_valid(portrait_shield_root):
+        portrait_shield_root.global_position=_portrait_bone_world_position("hand.R")-up*.025+right*.095+forward*.145
+        portrait_shield_root.global_basis=portrait_model.global_basis*Basis.from_euler(Vector3(-.08,-.14,.10))
+    if is_instance_valid(portrait_staff_root):
+        portrait_staff_root.global_position=_portrait_bone_world_position("hand.R")
+        portrait_staff_root.global_basis=portrait_model.global_basis
 
 
 func _unhandled_input(event:InputEvent)->void:

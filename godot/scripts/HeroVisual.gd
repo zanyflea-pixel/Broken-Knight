@@ -1,6 +1,7 @@
 extends Node3D
 
-const IMPORTED_HERO_SCENE := preload("res://assets/hero/hero_base_body.glb")
+const IMPORTED_HERO_PATH := "res://assets/hero/hero_runtime_optimized_v1.glb"
+const ROYAL_STAFF_SCENE := preload("res://assets/equipment/royal_vanguard_staff.glb")
 const AXE_SCENE:=preload("res://assets/items/axe_v2.glb")
 const PICKAXE_SCENE:=preload("res://assets/items/pickaxe.glb")
 const FISHING_POLE_SCENE:=preload("res://assets/items/fishing_pole.glb")
@@ -51,6 +52,7 @@ var _armor_right_leg: Node3D
 var _armor_head_anchor: Node3D
 var _armor_cape: Node3D
 var _imported_hero: Node3D
+var _continuous_body_geometry: Array[GeometryInstance3D] = []
 var _equipment_armor_root: Node3D
 var _equipment_piece_roots: Dictionary = {}
 var _base_loin_nodes: Array[Node] = []
@@ -79,6 +81,7 @@ var _shield_attachment: BoneAttachment3D
 var _warrior_equipped := false
 var _imported_animation_player: AnimationPlayer
 var _imported_skeleton: Skeleton3D
+var _leg_scale_bones := PackedInt32Array()
 var _sword_forearm_bone := -1
 var _sword_forearm_base_rotation := Quaternion.IDENTITY
 var _sword_forearm_base_ready := false
@@ -90,6 +93,9 @@ var _action_animation_state: StringName = &""
 var _action_time := 0.0
 var _action_kind := ""
 var _death_active := false
+var _diagnostic_hero_mode := ""
+var _mounted := false
+var _mounted_pose_base:Dictionary={}
 
 var _skin_mat: StandardMaterial3D
 var _face_mat: StandardMaterial3D
@@ -102,6 +108,14 @@ var _boot_mat: StandardMaterial3D
 var _steel_mat: StandardMaterial3D
 var _iron_mat: StandardMaterial3D
 var _trim_mat: StandardMaterial3D
+var _royal_cobalt_mat:StandardMaterial3D
+var _royal_dark_mat:StandardMaterial3D
+var _helmet_interior_mat:StandardMaterial3D
+var _royal_blued_mat:StandardMaterial3D
+var _royal_bright_mat:StandardMaterial3D
+var _royal_mail_mat:StandardMaterial3D
+var _royal_crimson_mat:StandardMaterial3D
+var _royal_crimson_dark_mat:StandardMaterial3D
 var _tabard_mat: StandardMaterial3D
 var _cape_mat: StandardMaterial3D
 var _eye_mat: StandardMaterial3D
@@ -117,15 +131,24 @@ func _ready() -> void:
 	_build_materials()
 	_build_visuals()
 	set_armored(false)
+	_diagnostic_hero_mode = OS.get_environment("BROKEN_KNIGHT_HERO_DIAGNOSTIC").strip_edges().to_lower()
+	if _diagnostic_hero_mode == "hidden":
+		_imported_hero.visible = false
+		_imported_hero.process_mode = Node.PROCESS_MODE_DISABLED
+	elif _diagnostic_hero_mode == "static":
+		_imported_hero.process_mode = Node.PROCESS_MODE_DISABLED
 
 
 func _process(delta: float) -> void:
+	if _diagnostic_hero_mode == "hidden" or _diagnostic_hero_mode == "static":
+		return
 	_time += delta
 	_walk_cycle += delta * lerpf(1.6, 7.2, _move_blend)
 	_action_time = maxf(0.0, _action_time - delta)
 	_apply_animation()
 	_update_imported_animation()
 	_apply_leg_proportion_correction()
+	_apply_mounted_pose()
 	_update_hand_torch_transform()
 	_update_torch_effects()
 	_update_staff_effects()
@@ -158,6 +181,20 @@ func set_equipment_pieces(slots:Dictionary)->void:
 		any=any or shown
 	_equipment_armor_root.visible=any
 	var lower_armor_shown:bool=not slots.get("pants",{}).is_empty()
+	var head_armor_shown:bool=not slots.get("head",{}).is_empty()
+	var full_plate: bool = not slots.get("head",{}).is_empty() and not slots.get("chest",{}).is_empty() and not slots.get("shoulders",{}).is_empty() and not slots.get("hands",{}).is_empty() and not slots.get("feet",{}).is_empty() and lower_armor_shown
+	for geometry in _continuous_body_geometry:
+		if not is_instance_valid(geometry):continue
+		var geometry_name:=String(geometry.name)
+		if geometry_name.begins_with("RoyalArmor_"):continue
+		if geometry_name=="ProfessionalHelmetFace":
+			geometry.visible=false
+		elif geometry_name.begins_with("ProfessionalEyes") or geometry_name.begins_with("ProfessionalBrows"):
+			geometry.visible=not head_armor_shown
+		elif geometry_name.begins_with("HeroHair"):
+			geometry.visible=not head_armor_shown
+		else:
+			geometry.visible=not full_plate
 	for loin_node in _base_loin_nodes:
 		if is_instance_valid(loin_node):loin_node.visible=not lower_armor_shown
 	if is_instance_valid(_torch_root):
@@ -222,6 +259,24 @@ func set_movement_speed(speed: float) -> void:
 	_movement_speed = maxf(speed, 0.0)
 
 
+func set_mounted(enabled:bool)->void:
+	if _mounted==enabled:return
+	if not enabled:_restore_mounted_pose()
+	_mounted=enabled
+	_air_animation_state=&""
+	_action_animation_state=&""
+	_action_kind=""
+	_action_time=0.0
+	_current_imported_animation=&""
+	_update_imported_animation(true)
+
+
+func _play_synced_equipment(animation: StringName, blend := 0.0, speed := 1.0) -> void:
+	# Armor is consolidated onto the hero's own armature, so one AnimationPlayer
+	# now drives both body and equipment without a second per-frame seek.
+	pass
+
+
 func play_jump() -> void:
 	if not is_instance_valid(_imported_animation_player):
 		return
@@ -229,6 +284,7 @@ func play_jump() -> void:
 	_current_imported_animation = &"Jump"
 	_imported_animation_player.speed_scale = 1.0
 	_imported_animation_player.play(&"Jump", 0.10)
+	_play_synced_equipment(&"Jump", 0.10, 1.0)
 
 
 func play_land() -> void:
@@ -240,6 +296,7 @@ func play_land() -> void:
 	# polished clip before the controller's locomotion handoff.
 	_imported_animation_player.speed_scale = 1.12
 	_imported_animation_player.play(&"Land", 0.08)
+	_play_synced_equipment(&"Land", 0.08, 1.12)
 
 
 func play_roll() -> void:
@@ -250,6 +307,7 @@ func play_roll() -> void:
 	_current_imported_animation = &"Roll"
 	_imported_animation_player.speed_scale = 1.0
 	_imported_animation_player.play(&"Roll", 0.04)
+	_play_synced_equipment(&"Roll", 0.04, 1.0)
 	_action_time = _imported_animation_player.get_animation(&"Roll").length
 
 
@@ -261,6 +319,7 @@ func play_death() -> void:
 	if is_instance_valid(_imported_animation_player) and _imported_animation_player.has_animation(&"Death"):
 		_imported_animation_player.speed_scale=1.0
 		_imported_animation_player.play(&"Death",.06)
+		_play_synced_equipment(&"Death", .06, 1.0)
 
 
 func reset_death() -> void:
@@ -301,6 +360,7 @@ func play_action(kind: String) -> void:
 		_current_imported_animation = target
 		_imported_animation_player.speed_scale = 1.0
 		_imported_animation_player.play(target,0.08)
+		_play_synced_equipment(target, 0.08, 1.0)
 		_action_time = _imported_animation_player.get_animation(target).length
 	else:
 		_action_time = 0.32 if kind != "orb" else 0.48
@@ -389,10 +449,10 @@ func _apply_procedural_sword_swing(phase: float) -> void:
 		"clavicle.L",
 		_sword_pose_rotation(
 			phase,
-			Vector3(0.0,0.0,deg_to_rad(-8.0)),
-			Vector3(0.0,0.0,deg_to_rad(-14.0)),
-			Vector3(0.0,0.0,deg_to_rad(-6.0)),
-			Vector3(0.0,0.0,deg_to_rad(12.0))
+			Vector3(0.0,0.0,deg_to_rad(8.0)),
+			Vector3(0.0,0.0,deg_to_rad(14.0)),
+			Vector3(0.0,0.0,deg_to_rad(2.0)),
+			Vector3(0.0,0.0,deg_to_rad(-2.0))
 		)
 	)
 
@@ -402,10 +462,10 @@ func _apply_procedural_sword_swing(phase: float) -> void:
 		"upper_arm.L",
 		_sword_pose_rotation(
 			phase,
-			Vector3(deg_to_rad(-32.0),0.0,deg_to_rad(-68.0)),
-			Vector3(deg_to_rad(-72.0),0.0,deg_to_rad(-82.0)),
-			Vector3(deg_to_rad(16.0),0.0,deg_to_rad(-46.0)),
-			Vector3(deg_to_rad(30.0),0.0,deg_to_rad(18.0))
+			Vector3(deg_to_rad(-30.0),0.0,deg_to_rad(56.0)),
+			Vector3(deg_to_rad(-68.0),0.0,deg_to_rad(72.0)),
+			Vector3(deg_to_rad(12.0),0.0,deg_to_rad(-6.0)),
+			Vector3(deg_to_rad(24.0),0.0,deg_to_rad(-12.0))
 		)
 	)
 
@@ -415,10 +475,10 @@ func _apply_procedural_sword_swing(phase: float) -> void:
 		"forearm.L",
 		_sword_pose_rotation(
 			phase,
-			Vector3(deg_to_rad(48.0),deg_to_rad(46.0),0.0),
-			Vector3(deg_to_rad(78.0),deg_to_rad(64.0),0.0),
-			Vector3(deg_to_rad(42.0),deg_to_rad(30.0),deg_to_rad(3.0)),
-			Vector3(deg_to_rad(22.0),deg_to_rad(2.0),deg_to_rad(6.0))
+			Vector3(deg_to_rad(46.0),deg_to_rad(38.0),0.0),
+			Vector3(deg_to_rad(72.0),deg_to_rad(52.0),0.0),
+			Vector3(deg_to_rad(30.0),deg_to_rad(22.0),deg_to_rad(3.0)),
+			Vector3(deg_to_rad(20.0),deg_to_rad(12.0),deg_to_rad(5.0))
 		)
 	)
 
@@ -450,7 +510,7 @@ func _restore_procedural_sword_swing() -> void:
 	_sword_pose_ready=false
 
 func _build_materials() -> void:
-	_skin_mat = _make_lit_material(Color(0.77, 0.63, 0.52, 1.0), 0.95, 0.0)
+	_skin_mat = _make_lit_material(Color(0.64, 0.40, 0.30, 1.0), 0.84, 0.0)
 	_face_mat = _make_lit_material(Color(0.71, 0.57, 0.47, 1.0), 0.92, 0.0)
 	_hair_mat = _make_lit_material(Color(0.11, 0.09, 0.08, 1.0), 0.78, 0.0)
 	_cloth_mat = _make_lit_material(Color(0.46, 0.34, 0.24, 1.0), 0.92, 0.0)
@@ -460,7 +520,21 @@ func _build_materials() -> void:
 	_boot_mat = _make_lit_material(Color(0.13, 0.09, 0.08, 1.0), 0.88, 0.0)
 	_steel_mat = _make_metal_material(Color(0.72, 0.77, 0.83, 1.0), 0.18, 0.95)
 	_iron_mat = _make_metal_material(Color(0.52, 0.57, 0.63, 1.0), 0.28, 0.82)
-	_trim_mat = _make_metal_material(Color(0.89, 0.74, 0.33, 1.0), 0.20, 0.94)
+	_trim_mat = _make_metal_material(Color(0.70, 0.46, 0.15, 1.0), 0.42, 0.72)
+	# Stable authored metals replace the old filigree texture override. The
+	# texture produced purple highlights/shimmer and added needless texture work
+	# to every cobalt surface while moving.
+	# The world has a restrained reflection environment.  Very dark, highly
+	# metallic values read as a black hole in play even when the Blender preview
+	# looks correct, so these remain metal while retaining readable blue forms.
+	_royal_cobalt_mat=_make_metal_material(Color(.07,.14,.28,1),.46,.65)
+	_royal_dark_mat=_make_metal_material(Color(.065,.085,.13,1),.58,.52)
+	_helmet_interior_mat=_make_metal_material(Color(.003,.005,.009,1),.90,.04)
+	_royal_blued_mat=_make_metal_material(Color(.08,.16,.30,1),.44,.68)
+	_royal_bright_mat=_make_metal_material(Color(.16,.21,.30,1),.42,.68)
+	_royal_mail_mat=_make_metal_material(Color(.12,.16,.22,1),.58,.58)
+	_royal_crimson_mat=_make_lit_material(Color(.42,.045,.065,1),.74,.06)
+	_royal_crimson_dark_mat=_make_lit_material(Color(.16,.018,.03,1),.82,.02)
 	_tabard_mat = _make_lit_material(Color(0.15, 0.25, 0.52, 1.0), 0.92, 0.0)
 	_cape_mat = _make_lit_material(Color(0.41, 0.09, 0.08, 1.0), 0.90, 0.0)
 	_eye_mat = _make_lit_material(Color(0.06, 0.05, 0.05, 1.0), 0.50, 0.0)
@@ -483,17 +557,30 @@ func _build_visuals() -> void:
 	add_child(_armor_root)
 	_build_armored_hero(_armor_root)
 
-	_imported_hero = IMPORTED_HERO_SCENE.instantiate()
+	var imported_path := OS.get_environment("BROKEN_KNIGHT_HERO_SCENE").strip_edges()
+	if imported_path.is_empty():
+		imported_path = IMPORTED_HERO_PATH
+	var imported_scene := load(imported_path) as PackedScene
+	_imported_hero = imported_scene.instantiate()
 	_imported_hero.name = "ImportedBlenderHero"
 	add_child(_imported_hero)
+	_apply_continuous_runtime_materials(_imported_hero)
+	_collect_geometry(_imported_hero, _continuous_body_geometry)
 	_build_equipment_armor()
 	_build_staff_focus()
 	_build_warrior_weapons()
 	_build_hand_torch()
 	_imported_animation_player = _find_animation_player(_imported_hero)
+	_configure_locomotion_loops(_imported_animation_player)
 	_imported_skeleton = _find_skeleton(_imported_hero)
 	if is_instance_valid(_imported_skeleton):
 		_sword_forearm_bone=_imported_skeleton.find_bone("forearm.L")
+		_leg_scale_bones = PackedInt32Array([
+			_imported_skeleton.find_bone("thigh.L"),
+			_imported_skeleton.find_bone("thigh.R"),
+			_imported_skeleton.find_bone("shin.L"),
+			_imported_skeleton.find_bone("shin.R"),
+		])
 	_current_imported_animation = &""
 	_air_animation_state = &""
 	_action_animation_state = &""
@@ -502,6 +589,16 @@ func _build_visuals() -> void:
 	_armor_root.visible = false
 	_equipment_armor_root.visible = false
 	_torch_root.visible = false
+
+
+func _configure_locomotion_loops(player:AnimationPlayer)->void:
+	if not is_instance_valid(player):return
+	# glTF does not reliably carry Blender's cyclic-action flag into Godot.
+	# Locomotion must loop in engine or the character freezes on the final pose
+	# while the controller continues moving.
+	for animation_name in [&"Idle",&"Walk",&"TorchIdle",&"TorchWalk",&"StaffIdle",&"StaffWalk",&"WarriorIdle",&"WarriorWalk"]:
+		if player.has_animation(animation_name):
+			player.get_animation(animation_name).loop_mode=Animation.LOOP_LINEAR
 
 
 func _build_equipment_armor() -> void:
@@ -513,9 +610,61 @@ func _build_equipment_armor() -> void:
 	_base_loin_nodes=[]
 	_staff_nodes=[]
 	_collect_imported_armor(_imported_hero)
+	_build_standalone_staff()
 	for slot in _equipment_piece_roots:
 		for armor_node in _equipment_piece_roots[slot]:
 			armor_node.visible=false
+
+
+func _collect_geometry(node: Node, output: Array[GeometryInstance3D]) -> void:
+	if node is GeometryInstance3D: output.append(node as GeometryInstance3D)
+	for child in node.get_children(): _collect_geometry(child, output)
+
+
+func _apply_continuous_runtime_materials(node:Node)->void:
+	# Blender procedural nodes do not survive glTF. Assign explicit Godot
+	# materials to the imported runtime surfaces so the hero can never turn
+	# white and the groom retains a consistent dark-brown finish.
+	if node is MeshInstance3D:
+		var mesh_node:=node as MeshInstance3D
+		var node_name:=String(mesh_node.name)
+		if node_name.begins_with("RoyalArmor_"):
+			_apply_royal_armor_materials(mesh_node)
+		elif node_name=="ConnectedBody" or node_name=="ProfessionalHelmetFace":
+			mesh_node.set_surface_override_material(0,_skin_mat)
+		elif node_name=="ProfessionalBrows":
+			# The rebuilt brows carry a high-roughness matte Blender material.
+			# Preserve it so they remain solid instead of shimmering like fibers.
+			pass
+		elif node_name.begins_with("HeroHair"):
+			# Keep Blender's embedded directional albedo/normal maps on the new
+			# groom.  Fall back to the flat material only for legacy untextured
+			# hair assets.
+			var imported:=mesh_node.mesh.surface_get_material(0) as BaseMaterial3D if mesh_node.mesh.get_surface_count()>0 else null
+			if imported==null or (imported.albedo_texture==null and imported.normal_texture==null):
+				mesh_node.set_surface_override_material(0,_hair_mat)
+	for child in node.get_children():_apply_continuous_runtime_materials(child)
+
+
+func _apply_royal_armor_materials(mesh_node:MeshInstance3D)->void:
+	if mesh_node.mesh==null:return
+	for surface in range(mesh_node.mesh.get_surface_count()):
+		var imported:=mesh_node.mesh.surface_get_material(surface)
+		var material_name:=String(imported.resource_name) if imported!=null else ""
+		var replacement:Material
+		match material_name:
+			"Royal Cobalt Filigree Plate":replacement=_royal_cobalt_mat
+			"Royal Gilt Brass":replacement=_trim_mat
+			"Royal Blackened Steel":replacement=_royal_dark_mat
+			"Helmet Interior":replacement=_helmet_interior_mat
+			"Royal Blued Steel":replacement=_royal_blued_mat
+			"Royal Planished Edge Steel":replacement=_royal_bright_mat
+			"Riveted Mail":replacement=_royal_mail_mat
+			"Harness Leather":replacement=_belt_mat
+			"Ducal Crimson Horsehair":replacement=_royal_crimson_mat
+			"Ducal Horsehair Shadow":replacement=_royal_crimson_dark_mat
+			_:replacement=imported
+		if replacement!=null:mesh_node.set_surface_override_material(surface,replacement)
 
 
 func _collect_imported_armor(node:Node)->void:
@@ -533,10 +682,32 @@ func _collect_imported_armor(node:Node)->void:
 	for child in node.get_children():_collect_imported_armor(child)
 
 
+func _build_standalone_staff()->void:
+	var staff:=ROYAL_STAFF_SCENE.instantiate() as Node3D
+	staff.name="RoyalStaff_Runtime"
+	var skeleton:=_find_skeleton(_imported_hero)
+	if skeleton!=null and skeleton.find_bone("hand.R")>=0:
+		if not is_instance_valid(_staff_hand_attachment):
+			_staff_hand_attachment=BoneAttachment3D.new()
+			_staff_hand_attachment.name="RoyalStaffGrip"
+			_staff_hand_attachment.bone_name="hand.R"
+			skeleton.add_child(_staff_hand_attachment)
+		_staff_hand_attachment.add_child(staff)
+		# glTF converts the Blender staff's long Z axis to Godot Y. The authored
+		# origin is already centered at the hand grip.
+		staff.position=Vector3(0.0,0.0,0.0)
+		staff.rotation=Vector3.ZERO
+	else:
+		add_child(staff)
+	_staff_nodes.append(staff)
+	staff.visible=false
+
+
 func _build_staff_focus()->void:
 	var skeleton:=_find_skeleton(_imported_hero)
 	if skeleton==null or skeleton.find_bone("hand.R")<0:return
-	_staff_hand_attachment=BoneAttachment3D.new();_staff_hand_attachment.name="RoyalStaffGrip";_staff_hand_attachment.bone_name="hand.R";skeleton.add_child(_staff_hand_attachment)
+	if not is_instance_valid(_staff_hand_attachment):
+		_staff_hand_attachment=BoneAttachment3D.new();_staff_hand_attachment.name="RoyalStaffGrip";_staff_hand_attachment.bone_name="hand.R";skeleton.add_child(_staff_hand_attachment)
 	_staff_focus_marker=Node3D.new();_staff_focus_marker.name="RoyalStaffFocus";_staff_focus_marker.position=Vector3(0,-1.02,0);_staff_hand_attachment.add_child(_staff_focus_marker)
 	var aura_mat:=StandardMaterial3D.new();aura_mat.albedo_color=Color(.18,.04,.06,.10);aura_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA;aura_mat.emission_enabled=true;aura_mat.emission=Color(.30,.01,.015);aura_mat.emission_energy_multiplier=.55;aura_mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
 	_staff_focus_aura=_add_sphere(_staff_focus_marker,Vector3.ZERO,Vector3(.045,.045,.045),aura_mat)
@@ -564,7 +735,7 @@ func _build_warrior_weapons()->void:
 		# Blender's authored tip (.08, 2.10, -.18) converted to Godot's Y-up
 		# glTF coordinates.  The marker follows the hand and animated rod.
 		_fishing_pole_tip=Node3D.new();_fishing_pole_tip.name="FishingPoleTip";_fishing_pole_tip.position=Vector3(.08,-.18,-2.10);_fishing_pole_root.add_child(_fishing_pole_tip)
-	if skeleton.find_bone("hand.L")>=0:
+	if skeleton.find_bone("hand.R")>=0:
 		_shield_attachment=BoneAttachment3D.new();_shield_attachment.name="RoyalShieldGrip";_shield_attachment.bone_name="hand.R";skeleton.add_child(_shield_attachment)
 		_shield_root=ROYAL_SHIELD_SCENE.instantiate() as Node3D
 		_shield_root.name="RoyalVanguardShield"
@@ -704,7 +875,9 @@ func _update_imported_animation(force: bool = false) -> void:
 		_current_imported_animation = &""
 	var carrying_torch := is_instance_valid(_torch_root) and _torch_root.visible
 	var target: StringName
-	if _warrior_equipped:
+	if _mounted:
+		target=&"WarriorIdle" if _warrior_equipped and _imported_animation_player.has_animation(&"WarriorIdle") else &"Idle"
+	elif _warrior_equipped:
 		target=&"WarriorWalk" if _move_blend>.08 else &"WarriorIdle"
 		if not _imported_animation_player.has_animation(target):target=&"Walk" if _move_blend>.08 else &"Idle"
 	elif _staff_equipped:
@@ -716,7 +889,7 @@ func _update_imported_animation(force: bool = false) -> void:
 			target = &"Walk" if _move_blend > 0.08 else &"Idle"
 	else:
 		target = &"Walk" if _move_blend > 0.08 else &"Idle"
-	if force or target != _current_imported_animation:
+	if force or target != _current_imported_animation or not _imported_animation_player.is_playing():
 		_imported_animation_player.play(target, 0.16)
 		_current_imported_animation = target
 	if target == &"Walk" or target == &"TorchWalk" or target == &"StaffWalk" or target == &"WarriorWalk":
@@ -725,6 +898,40 @@ func _update_imported_animation(force: bool = false) -> void:
 		_imported_animation_player.speed_scale = clampf(_movement_speed / 3.6, 0.78, 2.35)
 	else:
 		_imported_animation_player.speed_scale = 1.0
+
+
+func _apply_mounted_pose()->void:
+	if not _mounted or not is_instance_valid(_imported_skeleton):return
+	if _mounted_pose_base.is_empty():
+		for bone_name in ["pelvis","thigh.L","thigh.R","shin.L","shin.R","foot.L","foot.R"]:
+			var bone:=_imported_skeleton.find_bone(bone_name)
+			if bone>=0:_mounted_pose_base[bone_name]=_imported_skeleton.get_bone_pose_rotation(bone)
+	var offsets:={
+		"pelvis":Vector3(deg_to_rad(-4.0),0.0,0.0),
+		"thigh.L":Vector3(deg_to_rad(-49.0),deg_to_rad(-17.0),deg_to_rad(-8.0)),
+		"thigh.R":Vector3(deg_to_rad(-49.0),deg_to_rad(17.0),deg_to_rad(8.0)),
+		"shin.L":Vector3(deg_to_rad(76.0),0.0,0.0),
+		"shin.R":Vector3(deg_to_rad(76.0),0.0,0.0),
+		"foot.L":Vector3(deg_to_rad(-22.0),0.0,0.0),
+		"foot.R":Vector3(deg_to_rad(-22.0),0.0,0.0),
+	}
+	for bone_name in offsets:
+		if not _mounted_pose_base.has(bone_name):continue
+		var bone:=_imported_skeleton.find_bone(bone_name)
+		if bone<0:continue
+		var base:Quaternion=_mounted_pose_base[bone_name]
+		var euler:Vector3=offsets[bone_name]
+		_imported_skeleton.set_bone_pose_rotation(bone,base*Basis.from_euler(euler).get_rotation_quaternion())
+	_imported_skeleton.force_update_all_bone_transforms()
+
+
+func _restore_mounted_pose()->void:
+	if is_instance_valid(_imported_skeleton):
+		for bone_name in _mounted_pose_base:
+			var bone:=_imported_skeleton.find_bone(String(bone_name))
+			if bone>=0:_imported_skeleton.set_bone_pose_rotation(bone,_mounted_pose_base[bone_name])
+		_imported_skeleton.force_update_all_bone_transforms()
+	_mounted_pose_base.clear()
 
 
 func _update_warrior_weapon_action()->void:
@@ -751,13 +958,15 @@ func _update_warrior_weapon_action()->void:
 			if _action_kind=="sword" and _action_time>0.0:
 				# Keep the sword attached to the animated hand.
 				# The arm moves the weapon; the weapon no longer rotates independently.
-				var local_grip_basis:=Basis.from_euler(Vector3(-.12,.05,-.12))*Basis(Vector3.UP,PI*.5)
+				# Roll the blade away from the armored forearm while preserving the
+				# hilt's seated position in the anatomical right hand (hand.L).
+				var local_grip_basis:=Basis.from_euler(Vector3(-.10,.05,.20))*Basis(Vector3.UP,PI*.5)
 				var local_grip:=Transform3D(local_grip_basis,SWORD_GRIP_LOCAL_POSITION)
 				_sword_root.global_transform=_sword_attachment.global_transform*local_grip
 			else:
 				_sword_action_grip_ready=false
 				_sword_root.global_position=_sword_attachment.to_global(SWORD_GRIP_LOCAL_POSITION)
-				_sword_root.global_basis=Basis(Vector3.UP,global_rotation.y)*Basis.from_euler(Vector3(body_spin-.12,.05,-.12))*Basis(Vector3.UP,PI*.5)
+				_sword_root.global_basis=Basis(Vector3.UP,global_rotation.y)*Basis.from_euler(Vector3(body_spin-.10,.05,.20))*Basis(Vector3.UP,PI*.5)
 	if is_instance_valid(_axe_root):
 		_axe_root.rotation=Vector3(-arc*1.05,arc*.72,-arc*.22) if _action_kind=="chop" and _action_time>0.0 else Vector3.ZERO
 	if is_instance_valid(_pickaxe_root):
@@ -768,14 +977,20 @@ func _update_warrior_weapon_action()->void:
 		# the violent, disconnected casting motion.
 		_fishing_pole_root.rotation=Vector3(0,0,PI)
 	if is_instance_valid(_shield_root):
-		# The shield stays strapped to the animated left hand.
+		# The shield model is authored face-forward. Mount it in world space so
+		# the crest faces away from the hero and its point remains downward;
+		# inheriting the hand/forearm bone axes rotated it almost onto its back.
 		var forward:=global_basis.z.normalized()
 		var right:=global_basis.x.normalized()
-		var combo_clear:=arc*.025 if _action_kind=="sword" and _action_time>0.0 else 0.0
+		# Keep the guard on the shield side and the cut on the sword side.  The
+		# previous subtraction pulled the shield inward across the breastplate,
+		# directly into the blade path during the middle of the slash.
+		var combo_clear:=arc*.075 if _action_kind=="sword" and _action_time>0.0 else 0.0
 		var bash_drive:=arc*.34 if _action_kind=="shield" and _action_time>0.0 else 0.0
 		if is_instance_valid(_shield_attachment):
-			_shield_root.global_position=_shield_attachment.global_position-Vector3.UP*(.025+combo_clear*.22)-right*(.090+combo_clear)+forward*(.145+bash_drive)
-		_shield_root.global_basis=Basis(Vector3.UP,global_rotation.y)*Basis.from_euler(Vector3(body_spin-.08-arc*.18,-.14,.10))
+			_shield_root.global_position=_shield_attachment.global_position-Vector3.UP*(.025+combo_clear*.12)+right*(.095+combo_clear)+forward*(.145+bash_drive+combo_clear*.20)
+			_shield_root.global_basis=Basis(Vector3.UP,global_rotation.y)*Basis.from_euler(Vector3(body_spin-.08-arc*.10,-.10,.08))
+
 
 
 func get_fishing_line_origin()->Vector3:
@@ -790,14 +1005,14 @@ func _apply_leg_proportion_correction()->void:
 	# Preserve bone length and planted feet while keeping a strong-man amount of
 	# thigh and calf mass.  The previous .87/.91 squeeze made the armored legs
 	# look weak beside the cuirass and gauntlets.
-	var skeleton:=_find_skeleton(_imported_hero)
-	if skeleton==null:return
-	for bone_name in ["thigh.L","thigh.R"]:
-		var index:=skeleton.find_bone(bone_name)
-		if index>=0:skeleton.set_bone_pose_scale(index,Vector3(.96,1.0,.96))
-	for bone_name in ["shin.L","shin.R"]:
-		var index:=skeleton.find_bone(bone_name)
-		if index>=0:skeleton.set_bone_pose_scale(index,Vector3(.97,1.0,.97))
+	if not is_instance_valid(_imported_skeleton) or _leg_scale_bones.size() != 4:
+		return
+	for index in range(2):
+		if _leg_scale_bones[index] >= 0:
+			_imported_skeleton.set_bone_pose_scale(_leg_scale_bones[index],Vector3(.96,1.0,.96))
+	for index in range(2,4):
+		if _leg_scale_bones[index] >= 0:
+			_imported_skeleton.set_bone_pose_scale(_leg_scale_bones[index],Vector3(.97,1.0,.97))
 
 
 func _build_poor_hero(root: Node3D) -> void:
@@ -842,7 +1057,10 @@ func _apply_animation() -> void:
 	var bob: float = sin(_walk_cycle * 2.0) * 0.04 * _move_blend
 	# The imported Blender hero owns its body motion through the skeleton. Keep
 	# the legacy procedural bob only for the fallback constructed characters.
-	position.y = 0.0 if is_instance_valid(_imported_hero) else bob
+	# Mounted characters need their whole visual root seated above the saddle.
+	# HeroController's node offset cannot own this because this animation pass
+	# deliberately resets the imported root every frame.
+	position.y = .92 if _mounted else (0.0 if is_instance_valid(_imported_hero) else bob)
 
 	if is_instance_valid(_left_arm):
 		_left_arm.rotation.x = swing

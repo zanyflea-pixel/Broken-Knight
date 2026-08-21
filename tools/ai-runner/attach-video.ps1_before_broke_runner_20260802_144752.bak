@@ -1,0 +1,297 @@
+param(
+    [string]$ProjectRoot = "C:\Users\Jimmy\Desktop\Broken Knight",
+    [string]$VideoPath = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+$OutputDir = Join-Path $ProjectRoot "Powershell output"
+$TestFile = Join-Path $OutputDir "test.txt"
+$LogFile = Join-Path $OutputDir "ai-runner.log"
+
+New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+
+function Report([string]$m) {
+    Add-Content -LiteralPath $TestFile -Value $m -Encoding UTF8
+}
+function Log([string]$m) {
+    Add-Content -LiteralPath $LogFile -Value ("{0} | {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),$m) -Encoding UTF8
+}
+
+if ([string]::IsNullOrWhiteSpace($VideoPath)) {
+    $latest = Get-ChildItem -LiteralPath (Join-Path $ProjectRoot "captures") -Filter "*.avi" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    if (-not $latest) {
+        Report "AUTO_UPLOAD: FAILED - no AVI found"
+        Log "UPLOAD_V2_FAILED|no AVI found"
+        exit 2
+    }
+    $VideoPath = $latest.FullName
+}
+
+$VideoPath = [IO.Path]::GetFullPath($VideoPath)
+
+if (-not (Test-Path -LiteralPath $VideoPath -PathType Leaf)) {
+    Report "AUTO_UPLOAD: FAILED - AVI missing"
+    Log "UPLOAD_V2_FAILED|AVI missing|$VideoPath"
+    exit 3
+}
+
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class BKForeground {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+
+function Desc($root) {
+    return $root.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    )
+}
+
+function ById($root,[string]$id) {
+    $c = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id
+    )
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c)
+}
+
+function Chat {
+    foreach ($p in @(Get-Process firefox -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0})) {
+        try {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+            $url = ById $root "urlbar-input"
+            if ($url -and ([string]$url.Current.Name -match '^https://chatgpt\.com/')) {
+                return [pscustomobject]@{ Process=$p; Root=$root }
+            }
+        } catch {}
+    }
+    return $null
+}
+
+function FileDialog {
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    foreach ($w in $desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    )) {
+        try {
+            if ($w.Current.IsOffscreen) { continue }
+            $field = ById $w "1148"
+            if ($field) {
+                return $w
+            }
+        } catch {}
+    }
+    return $null
+}
+
+function WaitDialog([int]$ms) {
+    $n = [Math]::Ceiling($ms / 150.0)
+    for ($i=0; $i -lt $n; $i++) {
+        Start-Sleep -Milliseconds 150
+        $d = FileDialog
+        if ($d) { return $d }
+    }
+    return $null
+}
+
+function Bring-DialogForward($dialog) {
+    try {
+        $hwnd = [IntPtr]([int64]$dialog.Current.NativeWindowHandle)
+        if ($hwnd -ne [IntPtr]::Zero) {
+            [void][BKForeground]::SetForegroundWindow($hwnd)
+            Start-Sleep -Milliseconds 250
+            return
+        }
+    } catch {}
+
+    try {
+        $pidValue = [int]$dialog.Current.ProcessId
+        $ws = New-Object -ComObject WScript.Shell
+        [void]$ws.AppActivate($pidValue)
+        Start-Sleep -Milliseconds 250
+    } catch {}
+}
+
+function Submit-Path-ByKeyboard($dialog,[string]$path) {
+    Bring-DialogForward $dialog
+
+    # Primary fix:
+    # Windows common Open dialog uses Alt+N for the File name field.
+    try {
+        [System.Windows.Forms.Clipboard]::SetText($path)
+        [System.Windows.Forms.SendKeys]::SendWait("%n")
+        Start-Sleep -Milliseconds 200
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        Start-Sleep -Milliseconds 80
+        [System.Windows.Forms.SendKeys]::SendWait("^v")
+        Start-Sleep -Milliseconds 250
+        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+        return $true
+    } catch {
+        Log "UPLOAD_V2_ALT_N_EXCEPTION|$($_.Exception.Message)"
+    }
+
+    return $false
+}
+
+function Submit-Path-ByInnerEdit($dialog,[string]$path) {
+    # Fallback: 1148 is sometimes a ComboBox rather than the writable Edit.
+    $outer = ById $dialog "1148"
+    if (-not $outer) { return $false }
+
+    $target = $outer
+    try {
+        foreach ($e in (Desc $outer)) {
+            try {
+                $type = [string]$e.Current.ControlType.ProgrammaticName
+                if ($type -match 'Edit$') {
+                    $target = $e
+                    break
+                }
+            } catch {}
+        }
+    } catch {}
+
+    try {
+        [System.Windows.Forms.Clipboard]::SetText($path)
+        $target.SetFocus()
+        Start-Sleep -Milliseconds 150
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        Start-Sleep -Milliseconds 80
+        [System.Windows.Forms.SendKeys]::SendWait("^v")
+        Start-Sleep -Milliseconds 250
+        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+        return $true
+    } catch {
+        Log "UPLOAD_V2_INNER_EDIT_EXCEPTION|$($_.Exception.Message)"
+    }
+
+    return $false
+}
+
+function Dialog-Still-Open {
+    try {
+        return [bool](FileDialog)
+    } catch {
+        return $false
+    }
+}
+
+function Verify-Attachment([string]$basename,[int]$seconds) {
+    for ($i=0; $i -lt ($seconds * 4); $i++) {
+        Start-Sleep -Milliseconds 250
+        $chat = Chat
+        if (-not $chat) { continue }
+
+        foreach ($e in (Desc $chat.Root)) {
+            try {
+                if ([string]$e.Current.Name -like "*$basename*") {
+                    return $true
+                }
+            } catch {}
+        }
+    }
+    return $false
+}
+
+$chat = Chat
+if (-not $chat) {
+    Report "AUTO_UPLOAD: FAILED - ChatGPT Firefox tab not found"
+    Log "UPLOAD_V2_FAILED|ChatGPT tab not found"
+    exit 4
+}
+
+$ws = New-Object -ComObject WScript.Shell
+[void]$ws.AppActivate($chat.Process.Id)
+Start-Sleep -Milliseconds 400
+
+$chat = Chat
+$plus = ById $chat.Root "composer-plus-btn"
+if (-not $plus) {
+    Report "AUTO_UPLOAD: FAILED - composer plus button not found"
+    Log "UPLOAD_V2_FAILED|composer-plus-btn missing"
+    exit 5
+}
+
+try {
+    $plus.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+} catch {
+    Report "AUTO_UPLOAD: FAILED - could not open attachment menu"
+    Log "UPLOAD_V2_FAILED|plus activation"
+    exit 6
+}
+
+Start-Sleep -Milliseconds 400
+
+# Known-good bounded ChatGPT menu path.
+[System.Windows.Forms.SendKeys]::SendWait("{HOME}")
+Start-Sleep -Milliseconds 100
+[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+
+$dialog = WaitDialog 1800
+
+if (-not $dialog) {
+    [System.Windows.Forms.SendKeys]::SendWait("{HOME}")
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    $dialog = WaitDialog 2200
+}
+
+if (-not $dialog) {
+    [System.Windows.Forms.SendKeys]::SendWait("{ESC}{ESC}")
+    Report "AUTO_UPLOAD: FAILED - Windows file chooser did not appear"
+    Log "UPLOAD_V2_FAILED|no file chooser"
+    exit 10
+}
+
+Report "AUTO_UPLOAD_FILE_CHOOSER: FOUND"
+Log "UPLOAD_V2_FILE_CHOOSER_FOUND"
+
+$submitted = Submit-Path-ByKeyboard $dialog $VideoPath
+Start-Sleep -Seconds 1
+
+if ($submitted -and (Dialog-Still-Open)) {
+    Log "UPLOAD_V2_ALT_N_DID_NOT_CLOSE_DIALOG|trying inner edit"
+    $dialog = FileDialog
+    if ($dialog) {
+        $submitted = Submit-Path-ByInnerEdit $dialog $VideoPath
+        Start-Sleep -Seconds 1
+    }
+}
+
+if (-not $submitted -or (Dialog-Still-Open)) {
+    Report "AUTO_UPLOAD: FAILED - file chooser stayed open after path submission"
+    Log "UPLOAD_V2_FAILED|file chooser stayed open"
+    exit 11
+}
+
+Report "AUTO_UPLOAD_SUBMITTED: $VideoPath"
+Log "UPLOAD_V2_SUBMITTED|$VideoPath"
+
+Start-Sleep -Seconds 1
+[void]$ws.AppActivate($chat.Process.Id)
+
+$basename = [IO.Path]::GetFileName($VideoPath)
+
+if (Verify-Attachment $basename 12) {
+    Report "AUTO_UPLOAD_VERIFIED: $basename"
+    Report "AUTO_UPLOAD_RESULT: SUCCESS"
+    Log "UPLOAD_V2_SUCCESS|$VideoPath"
+    exit 0
+}
+
+Report "AUTO_UPLOAD_RESULT: SUBMITTED_UNVERIFIED"
+Log "UPLOAD_V2_SUBMITTED_UNVERIFIED|$VideoPath"
+exit 0

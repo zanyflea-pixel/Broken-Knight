@@ -1,9 +1,12 @@
 extends RefCounted
 
 const TERRAIN_MATERIAL_COLOR := Color(1.0, 1.0, 1.0, 1.0)
-const TERRAIN_CACHE_VERSION:=6
-const TERRAIN_MESH_CACHE_VERSION:=2
+const TERRAIN_CACHE_VERSION:=36
+const TERRAIN_MESH_CACHE_VERSION:=3
 const TERRAIN_PROFILE_PATH:="res://data/world/profile.json"
+const MAX_RIVER_BANK_GRADE:=0.42
+const RIVER_TERRAIN_INFLUENCE:=620.0
+const MAX_TERRAIN_CELL_GRADE:=0.28
 
 var _base_noise: FastNoiseLite
 var _detail_noise: FastNoiseLite
@@ -12,8 +15,10 @@ var _valley_noise: FastNoiseLite
 var _biome_noise: FastNoiseLite
 var _moisture_noise: FastNoiseLite
 var _bridge_sites_cache: Array[Dictionary] = []
-var _engineered_trails_cache: Array[Dictionary] = []
+var _engineered_route_buckets:Dictionary={}
 var _river_segment_buckets:Dictionary={}
+var _river_walkable_buckets:Dictionary={}
+var _surface_route_buckets:Dictionary={}
 var _river_junctions:Array[Vector2]=[]
 var _last_sampled_river_distance := -1.0
 const RIVER_BUCKET_SIZE:=256.0
@@ -66,7 +71,7 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
     var water_level: float = profile.get("water_level", -18.0)
     _prepare_bridge_cache(profile)
     _prepare_river_segment_cache(profile)
-    _prepare_engineered_trail_cache(profile)
+    _prepare_engineered_route_cache(profile)
 
     var expected_height_count:=(grid_resolution+1)*(grid_resolution+1)
     var heights:PackedFloat32Array=PackedFloat32Array()
@@ -89,6 +94,7 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
                 var grid_index := _grid_index(x_idx, z_idx, grid_resolution)
                 heights[grid_index] = h
                 river_distances[grid_index] = _last_sampled_river_distance
+        heights=_stabilize_heightfield(heights,grid_resolution,world_size)
         _store_heightfield_cache(terrain_cache_path,heights,river_distances)
         _profile_generation_step("heightfield",profile_start_usec)
 
@@ -140,13 +146,12 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
     # No ocean plane in the controlled aqueduct test world.
 
     var road_junctions := _collect_road_junctions(profile.get("road_corridors", []))
+    _prepare_surface_route_cache(profile, road_junctions)
     return {
         "spawn_position": spawn_position,
         "water_level": water_level,
         "height_sampler": func(x: float, z: float) -> Vector3:
             var sampled_height := _sample_heightfield(x, z, heights, world_size, grid_resolution)
-            var bank_height:=_river_bank_surface_height(Vector2(x,z),profile,world_size,grid_resolution)
-            if bank_height>-INF:sampled_height=maxf(sampled_height,bank_height)
             var bridge_info := _bridge_deck_info(Vector2(x, z), profile)
             if not bridge_info.is_empty():
                 var terrain_blend: float = float(bridge_info.get("terrain_blend", 0.0))
@@ -161,32 +166,26 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
                 # Give movement the identical profile so feet rest on the
                 # visible road instead of continuing to follow the grass below.
                 var point := Vector2(x, z)
-                sampled_height += maxf(_road_surface_offset(point, profile, road_junctions), _trail_surface_offset(point, profile))
+                sampled_height += _surface_route_offset(point)
             return Vector3(x, sampled_height, z),
         "terrain_height_sampler": func(x: float, z: float) -> Vector3:
             var sampled_height:=_sample_heightfield(x,z,heights,world_size,grid_resolution)
-            var bank_height:=_river_bank_surface_height(Vector2(x,z),profile,world_size,grid_resolution)
-            if bank_height>-INF:sampled_height=maxf(sampled_height,bank_height)
             return Vector3(x,sampled_height,z),
-        # Uncarved authored land is used to reconstruct visible river-bank
-        # slopes over the widened hidden channel support. Those slope meshes
-        # carry collision, so their visual and walkable surfaces agree.
-        "land_surface_sampler": func(x:float,z:float)->Vector3:
-            return Vector3(x,_land_surface_without_water(Vector2(x,z),profile),z),
         "structure_height_sampler": func(x: float, z: float, current_y: float) -> float:
             return _castle_structure_height(Vector2(x, z), current_y, profile),
         "river_height_sampler": func(x: float, z: float) -> Vector3:
-            var river_grade := _river_grade(x)
+            var river_grade:=_river_centerline_grade(Vector2(x,z),profile)
             return Vector3(x, river_grade - 2.8, z),
         "walkable_sampler": func(x: float, z: float) -> bool:
             var inside_world := absf(x) < world_size * 0.49 and absf(z) < world_size * 0.49
             var point := Vector2(x, z)
             var inside_channel := false
-            for river in profile.get("river_corridors", []):
+            var local_river:=_nearest_cached_walkable_river_segment(point,profile)
+            if not local_river.is_empty():
                 # Only the deeper central channel is blocked. The outer bank
                 # remains walkable so the hero can approach and wade through
                 # the gently submerged shelf without crossing the whole river.
-                var channel_limit: float = float(river.get("width", 84.0)) * 0.35
+                var channel_limit: float = float(local_river.get("width", 84.0)) * 0.35
                 # Bridge sites are intentional access points. Let the player
                 # wade farther into the water beside a bridge while retaining
                 # a blocked deep core, so this does not become an accidental
@@ -195,11 +194,10 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
                     var ford_center: Vector2 = ford.get("position", Vector2.ZERO)
                     var ford_radius: float = float(ford.get("radius", 62.0))
                     if point.distance_to(ford_center) <= ford_radius * 1.15:
-                        channel_limit = float(river.get("width", 84.0)) * 0.24
+                        channel_limit = float(local_river.get("width", 84.0)) * 0.24
                         break
-                if _distance_to_polyline(point, river.get("points", [])) < channel_limit:
+                if float(local_river.get("distance", INF)) < channel_limit:
                     inside_channel = true
-                    break
             var on_bridge := not _bridge_deck_info(point, profile).is_empty()
             return inside_world and (not inside_channel or on_bridge),
     }
@@ -215,15 +213,15 @@ func _profile_generation_step(label:String,start_usec:int)->void:
 
 func _terrain_cache_path(profile:Dictionary)->String:
     var zone_id:=str(profile.get("zone_id","starting_realm")).validate_filename()
-    # Decorative landmarks, camps and encounter data do not affect terrain.
-    # Keep them out of the signature so an ecology pass does not trigger an
-    # expensive heightfield rebuild on the player's next launch.
+    # Most decorative data does not affect terrain. Named elevation landmarks
+    # are an exception: overlooks and hill forts now author the ground beneath
+    # them, so map and landmark sites belong in the heightfield signature.
     var terrain_profile:Dictionary={}
     for key in [
         "world_size","grid_resolution","water_level","controlled_aqueduct",
         "spawn_site","town_sites","mountain_chains","landform_regions",
         "pond_sites","river_corridors","road_corridors","trail_corridors",
-        "ford_sites","forest_regions",
+        "ford_sites","forest_regions","landmark_sites","map_sites",
     ]:
         terrain_profile[key]=profile.get(key)
     var profile_hash:=str(hash(terrain_profile)).replace("-","n")
@@ -305,6 +303,54 @@ func _sample_heightfield(x: float, z: float, heights: PackedFloat32Array, world_
     return d * weight_d + b * weight_b + c * weight_c
 
 
+func _stabilize_heightfield(heights:PackedFloat32Array,grid_resolution:int,world_size:float)->PackedFloat32Array:
+    # A heightfield cannot form an actual topological hole, but a very tall
+    # single-cell face behaves like one in play: the player falls beside it and
+    # sees the culled underside. Bound every shared grid edge to a steep but
+    # traversable cliff grade. This final integrity pass covers river valleys,
+    # route cuts, settlement pads and cave mountains with the same contract.
+    var stride:=grid_resolution+1
+    var maximum_delta:=world_size/maxf(1.0,float(grid_resolution))*MAX_TERRAIN_CELL_GRADE
+    for iteration in range(12):
+        var changed:=false
+        for z_index in range(stride):
+            for x_index in range(stride):
+                var index:=z_index*stride+x_index
+                if x_index<grid_resolution:
+                    var right:=index+1
+                    var difference:=float(heights[index])-float(heights[right])
+                    if difference>maximum_delta:
+                        heights[index]=float(heights[right])+maximum_delta;changed=true
+                    elif difference < -maximum_delta:
+                        heights[right]=float(heights[index])+maximum_delta;changed=true
+                if z_index<grid_resolution:
+                    var below:=index+stride
+                    var difference:=float(heights[index])-float(heights[below])
+                    if difference>maximum_delta:
+                        heights[index]=float(heights[below])+maximum_delta;changed=true
+                    elif difference < -maximum_delta:
+                        heights[below]=float(heights[index])+maximum_delta;changed=true
+        for z_index in range(grid_resolution,-1,-1):
+            for x_index in range(grid_resolution,-1,-1):
+                var index:=z_index*stride+x_index
+                if x_index>0:
+                    var left:=index-1
+                    var difference:=float(heights[index])-float(heights[left])
+                    if difference>maximum_delta:
+                        heights[index]=float(heights[left])+maximum_delta;changed=true
+                    elif difference < -maximum_delta:
+                        heights[left]=float(heights[index])+maximum_delta;changed=true
+                if z_index>0:
+                    var above:=index-stride
+                    var difference:=float(heights[index])-float(heights[above])
+                    if difference>maximum_delta:
+                        heights[index]=float(heights[above])+maximum_delta;changed=true
+                    elif difference < -maximum_delta:
+                        heights[above]=float(heights[index])+maximum_delta;changed=true
+        if not changed:break
+    return heights
+
+
 func _sample_height(x: float, z: float, profile: Dictionary, world_size: float, water_level: float) -> float:
     if profile.get("controlled_aqueduct", false):
         return _sample_controlled_aqueduct_height(x, z, profile, water_level)
@@ -324,45 +370,64 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
         return surface
     var width := 84.0
     var dist := INF
+    var grade_x:=x
     var nearby_segments:Array=_river_segment_buckets.get(
         Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),
         []
     )
     for segment_data in nearby_segments:
-        var candidate_dist:=_distance_to_segment(point,segment_data.a,segment_data.b)
+        var segment:Vector2=segment_data.b-segment_data.a
+        var segment_t:=0.0
+        if segment.length_squared()>.0001:
+            segment_t=clampf((point-segment_data.a).dot(segment)/segment.length_squared(),0.0,1.0)
+        var closest_point:Vector2=segment_data.a+segment*segment_t
+        var candidate_dist:=point.distance_to(closest_point)
         if candidate_dist < dist:
             dist = candidate_dist
-            width = float(segment_data.width)
+            width = lerpf(float(segment_data.width_a),float(segment_data.width_b),segment_t)
+            grade_x=closest_point.x
     # Defensive fallback for direct unit calls made before generate_world().
     if _river_segment_buckets.is_empty():
         for candidate in corridors:
-            var candidate_dist := _distance_to_polyline(point, candidate.get("points", []))
+            var nearest_candidate := _nearest_road_segment(point, [candidate])
+            if nearest_candidate.is_empty():
+                continue
+            var candidate_dist: float = float(nearest_candidate.get("distance", INF))
             if candidate_dist < dist:
                 dist = candidate_dist
-                width = float(candidate.get("width", width))
+                width = float(nearest_candidate.get("width", width))
+                grade_x=Vector2(nearest_candidate.get("closest_point",point)).x
     _last_sampled_river_distance = dist
     var half_channel := width * 0.5
-    # Keep the land-water seam tight: the bank rises immediately outside the
-    # flat bed instead of leaving a broad recessed coastal strip.
-    var taper_width := 5.0
     # Predictable east-to-west fall. Small undulation preserves a natural bed
     # without creating uphill water or disconnected pools.
     # A gentle world-scale fall keeps the full river close to the surrounding
     # watershed. The previous grade climbed far above low terrain downstream.
-    var channel_surface := _river_grade(x)
+    var channel_surface:=_river_grade(grade_x)
     var bed := channel_surface - 2.8
-    var water_surface := bed + 2.2
-    var bank_floor := channel_surface + 0.45
+    # This is the exact rendered water datum used by WorldPreviewBuilder.
+    # Keeping a second, lower "support water" height made the real terrain sit
+    # below the visible river and exposed a floating sheet wherever a bank
+    # detail strip was absent or viewed edge-on.
+    var water_lift:float=float(profile.get("river_water_lift",1.35))
+    var bank_drop:float=float(profile.get("river_bank_drop",1.15))
+    var water_surface:=bed+water_lift
+    # The 22.5 m terrain grid cannot represent a narrow tributary's deep center
+    # and its shoreline inside the same triangle. A deep heightfield vertex
+    # pulled the visible bank metres below the water. Keep the physical terrain
+    # bed shallow and continuous; the river traversal mask still blocks the
+    # deep core, so this integrity fix does not create an accidental ford.
+    var terrain_channel_bed:=water_surface-.24
     # Bridge approaches are where the coarse heightfield is most likely to
     # interpolate from a deep center-bed vertex to a bank vertex and expose a
-    # vertical water gap. Make the terrain immediately around every crossing a
-    # shallow ford beneath the water; the river remains deep away from bridges.
+    # vertical water gap. Make the terrain immediately around every crossing
+    # meet the water exactly.
     for support_site in _bridge_sites_cache:
         var support_center: Vector2 = support_site.get("position", Vector2.ZERO)
         var support_distance := Vector2(x, z).distance_to(support_center)
         if support_distance < 132.0:
             var support_weight := 1.0 - _smoothstep(86.0, 132.0, support_distance)
-            bed = lerpf(bed, water_surface, support_weight)
+            terrain_channel_bed=lerpf(terrain_channel_bed,water_surface-.18,support_weight)
     # South Ford sits on a sharp authored bend. Coarse terrain triangles could
     # dip beside the bridge and expose water outside the channel, so reinforce
     # only the outer bank vertices around explicitly guarded crossings.
@@ -375,7 +440,7 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
         if guard_offset.length_squared() < guard_radius * guard_radius and dist >= half_channel * 0.82:
             var guard_distance := guard_offset.length()
             var guard_weight := 1.0 - _smoothstep(guard_radius * 0.55, guard_radius, guard_distance)
-            surface = maxf(surface, water_surface + 0.55 * guard_weight)
+            surface=maxf(surface,water_surface+bank_drop*guard_weight)
     # Grade only the road approaches beside a bridge. The river channel stays
     # carved and continuous, while both banks meet the crossing at a sensible
     # shared elevation instead of producing a giant ramp on the higher side.
@@ -390,45 +455,83 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
             var approach_weight := 1.0 - _smoothstep(half_channel + 20.0, half_channel + 82.0, bridge_along)
             var approach_height := _river_grade(bridge_center.x) + 0.48
             surface = lerpf(surface, approach_height, approach_weight)
-    # The world grid is about 28 units between vertices. A narrow underwater
-    # rise can fall entirely between samples, making one large triangle stretch
-    # from the deep bed to dry land and leaving a visible trench beside the
-    # water. Reserve a broad, flat waterline shelf inside the authored channel
-    # so every bank cell has terrain supporting the water edge.
+    # The world grid is about 22 metres between vertices. Every vertex whose
+    # triangle can reach the liquid has to remain just beneath the water or a
+    # distant hillside vertex can slice through the river. This support is part
+    # of the real, collidable terrain--not a second bank surface.
     var grid_step: float = float(profile.get("world_size", 7200.0)) / maxf(1.0, float(profile.get("grid_resolution", 256)))
     var edge_guard := minf(half_channel * 0.70, grid_step * 0.88)
     var flat_bed_edge := half_channel - edge_guard
-    # The rendered ribbon is 84% of the authored channel. Keep the hidden
-    # support only beneath that water and the compact authored bank. The old
-    # grid-diagonal expansion continued forty metres beyond the shoreline and
-    # exposed a flat green shelf that appeared to climb surrounding hills.
+    # The rendered ribbon is 84% of the authored channel.
     var visible_water_half:=half_channel*.84
     # A water-edge sample can sit in a terrain triangle whose far vertex is a
     # full grid diagonal away. Lower that complete support envelope so steep
-    # hills cannot interpolate through the visible water. WorldPreviewBuilder
-    # reconstructs the natural turf bank over this hidden support.
+    # hills cannot interpolate through the visible water.
     var mesh_support_half:=visible_water_half+grid_step*1.65
     var waterline_shelf_start := minf(flat_bed_edge + edge_guard * 0.45, visible_water_half * 0.88)
+    # This support remains safely submerged across every coarse triangle. The
+    # narrow wet-bank mesh starts below the same liquid datum and meets the real
+    # terrain on its outer row, so the visible shoreline has no air slit.
+    var submerged_edge_surface:=water_surface-.24
     if dist <= flat_bed_edge:
-        return bed
+        return _apply_pond_carve(terrain_channel_bed,point,profile)
     if dist <= waterline_shelf_start:
         var submerged_t := _smoothstep(flat_bed_edge, waterline_shelf_start, dist)
-        return lerpf(bed, water_surface, submerged_t)
+        return _apply_pond_carve(lerpf(terrain_channel_bed,submerged_edge_surface,submerged_t),point,profile)
     if dist <= mesh_support_half:
-        return water_surface
-    if dist < mesh_support_half + taper_width:
-        var taper := _smoothstep(mesh_support_half, mesh_support_half + taper_width, dist)
-        # Continue upward from the waterline. Restarting this strip at `bed`
-        # opened a low seam immediately outside the river mesh.
-        return lerpf(water_surface, maxf(surface, bank_floor), taper)
-    if dist < mesh_support_half + taper_width + 72.0:
-        var bank_blend := 1.0 - _smoothstep(mesh_support_half + taper_width, mesh_support_half + taper_width + 72.0, dist)
-        surface = maxf(surface, lerpf(surface, bank_floor, bank_blend))
+        # The channel floor reaches the liquid just inside the visible edge;
+        # immediately outside it the actual heightfield rises a few centimetres
+        # above the water. The river therefore meets real ground even if every
+        # decorative bank mesh is hidden, culled or omitted at a confluence.
+        var support_surface:=submerged_edge_surface
+        var settlement_target:=_settlement_route_target(point,surface,profile)
+        if settlement_target.fixed and dist>visible_water_half+6.0:
+            # Hidden diagonal support must not excavate a settlement that is
+            # safely beyond the visible water. Restore its authored pad over
+            # the remaining bank run, while leaving the river and wading shelf
+            # untouched.
+            var restoration:=_smoothstep(visible_water_half+6.0,mesh_support_half,dist)
+            support_surface=lerpf(support_surface,maxf(support_surface,float(settlement_target.height)),restoration)
+        return _apply_pond_carve(support_surface,point,profile)
+    # Never jump directly from the hidden water support to a mountain vertex.
+    # That former five-metre transition could produce 180m height differences
+    # across a single gameplay cell, which read as a hole and exposed the
+    # backface of the terrain when approached from below.  Cap the surrounding
+    # land to a continuous valley grade until it naturally meets the authored
+    # landform. Low meadows recover within a few metres; high gorge walls take
+    # the broad run they need instead of becoming a vertical tear.
+    if dist<INF:
+        var bank_run:=maxf(0.0,dist-mesh_support_half)
+        var maximum_bank_surface:=water_surface+.12+bank_run*MAX_RIVER_BANK_GRADE
+        # Low natural noise is just as destructive as an over-steep bank: it
+        # leaves dry ground below the water plane. Hold a broad real-terrain
+        # shoulder above the waterline, then blend it back into the authored
+        # valley so there is no wall or artificial shelf.
+        var low_bank_reach:=mesh_support_half+maxf(56.0,grid_step*3.2)
+        if dist<=low_bank_reach:
+            var bank_rise_end:=mesh_support_half+grid_step*1.55
+            var bank_floor:=lerpf(
+                water_surface+.08,
+                water_surface+bank_drop,
+                _smoothstep(mesh_support_half,bank_rise_end,dist)
+            )
+            var low_bank_weight:=1.0-_smoothstep(bank_rise_end,low_bank_reach,dist)
+            surface=maxf(surface,lerpf(surface,bank_floor,low_bank_weight))
+        surface=minf(surface,maximum_bank_surface)
+    # Water bodies are the final terrain authority. An engineered path may
+    # approach a pond, but it must never lift isolated land triangles through
+    # the water surface or create a fake causeway across the shoreline.
+    surface=_apply_engineered_route_surface(point,surface)
+    return _apply_pond_carve(surface,point,profile)
+
+
+func _apply_pond_carve(input_surface:float,point:Vector2,profile:Dictionary)->float:
+    var surface:=input_surface
     for pond in profile.get("pond_sites", []):
         var pond_center: Vector2 = pond.get("position", Vector2.ZERO)
         var authored_radius: float = pond.get("radius", 70.0)
         var pond_water: float = pond.get("water_height", 1.2)
-        var pond_offset := Vector2(x, z) - pond_center
+        var pond_offset := point - pond_center
         var pond_dist := pond_offset.length()
         var pond_angle := atan2(pond_offset.y, pond_offset.x)
         var irregularity := 1.0 + sin(pond_angle * 3.0 + pond_center.x * 0.0017) * 0.11 + sin(pond_angle * 7.0 + pond_center.y * 0.0011) * 0.055
@@ -444,7 +547,7 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
             else:
                 var pond_edge := _smoothstep(visible_radius, carve_radius, pond_dist)
                 surface = minf(surface, lerpf(pond_water - 0.10, surface, pond_edge))
-    return _apply_engineered_trail_surface(point,surface)
+    return surface
 
 
 func _land_surface_without_water(point:Vector2,profile:Dictionary)->float:
@@ -452,55 +555,183 @@ func _land_surface_without_water(point:Vector2,profile:Dictionary)->float:
     # Settlements are authored spaces, not buildings dropped onto random
     # noise. Their inner districts are level, with a broad transition back to
     # the surrounding terrain so roads and city walls meet usable ground.
-    for town in profile.get("town_sites", []):
-        var town_center: Vector2 = town.get("position", Vector2.ZERO)
-        var town_radius: float = float(town.get("radius", 120.0))
-        var town_outer := town_radius * 1.30
-        var town_offset := point - town_center
-        if town_offset.length_squared() < town_outer * town_outer:
-            var town_distance := town_offset.length()
-            var town_height: float = float(town.get("ground_height", 7.0))
-            var town_weight := 1.0 - _smoothstep(town_radius * 0.78, town_outer, town_distance)
-            surface = lerpf(surface, town_height, town_weight)
+    # Riverwatch is intentionally kept out of town_sites so gameplay systems do
+    # not create a duplicate vendor town at the spawn. It still needs the same
+    # stable ground contract as every other settlement. Small authored
+    # destinations can opt into that contract with usable_ground.
+    var usable_sites:Array=[]
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if not spawn_site.is_empty():usable_sites.append(spawn_site)
+    usable_sites.append_array(profile.get("town_sites",[]))
+    for map_site in profile.get("map_sites",[]):
+        if map_site.get("usable_ground",false):usable_sites.append(map_site)
+    for site_value in usable_sites:
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var site_center: Vector2 = site.get("position", Vector2.ZERO)
+        var site_radius: float = float(site.get("radius", 120.0))
+        var inner_ratio:float=float(site.get("ground_inner_ratio",.78))
+        # Settlement pads must blend over several terrain cells. The former
+        # short ring could transition from a flat town to natural terrain in
+        # less than one coarse triangle, creating a town-edge cliff even when
+        # the heightfield itself was complete.
+        var site_outer:=maxf(site_radius*1.55,site_radius*inner_ratio+72.0)
+        var site_offset := point - site_center
+        if site_offset.length_squared() < site_outer * site_outer:
+            var site_distance := site_offset.length()
+            var site_height: float = float(site.get("ground_height", 7.0))
+            var site_weight := 1.0 - _smoothstep(site_radius * inner_ratio, site_outer, site_distance)
+            surface = lerpf(surface, site_height, site_weight)
     return _cave_access_surface(point,surface,profile)
 
 
-func _prepare_engineered_trail_cache(profile:Dictionary)->void:
-    _engineered_trails_cache.clear()
+func _prepare_engineered_route_cache(profile:Dictionary)->void:
+    _engineered_route_buckets.clear()
     var grid_step:float=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",256)))
-    for corridor in profile.get("trail_corridors",[]):
-        if not corridor.get("engineered_grade",false):continue
+    var corridors:Array=[]
+    corridors.append_array(profile.get("road_corridors",[]))
+    for trail in profile.get("trail_corridors",[]):
+        if trail.get("engineered_grade",false):corridors.append(trail)
+    for corridor in corridors:
         var points:Array=corridor.get("points",[])
         if points.size()<2:continue
+        var route_class:=str(corridor.get("route_class","local"))
+        var grade_limit:=.14 if route_class=="major" else (.18 if route_class=="secondary" else .24)
+        var sample_spacing:=maxf(16.0,grid_step*.78)
+        var sampled_points:Array=[]
+        for index in range(points.size()-1):
+            var a:Vector2=points[index];var b:Vector2=points[index+1]
+            var steps:=maxi(1,int(ceil(a.distance_to(b)/sample_spacing)))
+            for step in range(steps):sampled_points.append(a.lerp(b,float(step)/float(steps)))
+        sampled_points.append(points[-1])
         var cumulative:Array[float]=[0.0]
-        for i in range(points.size()-1):cumulative.append(cumulative[-1]+Vector2(points[i]).distance_to(Vector2(points[i+1])))
-        var start:Vector2=points[0];var finish:Vector2=points[-1]
-        _engineered_trails_cache.append({
-            "points":points,
-            "cumulative":cumulative,
-            "length":maxf(1.0,cumulative[-1]),
-            "start_y":_land_surface_without_water(start,profile),
-            "end_y":_land_surface_without_water(finish,profile),
-            # Grade only the tread and a compact shoulder. The previous
-            # grid-step multiplier flattened bands nearly eighty metres wide.
-            "inner":grid_step*.72+float(corridor.get("width",7.0))*.5,
-            "outer":grid_step*.72+float(corridor.get("width",7.0))*.5+26.0,
-        })
+        var target_heights:Array[float]=[]
+        var fixed_heights:Dictionary={}
+        for index in range(sampled_points.size()):
+            var point:Vector2=sampled_points[index]
+            if index>0:cumulative.append(cumulative[-1]+point.distance_to(sampled_points[index-1]))
+            var target:=_land_surface_without_water(point,profile)
+            var settlement_target:=_settlement_route_target(point,target,profile)
+            target=float(settlement_target.height)
+            if index==0 or index==sampled_points.size()-1:
+                target=_route_endpoint_height(point,target,profile)
+            var bridge_target:={"height":target,"fixed":false}
+            if not settlement_target.fixed:bridge_target=_bridge_route_target(point,target)
+            target=float(bridge_target.height)
+            if index==0 or index==sampled_points.size()-1 or settlement_target.fixed or bridge_target.fixed:
+                fixed_heights[index]=target
+            target_heights.append(target)
+        _limit_route_grades(target_heights,cumulative,grade_limit,fixed_heights)
+        # Include one heightfield sample beyond either shoulder so the coarse
+        # terrain triangles cannot poke through the road ribbon.
+        var inner:=grid_step*1.38+float(corridor.get("width",7.0))*.5
+        var outer:=inner+18.0
+        for index in range(sampled_points.size()-1):
+            _bucket_engineered_route_segment({
+                "a":sampled_points[index],"b":sampled_points[index+1],
+                "height_a":target_heights[index],"height_b":target_heights[index+1],
+                "inner":inner,"outer":outer,
+            })
+
+
+func _settlement_route_target(point:Vector2,fallback:float,profile:Dictionary)->Dictionary:
+    var sites:Array=[]
+    var spawn:Dictionary=profile.get("spawn_site",{})
+    if not spawn.is_empty():sites.append(spawn)
+    sites.append_array(profile.get("town_sites",[]))
+    for site in sites:
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var inner_radius:float=float(site.get("radius",120.0))*1.08
+        if point.distance_to(center)<=inner_radius:
+            return {"height":float(site.get("ground_height",fallback)),"fixed":true}
+    return {"height":fallback,"fixed":false}
+
+
+func _route_endpoint_height(point:Vector2,fallback:float,profile:Dictionary)->float:
+    for pond in profile.get("pond_sites",[]):
+        var center:Vector2=pond.get("position",Vector2.ZERO)
+        if point.distance_to(center)<=float(pond.get("radius",70.0))*1.55:
+            return float(pond.get("water_height",1.2))+.28
+    return fallback
+
+
+func _bridge_route_target(point:Vector2,fallback:float)->Dictionary:
+    for site in _bridge_sites_cache:
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        # Hold the route at deck height through the entire coarse-grid bridge
+        # support zone. The graded route then resumes beyond the bank instead
+        # of dropping once between the final plank and the first road sample.
+        if point.distance_to(center)<=float(site.get("radius",62.0))*1.55:
+            return {"height":_river_grade(center.x)+.62,"fixed":true}
+    return {"height":fallback,"fixed":false}
+
+
+func _limit_route_grades(heights:Array[float],cumulative:Array[float],grade_limit:float,fixed_heights:Dictionary)->void:
+    if heights.size()<2:return
+    # Project sampled terrain into a bounded-slope route profile. Repeated
+    # local corrections retain broad landform changes while removing noise
+    # spikes, settlement-pad cliffs, and direct climbs up mountain faces.
+    for iteration in range(40):
+        for fixed_index in fixed_heights:heights[int(fixed_index)]=float(fixed_heights[fixed_index])
+        for index in range(heights.size()-1):
+            var allowed:float=(float(cumulative[index+1])-float(cumulative[index]))*grade_limit
+            var delta:float=float(heights[index+1])-float(heights[index])
+            if absf(delta)<=allowed:continue
+            var correction:float=(absf(delta)-allowed)*signf(delta)
+            if fixed_heights.has(index):heights[index+1]=float(heights[index+1])-correction
+            elif fixed_heights.has(index+1):heights[index]=float(heights[index])+correction
+            else:
+                heights[index]=float(heights[index])+correction*.5
+                heights[index+1]=float(heights[index+1])-correction*.5
+        for index in range(heights.size()-2,-1,-1):
+            var allowed:float=(float(cumulative[index+1])-float(cumulative[index]))*grade_limit
+            var delta:float=float(heights[index+1])-float(heights[index])
+            if absf(delta)<=allowed:continue
+            var correction:float=(absf(delta)-allowed)*signf(delta)
+            if fixed_heights.has(index):heights[index+1]=float(heights[index+1])-correction
+            elif fixed_heights.has(index+1):heights[index]=float(heights[index])+correction
+            else:
+                heights[index]=float(heights[index])+correction*.5
+                heights[index+1]=float(heights[index+1])-correction*.5
+    for fixed_index in fixed_heights:heights[int(fixed_index)]=float(fixed_heights[fixed_index])
+
+
+func _bucket_engineered_route_segment(segment:Dictionary)->void:
+    var a:Vector2=segment.a;var b:Vector2=segment.b;var outer:float=segment.outer
+    var minimum:=Vector2i(floori((minf(a.x,b.x)-outer)/RIVER_BUCKET_SIZE),floori((minf(a.y,b.y)-outer)/RIVER_BUCKET_SIZE))
+    var maximum:=Vector2i(floori((maxf(a.x,b.x)+outer)/RIVER_BUCKET_SIZE),floori((maxf(a.y,b.y)+outer)/RIVER_BUCKET_SIZE))
+    for bucket_x in range(minimum.x,maximum.x+1):
+        for bucket_y in range(minimum.y,maximum.y+1):
+            var key:=Vector2i(bucket_x,bucket_y)
+            if not _engineered_route_buckets.has(key):_engineered_route_buckets[key]=[]
+            _engineered_route_buckets[key].append(segment)
 
 
 func _prepare_river_segment_cache(profile:Dictionary)->void:
     _river_segment_buckets.clear()
+    _river_walkable_buckets.clear()
     _river_junctions.clear()
     var grid_step:=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",256)))
     for corridor in profile.get("river_corridors",[]):
         var points:Array=corridor.get("points",[])
-        var width:=float(corridor.get("width",84.0))
+        var maximum_width:=maxf(
+            float(corridor.get("source_width",corridor.get("width",84.0))),
+            float(corridor.get("mouth_width",corridor.get("width",84.0)))
+        )
         # River terrain changes end within roughly 72 m of the support shelf.
         # A generous 220 m segment envelope also covers guarded bridge banks.
-        var influence:=maxf(220.0,width*.5+grid_step*1.45+84.0)
+        # The grade-limited river valley may need several hundred metres to
+        # meet a mountain honestly. Keep those segments in the spatial cache
+        # far enough out that the cap always reaches natural ground before the
+        # query envelope ends.
+        var influence:=maxf(RIVER_TERRAIN_INFLUENCE,maximum_width*.5+grid_step*1.45+84.0)
         for index in range(points.size()-1):
             var a:Vector2=points[index]
             var b:Vector2=points[index+1]
+            var start_progress:float=float(index)/maxf(1.0,float(points.size()-1))
+            var end_progress:float=float(index+1)/maxf(1.0,float(points.size()-1))
+            var width_a:=_corridor_width_at(corridor,start_progress,84.0)
+            var width_b:=_corridor_width_at(corridor,end_progress,84.0)
             var min_bucket:=Vector2i(
                 floori((minf(a.x,b.x)-influence)/RIVER_BUCKET_SIZE),
                 floori((minf(a.y,b.y)-influence)/RIVER_BUCKET_SIZE)
@@ -509,12 +740,26 @@ func _prepare_river_segment_cache(profile:Dictionary)->void:
                 floori((maxf(a.x,b.x)+influence)/RIVER_BUCKET_SIZE),
                 floori((maxf(a.y,b.y)+influence)/RIVER_BUCKET_SIZE)
             )
-            var segment_data:={"a":a,"b":b,"width":width}
+            var segment_data:={"a":a,"b":b,"width_a":width_a,"width_b":width_b}
             for bucket_x in range(min_bucket.x,max_bucket.x+1):
                 for bucket_y in range(min_bucket.y,max_bucket.y+1):
                     var key:=Vector2i(bucket_x,bucket_y)
                     if not _river_segment_buckets.has(key):_river_segment_buckets[key]=[]
                     _river_segment_buckets[key].append(segment_data)
+            var walkable_influence:=maxf(width_a,width_b)*.5+18.0
+            var walkable_min:=Vector2i(
+                floori((minf(a.x,b.x)-walkable_influence)/RIVER_BUCKET_SIZE),
+                floori((minf(a.y,b.y)-walkable_influence)/RIVER_BUCKET_SIZE)
+            )
+            var walkable_max:=Vector2i(
+                floori((maxf(a.x,b.x)+walkable_influence)/RIVER_BUCKET_SIZE),
+                floori((maxf(a.y,b.y)+walkable_influence)/RIVER_BUCKET_SIZE)
+            )
+            for bucket_x in range(walkable_min.x,walkable_max.x+1):
+                for bucket_y in range(walkable_min.y,walkable_max.y+1):
+                    var key:=Vector2i(bucket_x,bucket_y)
+                    if not _river_walkable_buckets.has(key):_river_walkable_buckets[key]=[]
+                    _river_walkable_buckets[key].append(segment_data)
     var rivers:Array=profile.get("river_corridors",[])
     for river_index in range(rivers.size()):
         var points:Array=rivers[river_index].get("points",[])
@@ -528,79 +773,173 @@ func _prepare_river_segment_cache(profile:Dictionary)->void:
                     break
 
 
-func _river_bank_surface_height(point:Vector2,profile:Dictionary,world_size:float,grid_resolution:int)->float:
-    if _river_segment_buckets.is_empty():return -INF
-    for junction in _river_junctions:
-        if point.distance_squared_to(junction)<110.0*110.0:return -INF
-    var nearby_segments:Array=_river_segment_buckets.get(
+func _nearest_cached_river_segment(point:Vector2,profile:Dictionary)->Dictionary:
+    return _nearest_river_segment_in_buckets(point,_river_segment_buckets,profile)
+
+
+func _nearest_cached_walkable_river_segment(point:Vector2,profile:Dictionary)->Dictionary:
+    return _nearest_river_segment_in_buckets(point,_river_walkable_buckets,profile)
+
+
+func _nearest_river_segment_in_buckets(point:Vector2,buckets:Dictionary,profile:Dictionary)->Dictionary:
+    var nearby_segments:Array=buckets.get(
         Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),[]
     )
+    if nearby_segments.is_empty():
+        # Retain the uncached path for direct diagnostic calls made before a
+        # world has been generated. In a live world, an empty bucket means the
+        # point is genuinely outside every relevant river envelope.
+        return _nearest_road_segment(point,profile.get("river_corridors",[])) if buckets.is_empty() else {}
+    var best:Dictionary={}
     var best_distance:=INF
-    var best_segment:Dictionary={}
-    var best_projection:=Vector2.ZERO
-    for segment in nearby_segments:
-        var a:Vector2=segment.a;var b:Vector2=segment.b;var delta:=b-a
-        var t:=clampf((point-a).dot(delta)/maxf(.001,delta.length_squared()),0.0,1.0)
-        var projection:=a+delta*t
-        var distance:=point.distance_to(projection)
-        if distance<best_distance:
-            best_distance=distance;best_segment=segment;best_projection=projection
-    if best_segment.is_empty():return -INF
-    var width:float=float(best_segment.width)
-    var half_water:=width*.84*.5
-    var mesh_inner_distance:=half_water+.12
-    # Averaged curve normals produce a small miter at bends. Begin the sampled
-    # walkable bank beyond that miter so it can never lift terrain through the
-    # last row of water vertices. The visual strip between these distances is
-    # a shallow submerged shelf.
-    var inner_distance:=half_water+1.5
-    var shore_distance:=half_water+8.0
-    var grid_step:=world_size/maxf(1.0,float(grid_resolution))
-    var outer_distance:=half_water+grid_step*1.65+10.0
-    if best_distance<inner_distance or best_distance>outer_distance:return -INF
-    var delta:Vector2=best_segment.b-best_segment.a
-    if delta.length_squared()<.001:return -INF
-    var tangent:=delta.normalized()
-    var normal:=Vector2(-tangent.y,tangent.x)
-    if (point-best_projection).dot(normal)<0.0:normal=-normal
-    var outer_point:=best_projection+normal*outer_distance
-    var water_y:=_river_grade(best_projection.x)-.45
-    var inner_y:=water_y-.08
-    var shore_y:=water_y+.14
-    if best_distance<=shore_distance:
-        return lerpf(inner_y,shore_y,_smoothstep(mesh_inner_distance,shore_distance,best_distance))
-    var natural_outer:=_land_surface_without_water(outer_point,profile)+.06
-    var max_bank_rise:=maxf(2.0,(outer_distance-shore_distance)*.48)
-    var outer_y:=clampf(natural_outer,shore_y+.06,shore_y+max_bank_rise)
-    return lerpf(shore_y,outer_y,_smoothstep(shore_distance,outer_distance,best_distance))
+    for segment_data in nearby_segments:
+        var a:Vector2=segment_data.a
+        var b:Vector2=segment_data.b
+        var segment:=b-a
+        var length_squared:=segment.length_squared()
+        if length_squared<=.0001:continue
+        var t:=clampf((point-a).dot(segment)/length_squared,0.0,1.0)
+        var closest:=a+segment*t
+        var distance:=point.distance_to(closest)
+        if distance>=best_distance:continue
+        best_distance=distance
+        best={
+            "distance":distance,
+            "direction":segment.normalized(),
+            "width":lerpf(float(segment_data.width_a),float(segment_data.width_b),t),
+            "closest_point":closest,
+        }
+    return best
 
 
-func _apply_engineered_trail_surface(point:Vector2,surface:float)->float:
-    for trail in _engineered_trails_cache:
-        var points:Array=trail.points;var cumulative:Array=trail.cumulative
-        var best_distance:=INF;var best_along:=0.0
-        for i in range(points.size()-1):
-            var a:Vector2=points[i];var b:Vector2=points[i+1];var segment:=b-a
-            var t:=clampf((point-a).dot(segment)/maxf(.001,segment.length_squared()),0.0,1.0)
-            var distance:=point.distance_to(a+segment*t)
-            if distance<best_distance:best_distance=distance;best_along=float(cumulative[i])+segment.length()*t
-        var outer:float=trail.outer
-        if best_distance>=outer:continue
-        var target:=lerpf(float(trail.start_y),float(trail.end_y),clampf(best_along/float(trail.length),0.0,1.0))
-        var weight:=1.0-_smoothstep(float(trail.inner),outer,best_distance)
-        surface=lerpf(surface,target,weight)
+func _prepare_surface_route_cache(profile:Dictionary,road_junctions:Array[Vector2])->void:
+    _surface_route_buckets.clear()
+    for road_value in profile.get("road_corridors",[]):
+        var road:Dictionary=road_value
+        _bucket_surface_route(road.get("points",[]),float(road.get("width",26.0))*.48*.5)
+    for trail_value in profile.get("trail_corridors",[]):
+        var trail:Dictionary=trail_value
+        _bucket_surface_route(trail.get("points",[]),maxf(2.4,float(trail.get("width",5.0))*.48)*.5)
+    for junction in road_junctions:
+        _bucket_surface_route_entry({"kind":"junction","point":junction,"half_width":7.5},junction-Vector2.ONE*7.5,junction+Vector2.ONE*7.5)
+
+
+func _bucket_surface_route(points:Array,half_width:float)->void:
+    if half_width<=.01:return
+    for index in range(points.size()-1):
+        var a:Vector2=points[index]
+        var b:Vector2=points[index+1]
+        _bucket_surface_route_entry(
+            {"kind":"segment","a":a,"b":b,"half_width":half_width},
+            Vector2(minf(a.x,b.x),minf(a.y,b.y))-Vector2.ONE*half_width,
+            Vector2(maxf(a.x,b.x),maxf(a.y,b.y))+Vector2.ONE*half_width
+        )
+
+
+func _bucket_surface_route_entry(entry:Dictionary,minimum:Vector2,maximum:Vector2)->void:
+    var min_bucket:=Vector2i(floori(minimum.x/RIVER_BUCKET_SIZE),floori(minimum.y/RIVER_BUCKET_SIZE))
+    var max_bucket:=Vector2i(floori(maximum.x/RIVER_BUCKET_SIZE),floori(maximum.y/RIVER_BUCKET_SIZE))
+    for bucket_x in range(min_bucket.x,max_bucket.x+1):
+        for bucket_y in range(min_bucket.y,max_bucket.y+1):
+            var key:=Vector2i(bucket_x,bucket_y)
+            if not _surface_route_buckets.has(key):_surface_route_buckets[key]=[]
+            _surface_route_buckets[key].append(entry)
+
+
+func _surface_route_offset(point:Vector2)->float:
+    var entries:Array=_surface_route_buckets.get(
+        Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),[]
+    )
+    var best_offset:=0.0
+    for entry_value in entries:
+        var entry:Dictionary=entry_value
+        if entry.kind=="junction":
+            if point.distance_squared_to(entry.point)<=float(entry.half_width)*float(entry.half_width):
+                best_offset=maxf(best_offset,.14)
+            continue
+        var a:Vector2=entry.a
+        var b:Vector2=entry.b
+        var segment:=b-a
+        var t:=clampf((point-a).dot(segment)/maxf(.0001,segment.length_squared()),0.0,1.0)
+        var distance:=point.distance_to(a+segment*t)
+        var half_width:float=entry.half_width
+        if distance<=half_width:
+            best_offset=maxf(best_offset,lerpf(.14,.08,clampf(distance/half_width,0.0,1.0)))
+    return best_offset
+
+
+func _apply_engineered_route_surface(point:Vector2,surface:float)->float:
+    var nearby_segments:Array=_engineered_route_buckets.get(
+        Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),[]
+    )
+    var best_distance:=INF;var best_target:=surface;var best_inner:=0.0;var best_outer:=0.0
+    for route_segment in nearby_segments:
+        var a:Vector2=route_segment.a;var b:Vector2=route_segment.b;var segment:=b-a
+        var t:=clampf((point-a).dot(segment)/maxf(.001,segment.length_squared()),0.0,1.0)
+        var distance:=point.distance_to(a+segment*t)
+        if distance>=best_distance or distance>=float(route_segment.outer):continue
+        best_distance=distance
+        best_target=lerpf(float(route_segment.height_a),float(route_segment.height_b),t)
+        best_inner=float(route_segment.inner);best_outer=float(route_segment.outer)
+    if best_distance<INF:
+        var weight:=1.0-_smoothstep(best_inner,best_outer,best_distance)
+        surface=lerpf(surface,best_target,weight)
     return surface
 
 
 func _natural_world_surface(point:Vector2,profile:Dictionary)->float:
     var surface:=3.0
-    surface+=_base_noise.get_noise_2d(point.x*.34,point.y*.34)*9.0
-    surface+=_ridge_noise.get_noise_2d(point.x*.22-70.0,point.y*.22+45.0)*4.0
-    surface+=_detail_noise.get_noise_2d(point.x*.52+90.0,point.y*.52-40.0)*1.8
-    surface+=sin(point.x*.0042)*2.8
-    surface+=sin(point.y*.0048+.7)*2.2
+    # Noise supplies surface character, not world structure. The former five
+    # overlapping fields produced height everywhere but no readable landform;
+    # named valleys, ridges and uplands now carry most of the regional relief.
+    surface+=_base_noise.get_noise_2d(point.x*.34,point.y*.34)*5.2
+    surface+=_ridge_noise.get_noise_2d(point.x*.22-70.0,point.y*.22+45.0)*2.2
+    surface+=_detail_noise.get_noise_2d(point.x*.52+90.0,point.y*.52-40.0)*.72
+    surface+=sin(point.x*.0042)*1.35
+    surface+=sin(point.y*.0048+.7)*1.05
     for region in profile.get("landform_regions",[]):surface+=_authored_landform_height(point,region)
     for chain in profile.get("mountain_chains",[]):surface+=_mountain_chain_height(point,chain)
+    surface+=_strategic_elevation_height(point,profile)
+    surface=_apply_travel_landform_surface(point,surface,profile)
+    return surface
+
+
+func _strategic_elevation_height(point:Vector2,profile:Dictionary)->float:
+    # Only explicitly authored landmarks shape high ground. This makes every
+    # local crown answer a world question: overlook, boundary marker, ruin or
+    # defensive position, rather than being another procedural bump.
+    var lift:=0.0
+    var sites:Array=[]
+    sites.append_array(profile.get("landmark_sites",[]))
+    sites.append_array(profile.get("map_sites",[]))
+    for site_value in sites:
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var height_lift:float=float(site.get("elevation_lift",0.0))
+        if height_lift<=0.0:continue
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var inner:float=maxf(4.0,float(site.get("elevation_inner",36.0)))
+        var outer:float=maxf(inner+12.0,float(site.get("elevation_radius",150.0)))
+        var distance:=point.distance_to(center)
+        if distance>=outer:continue
+        var weight:=1.0-_smoothstep(inner,outer,distance)
+        lift=maxf(lift,height_lift*weight)
+    return lift
+
+
+func _apply_travel_landform_surface(point:Vector2,surface:float,profile:Dictionary)->float:
+    # Important routes occupy broad shallow passes and valley floors. The road
+    # mesh still receives precise grade engineering later; this wider shaping
+    # explains why the route exists without making a visible man-made trench.
+    for corridor_value in profile.get("road_corridors",[]):
+        var corridor:Dictionary=corridor_value
+        var relief:float=float(corridor.get("terrain_relief",0.0))
+        var width:float=float(corridor.get("terrain_width",0.0))
+        if relief<=0.0 or width<=0.0:continue
+        var distance:=_distance_to_polyline(point,corridor.get("points",[]))
+        if distance>=width:continue
+        var weight:=1.0-_smoothstep(width*.22,width,distance)
+        surface-=relief*weight
     return surface
 
 
@@ -629,6 +968,31 @@ func _river_grade(x: float) -> float:
     grade += _smoothstep(-1195.0, -1125.0, x) * 3.2
     grade += _smoothstep(2005.0, 2075.0, x) * 2.6
     return grade
+
+
+func _river_centerline_grade(point:Vector2,profile:Dictionary)->float:
+    # Water elevation is constant across each river cross-section. Sampling
+    # world X directly tilted north-south rivers sideways and made one bank sit
+    # below the liquid near waterfall grade breaks.
+    var best_distance:=INF
+    var grade_x:=point.x
+    var nearby_segments:Array=_river_segment_buckets.get(
+        Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),[]
+    )
+    for segment_data in nearby_segments:
+        var segment:Vector2=segment_data.b-segment_data.a
+        var segment_t:=0.0
+        if segment.length_squared()>.0001:
+            segment_t=clampf((point-segment_data.a).dot(segment)/segment.length_squared(),0.0,1.0)
+        var closest:Vector2=segment_data.a+segment*segment_t
+        var distance:=point.distance_to(closest)
+        if distance<best_distance:
+            best_distance=distance
+            grade_x=closest.x
+    if nearby_segments.is_empty():
+        var nearest:=_nearest_road_segment(point,profile.get("river_corridors",[]))
+        if not nearest.is_empty():grade_x=Vector2(nearest.get("closest_point",point)).x
+    return _river_grade(grade_x)
 
 
 func _cave_cliff_raise(point: Vector2) -> float:
@@ -868,15 +1232,25 @@ func _nearest_road_segment(point: Vector2, roads: Array) -> Dictionary:
             if length_squared <= 0.0001:
                 continue
             var t := clampf((point - a).dot(segment) / length_squared, 0.0, 1.0)
-            var distance := point.distance_to(a + segment * t)
+            var closest_point:=a+segment*t
+            var distance := point.distance_to(closest_point)
             if distance < best_distance:
                 best_distance = distance
+                var corridor_progress:float=(float(i)+t)/maxf(1.0,float(points.size()-1))
                 best = {
                     "distance": distance,
                     "direction": segment.normalized(),
-                    "width": float(road.get("width", 14.0)),
+                    "width": _corridor_width_at(road,corridor_progress,14.0),
+                    "closest_point":closest_point,
                 }
     return best
+
+
+func _corridor_width_at(corridor:Dictionary,progress:float,fallback:float)->float:
+    var authored_width:=float(corridor.get("width",fallback))
+    var source_width:=float(corridor.get("source_width",authored_width))
+    var mouth_width:=float(corridor.get("mouth_width",authored_width))
+    return lerpf(source_width,mouth_width,clampf(progress,0.0,1.0))
 
 
 func _build_terrain_mesh(heights: PackedFloat32Array, river_distances: PackedFloat32Array, profile: Dictionary, world_size: float, grid_resolution: int, water_level: float) -> ArrayMesh:
@@ -1049,10 +1423,13 @@ func _terrain_color(height: float, point: Vector2, profile: Dictionary, water_le
             for river in rivers:
                 river_width = float(river.get("width", river_width))
                 break
-        if river_distance <= river_width * 0.5:
-            return Color(0.20, 0.16, 0.095, 1.0).lerp(Color(0.30, 0.25, 0.16, 1.0), detail_noise)
-        if river_distance <= river_width * 0.5 + 6.0:
-            return Color(0.28, 0.25, 0.16, 1.0).lerp(Color(0.40, 0.36, 0.22, 1.0), broad_bands)
+        # River soil now fades into the regional palette across an irregular
+        # transition instead of returning two hard color bands. The visible
+        # shoreline mesh handles close detail; this vertex blend keeps the
+        # coarse terrain beneath it from drawing straight brown/green seams.
+        var river_soil:=Color(0.20,0.16,0.095,1.0).lerp(Color(0.34,0.30,0.19,1.0),detail_noise*.62+broad_bands*.38)
+        var shoreline_warp:=(_moisture_noise.get_noise_2d(point.x*1.7+31.0,point.y*1.7-47.0))*5.5
+        var river_soil_weight:=1.0-_smoothstep(river_width*.42+shoreline_warp,river_width*.5+18.0+shoreline_warp,river_distance)
         var controlled_world_size: float = profile.get("world_size", 7200.0)
         var controlled_moisture: float = (_moisture_noise.get_noise_2d(point.x, point.y) + 1.0) * 0.5
         var biome := Color(0.12, 0.25, 0.10, 1.0).lerp(Color(0.26, 0.36, 0.18, 1.0), mix_value)
@@ -1077,7 +1454,7 @@ func _terrain_color(height: float, point: Vector2, profile: Dictionary, water_le
         var forest_mix:=_region_influence(point,profile.get("forest_regions",[]))
         biome=biome.lerp(Color(0.075,0.17,0.105,1.0),forest_mix*.62)
         biome=_apply_authored_terrain_palette(biome,point,height,profile.get("terrain_palette_regions",[]))
-        return biome
+        return biome.lerp(river_soil,clampf(river_soil_weight,0.0,1.0))
     if height < water_level + 2.2:
         return Color(0.31, 0.25, 0.11, 1.0)
     if height > 25.0:
@@ -1114,7 +1491,7 @@ func _make_terrain_material() -> ShaderMaterial:
     var shader := Shader.new()
     shader.code = """
 shader_type spatial;
-render_mode cull_back;
+render_mode cull_disabled;
 
 uniform sampler2D grass_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
 uniform sampler2D soil_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
@@ -1150,16 +1527,18 @@ void fragment() {
     float grit = value_noise(p * 0.24 + vec2(3.0, 31.0));
     float macro_field = value_noise(vec2(p.x * 0.0038 + p.y * 0.0014, -p.x * 0.0014 + p.y * 0.0038) + vec2(37.0, 19.0));
     vec3 base = COLOR.rgb;
-    vec3 dark_soil = vec3(0.105, 0.075, 0.038);
-    vec3 dry_grass = vec3(0.24, 0.25, 0.13);
-    vec3 moss = vec3(0.055, 0.14, 0.07);
-    vec3 meadow = vec3(0.13, 0.25, 0.11);
-    vec3 stone = vec3(0.225, 0.23, 0.22);
-    vec3 color = base * mix(0.86, 1.08, broad);
+    float camera_distance = distance(world_position, CAMERA_POSITION_WORLD);
+    float detail_fade = 1.0 - smoothstep(95.0, 420.0, camera_distance);
+    vec3 dark_soil = vec3(0.135, 0.095, 0.052);
+    vec3 dry_grass = vec3(0.285, 0.29, 0.16);
+    vec3 moss = vec3(0.075, 0.17, 0.075);
+    vec3 meadow = vec3(0.15, 0.285, 0.12);
+    vec3 stone = vec3(0.26, 0.265, 0.255);
+    vec3 color = base * mix(0.93, 1.065, broad);
     color = mix(color, moss, smoothstep(0.72, 0.94, clumps) * 0.22);
     color = mix(color, dry_grass, smoothstep(0.86, 0.98, broad) * 0.10);
-    color = mix(color, dark_soil, smoothstep(0.88, 0.985, grit) * 0.15);
-    color *= mix(0.95, 1.035, grit);
+    color = mix(color, dark_soil, smoothstep(0.88, 0.985, grit) * 0.12 * detail_fade);
+    color *= mix(0.975, 1.025, grit * detail_fade);
     // Keep individual blades and pebbles near human scale. The generated
     // source contains larger photographic structures than the previous map.
     vec2 terrain_uv = p * 0.085;
@@ -1169,39 +1548,42 @@ void fragment() {
     // Do not magnify the source photograph for macro variation. That exposed
     // its rectangular image border as huge square biome tiles. Procedural,
     // overlapping noise fields provide broad variation without any seam.
-    grass_albedo *= mix(0.88, 1.10, smoothstep(0.12, 0.88, macro_field));
-    grass_albedo *= vec3(1.04, 1.00, 0.91);
+    grass_albedo *= mix(0.91, 1.075, smoothstep(0.12, 0.88, macro_field));
+    grass_albedo *= vec3(1.035, 1.025, 0.96);
     float grass_luma = dot(grass_albedo, vec3(0.2126, 0.7152, 0.0722));
     grass_albedo = mix(vec3(grass_luma), grass_albedo, 0.94);
     vec3 soil_albedo = texture(soil_texture, terrain_uv * 0.82 + vec2(0.17, 0.31)).rgb * vec3(0.88, 0.93, 1.02);
     vec3 stone_albedo = texture(stone_texture, terrain_uv * 0.68 + vec2(0.43, 0.11)).rgb;
     // Soil speckles come from fine noise only. Thresholding interpolated
     // biome colour switched an entire coarse triangle to a different texture.
-    float soil_marker = clamp(smoothstep(0.74, 0.95, grit) * 0.36 + smoothstep(0.78, 0.96, broad) * 0.18, 0.0, 0.48);
+    float soil_marker = clamp(smoothstep(0.74, 0.95, grit) * 0.24 * detail_fade + smoothstep(0.78, 0.96, broad) * 0.16, 0.0, 0.38);
     float slope = 1.0 - smoothstep(0.48, 0.86, abs(NORMAL.y));
     float highland = smoothstep(28.0, 88.0, world_position.y);
     float stone_weight = clamp(max(slope * 0.62, highland), 0.0, 0.82);
     vec3 textured_ground = mix(grass_albedo, soil_albedo, soil_marker * 0.72);
     float dry_patch = smoothstep(0.56, 0.82, macro_field * 0.64 + broad * 0.36);
-    textured_ground = mix(textured_ground, vec3(0.31, 0.265, 0.125), dry_patch * (1.0 - stone_weight) * 0.43);
+    textured_ground = mix(textured_ground, vec3(0.33, 0.29, 0.16), dry_patch * (1.0 - stone_weight) * 0.30);
     float meadow_patch = smoothstep(0.61, 0.87, clumps * 0.62 + (1.0 - macro_field) * 0.38);
     textured_ground = mix(textured_ground, vec3(0.13, 0.235, 0.095), meadow_patch * (1.0 - dry_patch) * (1.0 - stone_weight) * 0.24);
     textured_ground = mix(textured_ground, stone_albedo, stone_weight);
     // Preserve enough authored vertex colour for Westmere heath, Northwood
     // moss and Southbank ochre to remain distinct beneath the shared detail.
-    color = mix(color, textured_ground, 0.52);
+    // The near field keeps tactile surface detail. At distance it resolves to
+    // authored biome colour plus macro variation, preventing the crawling
+    // speckle and eye-strain that was visible while walking.
+    color = mix(color, textured_ground, mix(0.48, 0.74, detail_fade));
     // Strong, overlapping earth and meadow fields stay visible at walking
     // distance. Rotated coordinates prevent these patches reading as a grid.
-    color = mix(color, vec3(0.33, 0.27, 0.12), smoothstep(0.58, 0.80, broad) * (1.0 - stone_weight) * 0.40);
-    color = mix(color, vec3(0.14, 0.29, 0.10), smoothstep(0.66, 0.88, clumps) * (1.0 - dry_patch) * (1.0 - stone_weight) * 0.20);
-    color = mix(color, color * vec3(0.82, 0.73, 0.56), (1.0 - smoothstep(0.22, 0.48, macro_field)) * (1.0 - stone_weight) * 0.23);
+    color = mix(color, vec3(0.34, 0.29, 0.16), smoothstep(0.58, 0.80, broad) * (1.0 - stone_weight) * 0.24);
+    color = mix(color, vec3(0.15, 0.30, 0.115), smoothstep(0.66, 0.88, clumps) * (1.0 - dry_patch) * (1.0 - stone_weight) * 0.16);
+    color = mix(color, color * vec3(0.88, 0.82, 0.70), (1.0 - smoothstep(0.22, 0.48, macro_field)) * (1.0 - stone_weight) * 0.15);
     color = mix(color, color * vec3(0.92, 1.04, 0.82), smoothstep(0.61, 0.86, macro_field) * (1.0 - stone_weight) * 0.12);
     // World-scale biome colour is already authored per vertex with warped
     // borders. Avoid large thresholded value-noise patches here: those reveal
     // the noise lattice as square or triangular fields from a distance.
     float final_luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    color = mix(vec3(final_luma), color, 0.88);
-    color *= vec3(0.98, 0.94, 0.87);
+    color = mix(vec3(final_luma), color, 0.94);
+    color *= vec3(1.015, 1.01, 0.965);
     ALBEDO = color;
     ROUGHNESS = 0.96;
     SPECULAR = 0.08;
