@@ -15,10 +15,25 @@ def clear_scene():
 
 
 def material(name, color, roughness=0.82, metallic=0.0):
+    rgba = (*color, 1.0)
+
     mat = bpy.data.materials.new(name)
-    mat.diffuse_color = (*color, 1.0)
+
+    # Blender viewport color
+    mat.diffuse_color = rgba
     mat.roughness = roughness
     mat.metallic = metallic
+
+    # GLB / glTF export color
+    mat.use_nodes = True
+
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = rgba
+        bsdf.inputs["Roughness"].default_value = roughness
+        bsdf.inputs["Metallic"].default_value = metallic
+
     return mat
 
 
