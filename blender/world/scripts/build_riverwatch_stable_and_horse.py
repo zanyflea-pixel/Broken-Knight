@@ -18090,7 +18090,7 @@ def build_horse_model_v23_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v24_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V24
     #
@@ -19654,6 +19654,1735 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V24",
         "CONTINUOUS_ANATOMY_PROTOTYPE_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V25
+    #
+    # PROPORTION-LOCKED COURSER BLOCKOUT
+    #
+    # V24 proved that simply making everything continuous
+    # does not automatically make the anatomy correct.
+    #
+    # V25 switches to measurable conformation landmarks.
+    #
+    # TARGET:
+    #
+    # sturdy compact medieval riding horse / cob / courser
+    #
+    # LOCKED APPROXIMATE LANDMARKS:
+    #
+    # ground                   Z = 0.00
+    # withers                  Z = 1.60
+    # croup                    Z = 1.58 - 1.61
+    #
+    # point shoulder           Y = -0.65
+    # point buttock            Y =  0.90
+    #
+    # body length                  1.55
+    # withers height               1.60
+    #
+    # therefore approximately square.
+    #
+    # Major changes from V24:
+    #
+    # - MUCH deeper barrel
+    # - MUCH shorter neck
+    # - MUCH larger torso relative to legs
+    # - smaller head
+    # - thicker legs
+    # - front legs straighter
+    # - proper high hind hock
+    # - hind cannon nearly vertical
+    # - croup height matched to withers
+    #
+    # Geometry strategy:
+    #
+    # BODY/NECK/HEAD:
+    # overlapping controlled ellipsoids
+    # -> joined
+    # -> voxel remeshed into ONE surface
+    #
+    # LEGS:
+    # explicit lofted anatomy
+    # NOT metaballs
+    #
+    # No mane.
+    # No tail.
+    # No saddle.
+    # No tack.
+    #
+    # V22 remains the acceptance benchmark.
+    # ========================================================
+
+    build_horse_model_v24_base(
+        arm
+    )
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    def find_material(
+        contains_text
+    ):
+
+        for candidate in bpy.data.materials:
+
+            if contains_text.lower() in candidate.name.lower():
+                return candidate
+
+        return None
+
+    def make_material(
+        name,
+        color,
+        roughness
+    ):
+
+        mat = bpy.data.materials.get(
+            name
+        )
+
+        if mat is not None:
+            return mat
+
+        mat = bpy.data.materials.new(
+            name=name
+        )
+
+        mat.diffuse_color = color
+        mat.use_nodes = True
+
+        bsdf = mat.node_tree.nodes.get(
+            "Principled BSDF"
+        )
+
+        if bsdf is not None:
+
+            if "Base Color" in bsdf.inputs:
+
+                bsdf.inputs[
+                    "Base Color"
+                ].default_value = color
+
+            if "Roughness" in bsdf.inputs:
+
+                bsdf.inputs[
+                    "Roughness"
+                ].default_value = roughness
+
+        return mat
+
+    coat = find_material(
+        "Warm Bay"
+    )
+
+    dark_points = find_material(
+        "Dark Points"
+    )
+
+    hoof_mat = find_material(
+        "Hoof"
+    )
+
+    if coat is None:
+
+        coat = make_material(
+            "Riverwatch V25 Warm Bay",
+            (
+                0.30,
+                0.075,
+                0.020,
+                1.0
+            ),
+            0.60
+        )
+
+    if dark_points is None:
+
+        dark_points = make_material(
+            "Riverwatch V25 Dark Points",
+            (
+                0.035,
+                0.018,
+                0.012,
+                1.0
+            ),
+            0.68
+        )
+
+    if hoof_mat is None:
+
+        hoof_mat = make_material(
+            "Riverwatch V25 Hoof",
+            (
+                0.16,
+                0.135,
+                0.115,
+                1.0
+            ),
+            0.74
+        )
+
+    eye_mat = make_material(
+        "Riverwatch V25 Eye",
+        (
+            0.008,
+            0.006,
+            0.004,
+            1.0
+        ),
+        0.30
+    )
+
+    muzzle_mat = make_material(
+        "Riverwatch V25 Muzzle",
+        (
+            0.18,
+            0.115,
+            0.085,
+            1.0
+        ),
+        0.70
+    )
+
+    # ========================================================
+    # DELETE V24 VISIBLE GEOMETRY
+    # ========================================================
+
+    delete_targets = []
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if (
+            obj.type == "MESH"
+            and obj.name.startswith(
+                "RiverwatchV24"
+            )
+        ):
+
+            delete_targets.append(
+                obj
+            )
+
+    for obj in delete_targets:
+
+        if obj.name in bpy.data.objects:
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def smooth_object(
+        obj
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_armature(
+        obj,
+        group_name
+    ):
+
+        obj.parent = arm
+
+        group = obj.vertex_groups.new(
+            name=group_name
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def add_ellipsoid(
+        name,
+        location,
+        scale
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=32,
+            ring_count=20,
+            location=location
+        )
+
+        obj = bpy.context.object
+        obj.name = name
+
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            coat
+        )
+
+        smooth_object(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # PROPORTION-LOCKED BODY VOLUMES
+    #
+    # These pieces overlap deeply.
+    #
+    # They are NOT exported separately.
+    #
+    # They will be joined and voxel-remeshed into one body.
+    # ========================================================
+
+    body_parts = []
+
+    # --------------------------------------------------------
+    # MAIN BARREL
+    #
+    # Much deeper and larger than V24.
+    # --------------------------------------------------------
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockBarrel",
+            (
+                0.000,
+                0.050,
+                1.170
+            ),
+            (
+                0.445,
+                0.590,
+                0.425
+            )
+        )
+    )
+
+    # --------------------------------------------------------
+    # DEEP CHEST
+    # --------------------------------------------------------
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockChest",
+            (
+                0.000,
+                -0.385,
+                1.165
+            ),
+            (
+                0.390,
+                0.325,
+                0.445
+            )
+        )
+    )
+
+    # --------------------------------------------------------
+    # SHOULDER / WITHERS REGION
+    # --------------------------------------------------------
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockShoulder",
+            (
+                0.000,
+                -0.365,
+                1.360
+            ),
+            (
+                0.350,
+                0.300,
+                0.335
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockWithers",
+            (
+                0.000,
+                -0.285,
+                1.475
+            ),
+            (
+                0.285,
+                0.255,
+                0.185
+            )
+        )
+    )
+
+    # --------------------------------------------------------
+    # LOIN
+    # --------------------------------------------------------
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockLoin",
+            (
+                0.000,
+                0.335,
+                1.270
+            ),
+            (
+                0.400,
+                0.340,
+                0.345
+            )
+        )
+    )
+
+    # --------------------------------------------------------
+    # CROUP / HINDQUARTERS
+    #
+    # Top is approximately same height as withers.
+    # --------------------------------------------------------
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockCroup",
+            (
+                0.000,
+                0.585,
+                1.225
+            ),
+            (
+                0.430,
+                0.385,
+                0.385
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockUpperCroup",
+            (
+                0.000,
+                0.565,
+                1.425
+            ),
+            (
+                0.365,
+                0.330,
+                0.180
+            )
+        )
+    )
+
+    # ========================================================
+    # SHORTER / THICKER NECK
+    #
+    # Neck ties into the body HIGH.
+    #
+    # No giraffe neck.
+    # ========================================================
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockNeckBase",
+            (
+                0.000,
+                -0.505,
+                1.455
+            ),
+            (
+                0.295,
+                0.260,
+                0.290
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockNeckLower",
+            (
+                0.000,
+                -0.625,
+                1.565
+            ),
+            (
+                0.260,
+                0.235,
+                0.260
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockNeckMid",
+            (
+                0.000,
+                -0.745,
+                1.650
+            ),
+            (
+                0.225,
+                0.215,
+                0.225
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockNeckTop",
+            (
+                0.000,
+                -0.855,
+                1.715
+            ),
+            (
+                0.190,
+                0.190,
+                0.195
+            )
+        )
+    )
+
+    # ========================================================
+    # COMPACT HEAD
+    # ========================================================
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockSkull",
+            (
+                0.000,
+                -0.970,
+                1.745
+            ),
+            (
+                0.175,
+                0.185,
+                0.175
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockFace",
+            (
+                0.000,
+                -1.115,
+                1.700
+            ),
+            (
+                0.145,
+                0.190,
+                0.140
+            )
+        )
+    )
+
+    body_parts.append(
+        add_ellipsoid(
+            "RiverwatchV25BlockMuzzle",
+            (
+                0.000,
+                -1.285,
+                1.640
+            ),
+            (
+                0.120,
+                0.145,
+                0.105
+            )
+        )
+    )
+
+    # ========================================================
+    # JOIN BODY VOLUMES
+    # ========================================================
+
+    bpy.ops.object.select_all(
+        action="DESELECT"
+    )
+
+    for obj in body_parts:
+
+        obj.select_set(
+            True
+        )
+
+    bpy.context.view_layer.objects.active = body_parts[0]
+
+    bpy.ops.object.join()
+
+    body = bpy.context.object
+
+    body.name = "RiverwatchV25ContinuousBody"
+
+    # ========================================================
+    # VOXEL UNION
+    #
+    # Important difference from V24:
+    #
+    # metaballs do NOT control the shape anymore.
+    #
+    # Explicit ellipsoids define the proportions first.
+    # Remesh is only being used to eliminate seams.
+    # ========================================================
+
+    remesh = body.modifiers.new(
+        "V25 Body Union",
+        "REMESH"
+    )
+
+    remesh.mode = "VOXEL"
+    remesh.voxel_size = 0.026
+    remesh.use_smooth_shade = True
+
+    try:
+
+        remesh.use_remove_disconnected = True
+        remesh.threshold = 0.010
+
+    except Exception:
+        pass
+
+    bpy.ops.object.modifier_apply(
+        modifier=remesh.name
+    )
+
+    relax = body.modifiers.new(
+        "V25 Body Relax",
+        "SMOOTH"
+    )
+
+    relax.factor = 0.28
+    relax.iterations = 3
+
+    bpy.ops.object.modifier_apply(
+        modifier=relax.name
+    )
+
+    body.data.materials.clear()
+
+    body.data.materials.append(
+        coat
+    )
+
+    smooth_object(
+        body
+    )
+
+    bind_armature(
+        body,
+        "body"
+    )
+
+    # ========================================================
+    # LIMB LOFT
+    #
+    # Proper explicit leg shapes.
+    #
+    # No metaballs.
+    # ========================================================
+
+    def build_limb(
+        name,
+        center_x,
+        sections,
+        group_name
+    ):
+
+        centers = [
+            Vector(
+                (
+                    center_x,
+                    section[0],
+                    section[1]
+                )
+            )
+            for section in sections
+        ]
+
+        ring_count = 10
+
+        verts = []
+        faces = []
+
+        def frame_at(
+            index
+        ):
+
+            if index == 0:
+
+                tangent = (
+                    centers[1]
+                    - centers[0]
+                )
+
+            elif index == len(
+                centers
+            ) - 1:
+
+                tangent = (
+                    centers[-1]
+                    - centers[-2]
+                )
+
+            else:
+
+                tangent = (
+                    centers[
+                        index + 1
+                    ]
+                    - centers[
+                        index - 1
+                    ]
+                )
+
+            if tangent.length < 0.00001:
+
+                tangent = Vector(
+                    (
+                        0.0,
+                        0.0,
+                        -1.0
+                    )
+                )
+
+            tangent.normalize()
+
+            lateral = Vector(
+                (
+                    1.0,
+                    0.0,
+                    0.0
+                )
+            )
+
+            lateral = (
+                lateral
+                - tangent
+                * lateral.dot(
+                    tangent
+                )
+            )
+
+            lateral.normalize()
+
+            depth = tangent.cross(
+                lateral
+            )
+
+            if depth.length < 0.00001:
+
+                depth = Vector(
+                    (
+                        0.0,
+                        1.0,
+                        0.0
+                    )
+                )
+
+            depth.normalize()
+
+            return (
+                lateral,
+                depth
+            )
+
+        for index, section in enumerate(
+            sections
+        ):
+
+            y = section[0]
+            z = section[1]
+            lateral_radius = section[2]
+            depth_radius = section[3]
+
+            center = centers[
+                index
+            ]
+
+            lateral, depth = frame_at(
+                index
+            )
+
+            for ring_index in range(
+                ring_count
+            ):
+
+                angle = (
+                    math.tau
+                    * float(
+                        ring_index
+                    )
+                    / float(
+                        ring_count
+                    )
+                )
+
+                point = (
+                    center
+                    + lateral
+                    * (
+                        math.cos(
+                            angle
+                        )
+                        * lateral_radius
+                    )
+                    + depth
+                    * (
+                        math.sin(
+                            angle
+                        )
+                        * depth_radius
+                    )
+                )
+
+                verts.append(
+                    tuple(
+                        point
+                    )
+                )
+
+        for section_index in range(
+            len(sections) - 1
+        ):
+
+            first = (
+                section_index
+                * ring_count
+            )
+
+            second = (
+                section_index + 1
+            ) * ring_count
+
+            for ring_index in range(
+                ring_count
+            ):
+
+                next_ring = (
+                    ring_index + 1
+                ) % ring_count
+
+                faces.append(
+                    (
+                        first + ring_index,
+                        second + ring_index,
+                        second + next_ring,
+                        first + next_ring
+                    )
+                )
+
+        # Root cap.
+        root_index = len(
+            verts
+        )
+
+        verts.append(
+            tuple(
+                centers[0]
+            )
+        )
+
+        # Bottom cap.
+        bottom_index = len(
+            verts
+        )
+
+        verts.append(
+            tuple(
+                centers[-1]
+            )
+        )
+
+        for ring_index in range(
+            ring_count
+        ):
+
+            next_ring = (
+                ring_index + 1
+            ) % ring_count
+
+            faces.append(
+                (
+                    root_index,
+                    next_ring,
+                    ring_index
+                )
+            )
+
+            final_start = (
+                len(sections) - 1
+            ) * ring_count
+
+            faces.append(
+                (
+                    bottom_index,
+                    final_start + ring_index,
+                    final_start + next_ring
+                )
+            )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            coat
+        )
+
+        obj.data.materials.append(
+            dark_points
+        )
+
+        # Dark lower legs.
+        for polygon in obj.data.polygons:
+
+            average_z = (
+                sum(
+                    obj.data.vertices[
+                        vertex_index
+                    ].co.z
+                    for vertex_index
+                    in polygon.vertices
+                )
+                / float(
+                    len(
+                        polygon.vertices
+                    )
+                )
+            )
+
+            if average_z < 0.410:
+
+                polygon.material_index = 1
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        subdivision = obj.modifiers.new(
+            "V25 Limb Smooth",
+            "SUBSURF"
+        )
+
+        subdivision.subdivision_type = "CATMULL_CLARK"
+        subdivision.levels = 1
+        subdivision.render_levels = 1
+
+        bpy.ops.object.modifier_apply(
+            modifier=subdivision.name
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    # ========================================================
+    # FRONT LEG
+    #
+    # Front line is deliberately almost vertical.
+    #
+    # Much thicker than V24.
+    # ========================================================
+
+    front_sections = [
+
+        # Shoulder attachment.
+        (
+            -0.445,
+            1.165,
+            0.145,
+            0.135
+        ),
+
+        # Upper arm.
+        (
+            -0.475,
+            1.020,
+            0.130,
+            0.120
+        ),
+
+        # Elbow.
+        (
+            -0.495,
+            0.875,
+            0.112,
+            0.108
+        ),
+
+        # Forearm.
+        (
+            -0.500,
+            0.720,
+            0.104,
+            0.096
+        ),
+
+        # Upper knee.
+        (
+            -0.500,
+            0.570,
+            0.102,
+            0.098
+        ),
+
+        # Knee.
+        (
+            -0.500,
+            0.505,
+            0.108,
+            0.102
+        ),
+
+        # Upper cannon.
+        (
+            -0.502,
+            0.420,
+            0.069,
+            0.064
+        ),
+
+        # Mid cannon.
+        (
+            -0.505,
+            0.310,
+            0.063,
+            0.059
+        ),
+
+        # Lower cannon.
+        (
+            -0.510,
+            0.220,
+            0.064,
+            0.060
+        ),
+
+        # Fetlock.
+        (
+            -0.515,
+            0.155,
+            0.079,
+            0.074
+        ),
+
+        # Pastern.
+        (
+            -0.548,
+            0.095,
+            0.060,
+            0.058
+        ),
+    ]
+
+    build_limb(
+        "RiverwatchV25FrontLeftLeg",
+        -0.285,
+        front_sections,
+        "front.L"
+    )
+
+    build_limb(
+        "RiverwatchV25FrontRightLeg",
+        0.285,
+        front_sections,
+        "front.R"
+    )
+
+    # ========================================================
+    # HIND LEG
+    #
+    # This is deliberately MUCH less dog-like.
+    #
+    # Hip -> stifle forward.
+    # Stifle -> hock backward.
+    # Hock is HIGH.
+    # Cannon is long and nearly vertical.
+    # ========================================================
+
+    hind_sections = [
+
+        # Hip / upper thigh root.
+        (
+            0.535,
+            1.190,
+            0.165,
+            0.160
+        ),
+
+        # Upper thigh.
+        (
+            0.475,
+            1.045,
+            0.155,
+            0.147
+        ),
+
+        # Lower thigh.
+        (
+            0.395,
+            0.930,
+            0.143,
+            0.134
+        ),
+
+        # Stifle forward.
+        (
+            0.305,
+            0.835,
+            0.128,
+            0.120
+        ),
+
+        # Upper gaskin.
+        (
+            0.355,
+            0.740,
+            0.113,
+            0.108
+        ),
+
+        # Mid gaskin.
+        (
+            0.440,
+            0.650,
+            0.103,
+            0.102
+        ),
+
+        # Hock.
+        (
+            0.545,
+            0.555,
+            0.111,
+            0.116
+        ),
+
+        # Below hock.
+        (
+            0.550,
+            0.485,
+            0.084,
+            0.080
+        ),
+
+        # Upper hind cannon.
+        (
+            0.545,
+            0.405,
+            0.070,
+            0.065
+        ),
+
+        # Hind cannon.
+        (
+            0.540,
+            0.300,
+            0.066,
+            0.061
+        ),
+
+        # Lower cannon.
+        (
+            0.535,
+            0.215,
+            0.067,
+            0.062
+        ),
+
+        # Fetlock.
+        (
+            0.525,
+            0.150,
+            0.081,
+            0.076
+        ),
+
+        # Pastern forward.
+        (
+            0.485,
+            0.092,
+            0.061,
+            0.059
+        ),
+    ]
+
+    build_limb(
+        "RiverwatchV25HindLeftLeg",
+        -0.315,
+        hind_sections,
+        "hind.L"
+    )
+
+    build_limb(
+        "RiverwatchV25HindRightLeg",
+        0.315,
+        hind_sections,
+        "hind.R"
+    )
+
+    # ========================================================
+    # HOOF
+    #
+    # Small wedge.
+    #
+    # Not rectangular concrete blocks.
+    # ========================================================
+
+    def build_hoof(
+        name,
+        center_x,
+        heel_y,
+        toe_y,
+        group_name
+    ):
+
+        heel_half_width = 0.068
+        toe_half_width = 0.100
+
+        heel_top = 0.115
+        toe_top = 0.078
+
+        heel_bottom = 0.032
+        toe_bottom = 0.020
+
+        verts = [
+
+            (
+                center_x - heel_half_width,
+                heel_y,
+                heel_top
+            ),
+
+            (
+                center_x + heel_half_width,
+                heel_y,
+                heel_top
+            ),
+
+            (
+                center_x - toe_half_width,
+                toe_y,
+                toe_top
+            ),
+
+            (
+                center_x + toe_half_width,
+                toe_y,
+                toe_top
+            ),
+
+            (
+                center_x - heel_half_width,
+                heel_y,
+                heel_bottom
+            ),
+
+            (
+                center_x + heel_half_width,
+                heel_y,
+                heel_bottom
+            ),
+
+            (
+                center_x - toe_half_width,
+                toe_y,
+                toe_bottom
+            ),
+
+            (
+                center_x + toe_half_width,
+                toe_y,
+                toe_bottom
+            ),
+        ]
+
+        faces = [
+
+            (
+                0,
+                1,
+                3,
+                2
+            ),
+
+            (
+                6,
+                7,
+                5,
+                4
+            ),
+
+            (
+                0,
+                2,
+                6,
+                4
+            ),
+
+            (
+                1,
+                5,
+                7,
+                3
+            ),
+
+            (
+                0,
+                4,
+                5,
+                1
+            ),
+
+            (
+                2,
+                3,
+                7,
+                6
+            ),
+        ]
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            hoof_mat
+        )
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        bevel = obj.modifiers.new(
+            "V25 Hoof Bevel",
+            "BEVEL"
+        )
+
+        bevel.width = 0.011
+        bevel.segments = 3
+
+        bpy.ops.object.modifier_apply(
+            modifier=bevel.name
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    build_hoof(
+        "RiverwatchV25FrontLeftHoof",
+        -0.285,
+        -0.525,
+        -0.660,
+        "front.L.hoof"
+    )
+
+    build_hoof(
+        "RiverwatchV25FrontRightHoof",
+        0.285,
+        -0.525,
+        -0.660,
+        "front.R.hoof"
+    )
+
+    build_hoof(
+        "RiverwatchV25HindLeftHoof",
+        -0.315,
+        0.495,
+        0.365,
+        "hind.L.hoof"
+    )
+
+    build_hoof(
+        "RiverwatchV25HindRightHoof",
+        0.315,
+        0.495,
+        0.365,
+        "hind.R.hoof"
+    )
+
+    # ========================================================
+    # EARS
+    # ========================================================
+
+    def build_ear(
+        name,
+        center_x
+    ):
+
+        bpy.ops.mesh.primitive_cone_add(
+            vertices=6,
+            radius1=0.050,
+            radius2=0.009,
+            depth=0.165,
+            location=(
+                center_x,
+                -0.930,
+                1.955
+            )
+        )
+
+        obj = bpy.context.object
+        obj.name = name
+
+        obj.data.materials.append(
+            coat
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj,
+            "head"
+        )
+
+        return obj
+
+    build_ear(
+        "RiverwatchV25LeftEar",
+        -0.095
+    )
+
+    build_ear(
+        "RiverwatchV25RightEar",
+        0.095
+    )
+
+    # ========================================================
+    # EYES
+    # ========================================================
+
+    def add_eye(
+        name,
+        x
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=18,
+            ring_count=10,
+            location=(
+                x,
+                -1.035,
+                1.770
+            )
+        )
+
+        obj = bpy.context.object
+        obj.name = name
+
+        obj.scale = Vector(
+            (
+                0.026,
+                0.018,
+                0.026
+            )
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            eye_mat
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj,
+            "head"
+        )
+
+    add_eye(
+        "RiverwatchV25LeftEye",
+        -0.155
+    )
+
+    add_eye(
+        "RiverwatchV25RightEye",
+        0.155
+    )
+
+    # ========================================================
+    # MUZZLE SOFT AREA
+    # ========================================================
+
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        segments=24,
+        ring_count=14,
+        location=(
+            0.000,
+            -1.370,
+            1.620
+        )
+    )
+
+    muzzle = bpy.context.object
+
+    muzzle.name = "RiverwatchV25MuzzleSoft"
+
+    muzzle.scale = Vector(
+        (
+            0.120,
+            0.055,
+            0.070
+        )
+    )
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True
+    )
+
+    muzzle.data.materials.append(
+        muzzle_mat
+    )
+
+    smooth_object(
+        muzzle
+    )
+
+    bind_armature(
+        muzzle,
+        "head"
+    )
+
+    # ========================================================
+    # NOSTRILS
+    # ========================================================
+
+    def add_nostril(
+        name,
+        x
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=16,
+            ring_count=8,
+            location=(
+                x,
+                -1.414,
+                1.630
+            )
+        )
+
+        obj = bpy.context.object
+        obj.name = name
+
+        obj.scale = Vector(
+            (
+                0.017,
+                0.010,
+                0.013
+            )
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            eye_mat
+        )
+
+        bind_armature(
+            obj,
+            "head"
+        )
+
+    add_nostril(
+        "RiverwatchV25LeftNostril",
+        -0.055
+    )
+
+    add_nostril(
+        "RiverwatchV25RightNostril",
+        0.055
+    )
+
+    # ========================================================
+    # METADATA / PROPORTION LOCKS
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "proportion_locked_courser_v25"
+
+    arm[
+        "broken_knight_horse_v25_process"
+    ] = "conformation_landmarks_before_geometry"
+
+    arm[
+        "broken_knight_horse_v25_withers_height"
+    ] = 1.60
+
+    arm[
+        "broken_knight_horse_v25_body_length"
+    ] = 1.55
+
+    arm[
+        "broken_knight_horse_v25_height_length_ratio"
+    ] = 1.032
+
+    arm[
+        "broken_knight_horse_v25_type"
+    ] = "compact_sturdy_medieval_courser"
+
+    arm[
+        "broken_knight_horse_v25_body"
+    ] = "deep_barrel_short_back"
+
+    arm[
+        "broken_knight_horse_v25_neck"
+    ] = "shorter_thicker_high_tie_in"
+
+    arm[
+        "broken_knight_horse_v25_head"
+    ] = "compact"
+
+    arm[
+        "broken_knight_horse_v25_front_legs"
+    ] = "straight_thick_loft"
+
+    arm[
+        "broken_knight_horse_v25_hind_legs"
+    ] = "high_hock_long_vertical_cannon"
+
+    arm[
+        "broken_knight_horse_v25_mane"
+    ] = "omitted_until_anatomy_passes"
+
+    arm[
+        "broken_knight_horse_v25_tail"
+    ] = "omitted_until_anatomy_passes"
+
+    arm[
+        "broken_knight_horse_v25_tack"
+    ] = "omitted_until_anatomy_passes"
+
+    arm[
+        "broken_knight_horse_v25_acceptance"
+    ] = "must_visibly_beat_v22"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_for_current_anatomy_review"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V25",
+        "PROPORTION_LOCKED_COURSER_COMPLETE"
     )
 
 def reset_pose(arm):
