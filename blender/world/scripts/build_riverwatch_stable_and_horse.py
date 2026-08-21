@@ -10049,7 +10049,7 @@ def build_horse_model_v17_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v18_base(arm):
     # ========================================================
     # BROKEN KNIGHT HORSE V18
     #
@@ -11470,6 +11470,1006 @@ def build_horse_model(arm):
     arm[
         "broken_knight_horse_v18_tail"
     ] = "broad_flattened_flowing_mass"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_for_current_anatomy_review"
+
+
+
+def build_horse_model(arm):
+    # ========================================================
+    # BROKEN KNIGHT HORSE V19
+    #
+    # RUMP + HOCK + LAYERED TAIL PASS
+    #
+    # Direct visual review of V18:
+    #
+    # GOOD:
+    #
+    # - front half is improving
+    # - front legs are usable
+    # - hind stance is better than V15/V16
+    # - hock is moving in the correct direction
+    #
+    # STILL BAD:
+    #
+    # - rump remains too round / inflated
+    # - visible tail attachment still resembles a plug/socket
+    # - V18 tail reads as one broad paddle
+    # - hind leg still reads too smoothly tubular
+    # - cannon/hock transition lacks definition
+    #
+    # V19 deliberately avoids another complete leg rewrite.
+    #
+    # It:
+    #
+    # - preserves V18 front half
+    # - preserves V18 basic hind-leg placement
+    # - reshapes the croup/rump
+    # - makes hock more distinct
+    # - slims cannon
+    # - deletes all V18 tail geometry
+    # - adds a flush dark hair cap over the socket
+    # - creates overlapping layered hair locks
+    #
+    # ========================================================
+
+    build_horse_model_v18_base(
+        arm
+    )
+
+    # ========================================================
+    # MATERIAL HELPERS
+    # ========================================================
+
+    def find_material(
+        contains_text
+    ):
+
+        for candidate in bpy.data.materials:
+
+            if contains_text.lower() in candidate.name.lower():
+                return candidate
+
+        return None
+
+    coat = find_material(
+        "Warm Bay"
+    )
+
+    dark_points = find_material(
+        "Dark Points"
+    )
+
+    hoof_mat = find_material(
+        "Hoof"
+    )
+
+    mane_tail_mat = find_material(
+        "Mane Tail"
+    )
+
+    if coat is None:
+
+        raise RuntimeError(
+            "V19 could not find Warm Bay material"
+        )
+
+    if dark_points is None:
+        dark_points = coat
+
+    if hoof_mat is None:
+        hoof_mat = dark_points
+
+    if mane_tail_mat is None:
+        mane_tail_mat = dark_points
+
+    # ========================================================
+    # BASIC HELPERS
+    # ========================================================
+
+    def smooth_object(
+        obj
+    ):
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_armature(
+        obj
+    ):
+
+        obj.parent = arm
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def apply_subdivision(
+        obj,
+        levels=1
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V19 Smooth",
+            "SUBSURF"
+        )
+
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = levels
+        modifier.render_levels = levels
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    # ========================================================
+    # DELETE ALL V18 TAIL OBJECTS
+    #
+    # This removes:
+    #
+    # RiverwatchV18TailRootTuft
+    # RiverwatchV18Tail
+    #
+    # plus any other V18 tail leftovers.
+    # ========================================================
+
+    delete_targets = []
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if (
+            obj.name.startswith(
+                "RiverwatchV18"
+            )
+            and "tail" in obj.name.lower()
+            and obj.type == "MESH"
+        ):
+
+            delete_targets.append(
+                obj
+            )
+
+    for obj in delete_targets:
+
+        if obj.name in bpy.data.objects:
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    # ========================================================
+    # RUMP / CROUP SILHOUETTE
+    #
+    # V18 rear view is too wide and almost spherical.
+    #
+    # Narrow the high rump and reduce the very top dome while
+    # preserving enough lower-quarter muscle.
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV18AnatomyControlCage"
+    )
+
+    if core is None:
+
+        for candidate in bpy.data.objects:
+
+            if (
+                candidate.name.startswith(
+                    "RiverwatchV18"
+                )
+                and "AnatomyControlCage" in candidate.name
+            ):
+
+                core = candidate
+                break
+
+    if core is not None:
+
+        for vertex in core.data.vertices:
+
+            x = vertex.co.x
+            y = vertex.co.y
+            z = vertex.co.z
+
+            # Main upper croup narrowing.
+            if (
+                y > 0.42
+                and y < 0.92
+                and z > 1.33
+            ):
+
+                vertex.co.x *= 0.955
+
+            # Very rear portion narrows a little more.
+            if (
+                y > 0.68
+                and z > 1.27
+            ):
+
+                vertex.co.x *= 0.970
+
+            # Lower the balloon-like highest dome.
+            if (
+                y > 0.42
+                and y < 0.76
+                and z > 1.60
+            ):
+
+                vertex.co.z -= 0.028
+
+            # Slight slope down toward the tail.
+            if (
+                y > 0.62
+                and z > 1.48
+            ):
+
+                amount = min(
+                    1.0,
+                    max(
+                        0.0,
+                        (
+                            y - 0.62
+                        )
+                        / 0.34
+                    )
+                )
+
+                vertex.co.z -= (
+                    0.025
+                    * amount
+                )
+
+            # Keep lower quarter muscular.
+            if (
+                y > 0.38
+                and y < 0.68
+                and z > 1.02
+                and z < 1.30
+            ):
+
+                vertex.co.x *= 1.018
+
+    # ========================================================
+    # HIND LEG DEFINITION
+    #
+    # Do NOT rebuild V18 leg.
+    #
+    # Use existing V18 anatomy but give:
+    #
+    # - fuller upper thigh
+    # - clearer hock
+    # - slimmer cannon
+    # - defined fetlock
+    #
+    # ========================================================
+
+    def refine_hind_leg(
+        name
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        center_x = 0.0
+
+        if "Left" in name:
+            center_x = -0.305
+        else:
+            center_x = 0.305
+
+        for vertex in obj.data.vertices:
+
+            z = vertex.co.z
+
+            # -----------------------------------------------
+            # THIGH
+            # -----------------------------------------------
+
+            if z > 0.95:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 1.025
+                )
+
+            # -----------------------------------------------
+            # STIFLE / GASKIN
+            # -----------------------------------------------
+
+            elif z > 0.68:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 0.975
+                )
+
+            # -----------------------------------------------
+            # HOCK
+            #
+            # Give the joint a visible local enlargement.
+            # -----------------------------------------------
+
+            elif z > 0.52:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 1.070
+                )
+
+                vertex.co.y += 0.010
+
+            # -----------------------------------------------
+            # CANNON
+            #
+            # Noticeably slimmer.
+            # -----------------------------------------------
+
+            elif z > 0.245:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 0.900
+                )
+
+                # Pull cannon toward a straighter vertical
+                # center line.
+                target_y = 0.555
+
+                vertex.co.y = (
+                    target_y
+                    + (
+                        vertex.co.y
+                        - target_y
+                    )
+                    * 0.88
+                )
+
+            # -----------------------------------------------
+            # FETLOCK / PASTERN
+            # -----------------------------------------------
+
+            else:
+
+                vertex.co.x = (
+                    center_x
+                    + (
+                        vertex.co.x
+                        - center_x
+                    )
+                    * 1.030
+                )
+
+    refine_hind_leg(
+        "RiverwatchV18HindLeftLeg"
+    )
+
+    refine_hind_leg(
+        "RiverwatchV18HindRightLeg"
+    )
+
+    # ========================================================
+    # DARK HAIR ROOT CAP
+    #
+    # Unlike V18's sphere, this is a shallow flattened shield
+    # that sits ON TOP of the rump opening.
+    #
+    # Rear view should see dark hair, not a circular flesh
+    # border / socket.
+    # ========================================================
+
+    def build_tail_root_cap():
+
+        name = "RiverwatchV19TailRootCap"
+
+        # z, half-width, y-front, y-back
+        stations = [
+
+            (
+                1.475,
+                0.105,
+                1.125,
+                1.205
+            ),
+
+            (
+                1.415,
+                0.180,
+                1.125,
+                1.210
+            ),
+
+            (
+                1.345,
+                0.225,
+                1.130,
+                1.215
+            ),
+
+            (
+                1.275,
+                0.205,
+                1.135,
+                1.218
+            ),
+
+            (
+                1.215,
+                0.150,
+                1.140,
+                1.215
+            ),
+        ]
+
+        verts = []
+        faces = []
+
+        for (
+            z,
+            half_width,
+            y_front,
+            y_back
+        ) in stations:
+
+            verts.extend(
+                [
+                    (
+                        -half_width,
+                        y_front,
+                        z
+                    ),
+
+                    (
+                        half_width,
+                        y_front,
+                        z
+                    ),
+
+                    (
+                        half_width,
+                        y_back,
+                        z
+                    ),
+
+                    (
+                        -half_width,
+                        y_back,
+                        z
+                    ),
+                ]
+            )
+
+        for index in range(
+            len(stations) - 1
+        ):
+
+            a = index * 4
+            b = (
+                index + 1
+            ) * 4
+
+            faces.extend(
+                [
+                    # Front
+                    (
+                        a,
+                        a + 1,
+                        b + 1,
+                        b
+                    ),
+
+                    # Right
+                    (
+                        a + 1,
+                        a + 2,
+                        b + 2,
+                        b + 1
+                    ),
+
+                    # Back
+                    (
+                        a + 2,
+                        a + 3,
+                        b + 3,
+                        b + 2
+                    ),
+
+                    # Left
+                    (
+                        a + 3,
+                        a,
+                        b,
+                        b + 3
+                    ),
+                ]
+            )
+
+        faces.append(
+            (
+                0,
+                3,
+                2,
+                1
+            )
+        )
+
+        final = (
+            len(stations) - 1
+        ) * 4
+
+        faces.append(
+            (
+                final,
+                final + 1,
+                final + 2,
+                final + 3
+            )
+        )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            mane_tail_mat
+        )
+
+        group = obj.vertex_groups.new(
+            name="tail.1"
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        apply_subdivision(
+            obj,
+            1
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # LAYERED TAIL LOCK
+    #
+    # Each lock is a thin hair ribbon with volume.
+    #
+    # Three strongly-overlapping locks create one mass without
+    # the V18 "single paddle" silhouette.
+    # ========================================================
+
+    def build_tail_lock(
+        name,
+        x_offset,
+        width_scale,
+        y_offset,
+        bend_sign
+    ):
+
+        # z, center x offset, y, half-width, depth
+        stations = [
+
+            (
+                1.265,
+                0.000,
+                1.205,
+                0.115,
+                0.035
+            ),
+
+            (
+                1.180,
+                0.010 * bend_sign,
+                1.220,
+                0.125,
+                0.036
+            ),
+
+            (
+                1.080,
+                0.022 * bend_sign,
+                1.230,
+                0.128,
+                0.036
+            ),
+
+            (
+                0.970,
+                0.035 * bend_sign,
+                1.235,
+                0.122,
+                0.035
+            ),
+
+            (
+                0.855,
+                0.048 * bend_sign,
+                1.230,
+                0.110,
+                0.033
+            ),
+
+            (
+                0.745,
+                0.058 * bend_sign,
+                1.220,
+                0.095,
+                0.031
+            ),
+
+            (
+                0.645,
+                0.065 * bend_sign,
+                1.205,
+                0.080,
+                0.028
+            ),
+
+            (
+                0.560,
+                0.065 * bend_sign,
+                1.185,
+                0.062,
+                0.025
+            ),
+
+            (
+                0.490,
+                0.055 * bend_sign,
+                1.160,
+                0.045,
+                0.021
+            ),
+
+            (
+                0.435,
+                0.040 * bend_sign,
+                1.135,
+                0.022,
+                0.016
+            ),
+        ]
+
+        verts = []
+        faces = []
+
+        for (
+            z,
+            local_x,
+            y,
+            half_width,
+            depth
+        ) in stations:
+
+            cx = (
+                x_offset
+                + local_x
+            )
+
+            py = (
+                y
+                + y_offset
+            )
+
+            width = (
+                half_width
+                * width_scale
+            )
+
+            verts.extend(
+                [
+                    (
+                        cx - width,
+                        py - depth,
+                        z
+                    ),
+
+                    (
+                        cx + width,
+                        py - depth,
+                        z
+                    ),
+
+                    (
+                        cx + width,
+                        py + depth,
+                        z
+                    ),
+
+                    (
+                        cx - width,
+                        py + depth,
+                        z
+                    ),
+                ]
+            )
+
+        for index in range(
+            len(stations) - 1
+        ):
+
+            a = index * 4
+            b = (
+                index + 1
+            ) * 4
+
+            faces.extend(
+                [
+                    (
+                        a,
+                        a + 1,
+                        b + 1,
+                        b
+                    ),
+
+                    (
+                        a + 1,
+                        a + 2,
+                        b + 2,
+                        b + 1
+                    ),
+
+                    (
+                        a + 2,
+                        a + 3,
+                        b + 3,
+                        b + 2
+                    ),
+
+                    (
+                        a + 3,
+                        a,
+                        b,
+                        b + 3
+                    ),
+                ]
+            )
+
+        faces.append(
+            (
+                0,
+                3,
+                2,
+                1
+            )
+        )
+
+        final = (
+            len(stations) - 1
+        ) * 4
+
+        faces.append(
+            (
+                final,
+                final + 1,
+                final + 2,
+                final + 3
+            )
+        )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            verts,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            mane_tail_mat
+        )
+
+        group = obj.vertex_groups.new(
+            name="tail.1"
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        apply_subdivision(
+            obj,
+            1
+        )
+
+        smooth_object(
+            obj
+        )
+
+        bind_armature(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # BUILD NEW TAIL SYSTEM
+    # ========================================================
+
+    build_tail_root_cap()
+
+    # Center lock.
+    build_tail_lock(
+        "RiverwatchV19TailCenter",
+        0.000,
+        1.00,
+        0.000,
+        0.0
+    )
+
+    # Left lock.
+    build_tail_lock(
+        "RiverwatchV19TailLeft",
+        -0.070,
+        0.82,
+        0.008,
+        -1.0
+    )
+
+    # Right lock.
+    build_tail_lock(
+        "RiverwatchV19TailRight",
+        0.070,
+        0.82,
+        -0.006,
+        1.0
+    )
+
+    # ========================================================
+    # RENAME V18 MATERIALS / PRESERVED OBJECTS
+    # ========================================================
+
+    for mat in bpy.data.materials:
+
+        if mat.name.startswith(
+            "Riverwatch V18"
+        ):
+
+            mat.name = mat.name.replace(
+                "Riverwatch V18",
+                "Riverwatch V19",
+                1
+            )
+
+    for obj in bpy.context.scene.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV18"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV18",
+                "RiverwatchV19",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "rump_hock_layered_tail_v19"
+
+    arm[
+        "broken_knight_horse_v19_basis"
+    ] = "direct_visual_v18_contact_sheet"
+
+    arm[
+        "broken_knight_horse_v19_front_half"
+    ] = "preserved_v18"
+
+    arm[
+        "broken_knight_horse_v19_rump"
+    ] = "narrower_less_balloon_like"
+
+    arm[
+        "broken_knight_horse_v19_hock"
+    ] = "more_defined_joint"
+
+    arm[
+        "broken_knight_horse_v19_cannon"
+    ] = "slimmer_straighter"
+
+    arm[
+        "broken_knight_horse_v19_tail_socket"
+    ] = "covered_by_flush_dark_hair_cap"
+
+    arm[
+        "broken_knight_horse_v19_tail"
+    ] = "three_overlapping_flowing_hair_locks"
 
     arm[
         "broken_knight_horse_animation_acceptance"
