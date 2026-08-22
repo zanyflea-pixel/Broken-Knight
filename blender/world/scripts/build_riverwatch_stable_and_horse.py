@@ -94515,9 +94515,76 @@ def build_horse_model(arm):
                 name
             )
 
+        # ====================================================
+        # V66.1
+        #
+        # glTF exports Principled BSDF material values.
+        #
+        # Setting only material.diffuse_color made the V66
+        # model arrive in Godot essentially white.
+        # ====================================================
+
+        material.use_nodes = True
+
+        nodes = material.node_tree.nodes
+
+        principled = nodes.get(
+            "Principled BSDF"
+        )
+
+        if principled is None:
+
+            for node in nodes:
+
+                if node.type == "BSDF_PRINCIPLED":
+                    principled = node
+                    break
+
+        if principled is None:
+
+            principled = nodes.new(
+                "ShaderNodeBsdfPrincipled"
+            )
+
+        base_color_input = principled.inputs.get(
+            "Base Color"
+        )
+
+        if base_color_input is not None:
+
+            base_color_input.default_value = color
+
+        roughness_input = principled.inputs.get(
+            "Roughness"
+        )
+
+        if roughness_input is not None:
+
+            roughness_input.default_value = roughness
+
+        metallic_input = principled.inputs.get(
+            "Metallic"
+        )
+
+        if metallic_input is not None:
+
+            metallic_input.default_value = metallic
+
+        alpha_input = principled.inputs.get(
+            "Alpha"
+        )
+
+        if alpha_input is not None:
+
+            alpha_input.default_value = color[3]
+
         material.diffuse_color = color
         material.roughness = roughness
         material.metallic = metallic
+
+        material[
+            "broken_knight_material_export"
+        ] = "principled_gltf_material_fix_v66_1"
 
         return material
 
