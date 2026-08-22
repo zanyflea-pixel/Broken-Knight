@@ -80739,7 +80739,7 @@ def build_horse_model_v57_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v58_base(arm):
 
     import bpy
     import math
@@ -83168,6 +83168,1162 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V58",
         "PROFILE_BOX_MODEL_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V59
+    #
+    # HORSE MASS + STANCE CORRECTION
+    #
+    # Keep V58 construction.
+    #
+    # Sculpt the actual V58 profile mesh instead of replacing
+    # it with another totally different procedural animal.
+    #
+    # ========================================================
+
+    build_horse_model_v58_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V59",
+        "V58_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def clamp01(
+        value
+    ):
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                value
+            )
+        )
+
+    def smoothstep(
+        value
+    ):
+
+        value = clamp01(
+            value
+        )
+
+        return (
+            value
+            * value
+            * (
+                3.0
+                - 2.0
+                * value
+            )
+        )
+
+    def bell(
+        value,
+        center,
+        radius
+    ):
+
+        if radius <= 0.0:
+            return 0.0
+
+        distance = abs(
+            value - center
+        )
+
+        if distance >= radius:
+            return 0.0
+
+        t = (
+            1.0
+            - distance
+            / radius
+        )
+
+        return smoothstep(
+            t
+        )
+
+    def rename_prefix(
+        old_prefix,
+        new_prefix
+    ):
+
+        for obj in list(
+            bpy.data.objects
+        ):
+
+            if obj.name.startswith(
+                old_prefix
+            ):
+
+                obj.name = obj.name.replace(
+                    old_prefix,
+                    new_prefix,
+                    1
+                )
+
+    # ========================================================
+    # V58 CORE
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV58ProfileCore"
+    )
+
+    if core is None:
+
+        raise RuntimeError(
+            "V59 could not find RiverwatchV58ProfileCore."
+        )
+
+    if core.type != "MESH":
+
+        raise RuntimeError(
+            "V59 profile core is not a mesh."
+        )
+
+    # ========================================================
+    # CORE SCULPT
+    #
+    # IMPORTANT:
+    #
+    # We preserve V58's manually defined planes.
+    #
+    # We DO NOT remesh.
+    # We DO NOT voxelize.
+    # We DO NOT Catmull-Clark the animal into a blob.
+    #
+    # ========================================================
+
+    for vertex in core.data.vertices:
+
+        co = vertex.co
+
+        x = co.x
+        y = co.y
+        z = co.z
+
+        original_x = x
+        original_z = z
+
+        # ====================================================
+        # 1. CROUP / HINDQUARTERS
+        #
+        # Add horse muscle to the upper rear without returning
+        # to the giant cow-like sphere.
+        # ====================================================
+
+        croup = bell(
+            y,
+            1.43,
+            0.40
+        )
+
+        if croup > 0.0:
+
+            # Width.
+
+            x *= (
+                1.0
+                + 0.055
+                * croup
+            )
+
+            # Upper croup roundness.
+
+            if z > 1.38:
+
+                upper_factor = clamp01(
+                    (
+                        z - 1.38
+                    )
+                    / 0.32
+                )
+
+                z += (
+                    0.030
+                    * croup
+                    * upper_factor
+                )
+
+            # Lower rear quarter gets a little more volume.
+
+            if z < 1.30:
+
+                x *= (
+                    1.0
+                    + 0.025
+                    * croup
+                )
+
+        # ====================================================
+        # 2. LOIN
+        #
+        # Keep waist controlled.
+        # ====================================================
+
+        loin = bell(
+            y,
+            1.05,
+            0.30
+        )
+
+        if loin > 0.0:
+
+            x *= (
+                1.0
+                - 0.015
+                * loin
+            )
+
+            # Maintain subtle back dip.
+
+            if z > 1.48:
+
+                z -= (
+                    0.018
+                    * loin
+                )
+
+        # ====================================================
+        # 3. BARREL
+        #
+        # V58 became too narrow/light.
+        #
+        # Add rib-cage width and a little depth.
+        # ====================================================
+
+        barrel = bell(
+            y,
+            0.40,
+            0.62
+        )
+
+        if barrel > 0.0:
+
+            x *= (
+                1.0
+                + 0.070
+                * barrel
+            )
+
+            # Add depth only to the true lower barrel.
+
+            if z < 1.18:
+
+                lower_factor = clamp01(
+                    (
+                        1.18 - z
+                    )
+                    / 0.40
+                )
+
+                z -= (
+                    0.035
+                    * barrel
+                    * lower_factor
+                )
+
+        # ====================================================
+        # 4. FLANK TUCK
+        #
+        # Prevent barrel growth from becoming cow belly.
+        # ====================================================
+
+        flank = bell(
+            y,
+            0.92,
+            0.30
+        )
+
+        if flank > 0.0 and z < 1.13:
+
+            lower_factor = clamp01(
+                (
+                    1.13 - z
+                )
+                / 0.34
+            )
+
+            z += (
+                0.060
+                * flank
+                * lower_factor
+            )
+
+        # ====================================================
+        # 5. SHOULDER / FRONT CHEST
+        #
+        # V58 front quarter is too narrow.
+        # ====================================================
+
+        shoulder = bell(
+            y,
+            -0.06,
+            0.33
+        )
+
+        if shoulder > 0.0:
+
+            x *= (
+                1.0
+                + 0.100
+                * shoulder
+            )
+
+            # Chest depth.
+
+            if z < 1.18:
+
+                lower_factor = clamp01(
+                    (
+                        1.18 - z
+                    )
+                    / 0.42
+                )
+
+                z -= (
+                    0.050
+                    * shoulder
+                    * lower_factor
+                )
+
+        # ====================================================
+        # 6. WITHERS
+        #
+        # A horse needs a visible wither peak.
+        # ====================================================
+
+        withers = bell(
+            y,
+            -0.21,
+            0.20
+        )
+
+        if withers > 0.0 and z > 1.46:
+
+            upper_factor = clamp01(
+                (
+                    z - 1.46
+                )
+                / 0.34
+            )
+
+            z += (
+                0.070
+                * withers
+                * upper_factor
+            )
+
+            x *= (
+                1.0
+                - 0.030
+                * withers
+                * upper_factor
+            )
+
+        # ====================================================
+        # 7. NECK
+        #
+        # THIS IS THE LARGEST V59 CHANGE.
+        #
+        # V58 neck is too deer-like.
+        #
+        # Make the base substantially deeper and wider while
+        # keeping the poll controlled.
+        # ====================================================
+
+        if (
+            y >= -0.70
+            and
+            y <= -0.24
+        ):
+
+            neck_base = bell(
+                y,
+                -0.37,
+                0.30
+            )
+
+            neck_mid = bell(
+                y,
+                -0.52,
+                0.24
+            )
+
+            # Width:
+            #
+            # strongest near chest,
+            # less near poll.
+
+            x *= (
+                1.0
+                + 0.135
+                * neck_base
+                + 0.045
+                * neck_mid
+            )
+
+            # Approximate center line through neck.
+
+            neck_center = (
+                1.96
+                - 0.91
+                * (
+                    y + 0.68
+                )
+            )
+
+            vertical_offset = (
+                z
+                - neck_center
+            )
+
+            # Deepen neck around center.
+
+            z = (
+                neck_center
+                + vertical_offset
+                * (
+                    1.0
+                    + 0.105
+                    * neck_base
+                    + 0.040
+                    * neck_mid
+                )
+            )
+
+            # Crest:
+            #
+            # give top neck some strength but no giant arch.
+
+            if z > neck_center:
+
+                z += (
+                    0.025
+                    * neck_mid
+                )
+
+            # Throat:
+            #
+            # lower it slightly near neck root.
+
+            if z < neck_center:
+
+                z -= (
+                    0.020
+                    * neck_base
+                )
+
+        # ====================================================
+        # 8. POLL
+        # ====================================================
+
+        poll = bell(
+            y,
+            -0.70,
+            0.11
+        )
+
+        if poll > 0.0 and z > 1.87:
+
+            z += (
+                0.025
+                * poll
+            )
+
+        # ====================================================
+        # 9. HEAD
+        #
+        # V58 head is too slight.
+        #
+        # Increase depth through cheek/jaw but DO NOT create
+        # separate masses.
+        # ====================================================
+
+        if y < -0.72:
+
+            # Approximate head center line.
+
+            head_center = (
+                1.975
+                + 0.55
+                * (
+                    y + 0.72
+                )
+            )
+
+            head_vertical = (
+                z
+                - head_center
+            )
+
+            head_strength = clamp01(
+                (
+                    -y - 0.72
+                )
+                / 0.58
+            )
+
+            # Moderate overall increase.
+
+            x *= (
+                1.0
+                + 0.045
+                + 0.015
+                * (
+                    1.0 - head_strength
+                )
+            )
+
+            z = (
+                head_center
+                + head_vertical
+                * 1.070
+            )
+
+        # ====================================================
+        # 10. CHEEK / JAW
+        #
+        # Integrated directly into core.
+        # ====================================================
+
+        cheek = bell(
+            y,
+            -0.94,
+            0.18
+        )
+
+        if cheek > 0.0:
+
+            # Wider cheek plane.
+
+            x *= (
+                1.0
+                + 0.075
+                * cheek
+            )
+
+            # Deeper lower jaw.
+
+            if z < 1.75:
+
+                jaw_factor = clamp01(
+                    (
+                        1.75 - z
+                    )
+                    / 0.25
+                )
+
+                z -= (
+                    0.040
+                    * cheek
+                    * jaw_factor
+                )
+
+        # ====================================================
+        # 11. MUZZLE TRANSITION
+        #
+        # Avoid bulbous snout.
+        # ====================================================
+
+        muzzle_root = bell(
+            y,
+            -1.24,
+            0.16
+        )
+
+        if muzzle_root > 0.0:
+
+            x *= (
+                1.0
+                - 0.025
+                * muzzle_root
+            )
+
+        co.x = x
+        co.z = z
+
+    core.data.update()
+
+    # ========================================================
+    # FRONT LEG MASS
+    #
+    # V58 stance is acceptable.
+    #
+    # Increase upper forelimb muscle and slightly reinforce
+    # cannons without changing foot placement.
+    # ========================================================
+
+    def strengthen_front_leg(
+        name,
+        side
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+
+            raise RuntimeError(
+                "V59 missing "
+                + name
+            )
+
+        center_x = (
+            side * 0.355
+        )
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            if co.z > 0.88:
+
+                factor = 1.115
+
+            elif co.z > 0.58:
+
+                factor = 1.075
+
+            elif co.z > 0.25:
+
+                factor = 1.040
+
+            else:
+
+                factor = 1.020
+
+            co.x = (
+                center_x
+                + (
+                    co.x
+                    - center_x
+                )
+                * factor
+            )
+
+        obj.data.update()
+
+    strengthen_front_leg(
+        "RiverwatchV58FrontLeftLeg",
+        -1.0
+    )
+
+    strengthen_front_leg(
+        "RiverwatchV58FrontRightLeg",
+        1.0
+    )
+
+    # ========================================================
+    # HIND LEGS
+    #
+    # Keep V58's large improvement.
+    #
+    # Add upper-thigh mass and relax remaining tucked look.
+    # ========================================================
+
+    def improve_hind_leg(
+        name,
+        side
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+
+            raise RuntimeError(
+                "V59 missing "
+                + name
+            )
+
+        center_x = (
+            side * 0.385
+        )
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            # Upper thigh / gaskin mass.
+
+            if co.z > 0.90:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x
+                        - center_x
+                    )
+                    * 1.105
+                )
+
+            elif co.z > 0.62:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x
+                        - center_x
+                    )
+                    * 1.070
+                )
+
+            # -----------------------------------------------
+            # Reduce tucked-under stance.
+            # -----------------------------------------------
+
+            # Stifle:
+            #
+            # move slightly back toward body.
+
+            if (
+                co.z > 0.78
+                and
+                co.z < 1.04
+                and
+                co.y < 1.34
+            ):
+
+                co.y += (
+                    0.050
+                    * clamp01(
+                        (
+                            1.04
+                            - co.z
+                        )
+                        / 0.26
+                    )
+                )
+
+            # Gaskin:
+            #
+            # slightly farther rearward.
+
+            if (
+                co.z >= 0.55
+                and
+                co.z <= 0.78
+            ):
+
+                co.y += 0.028
+
+            # Lower cannon:
+            #
+            # keep nearly vertical under hock.
+
+            if (
+                co.z > 0.16
+                and
+                co.z < 0.50
+            ):
+
+                target_y = 1.465
+
+                co.y = (
+                    co.y
+                    * 0.72
+                    + target_y
+                    * 0.28
+                )
+
+        obj.data.update()
+
+    improve_hind_leg(
+        "RiverwatchV58HindLeftLeg",
+        -1.0
+    )
+
+    improve_hind_leg(
+        "RiverwatchV58HindRightLeg",
+        1.0
+    )
+
+    # ========================================================
+    # HOOFS
+    #
+    # V58 hooves are still visually heavy.
+    #
+    # Scale around their own mesh centers.
+    # ========================================================
+
+    def scale_hoof(
+        name,
+        x_scale,
+        y_scale,
+        z_scale
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        xs = [
+            vertex.co.x
+            for vertex in obj.data.vertices
+        ]
+
+        ys = [
+            vertex.co.y
+            for vertex in obj.data.vertices
+        ]
+
+        zs = [
+            vertex.co.z
+            for vertex in obj.data.vertices
+        ]
+
+        if not xs:
+            return
+
+        cx = (
+            min(xs)
+            + max(xs)
+        ) * 0.5
+
+        cy = (
+            min(ys)
+            + max(ys)
+        ) * 0.5
+
+        cz = (
+            min(zs)
+            + max(zs)
+        ) * 0.5
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            co.x = (
+                cx
+                + (
+                    co.x - cx
+                )
+                * x_scale
+            )
+
+            co.y = (
+                cy
+                + (
+                    co.y - cy
+                )
+                * y_scale
+            )
+
+            co.z = (
+                cz
+                + (
+                    co.z - cz
+                )
+                * z_scale
+            )
+
+        obj.data.update()
+
+    for hoof_name in (
+
+        "RiverwatchV58FrontLeftHoof",
+        "RiverwatchV58FrontRightHoof",
+        "RiverwatchV58HindLeftHoof",
+        "RiverwatchV58HindRightHoof"
+
+    ):
+
+        scale_hoof(
+            hoof_name,
+            0.92,
+            0.94,
+            0.92
+        )
+
+    # ========================================================
+    # MUZZLE
+    #
+    # Slightly more substantial, still compact.
+    # ========================================================
+
+    muzzle = bpy.data.objects.get(
+        "RiverwatchV58Muzzle"
+    )
+
+    if muzzle is not None:
+
+        for vertex in muzzle.data.vertices:
+
+            vertex.co.x *= 1.050
+            vertex.co.z *= 1.035
+
+        muzzle.data.update()
+
+    # ========================================================
+    # EYES
+    #
+    # Tiny outward adjustment after increased cheek width.
+    # ========================================================
+
+    left_eye = bpy.data.objects.get(
+        "RiverwatchV58LeftEye"
+    )
+
+    right_eye = bpy.data.objects.get(
+        "RiverwatchV58RightEye"
+    )
+
+    if left_eye is not None:
+
+        left_eye.location.x -= 0.010
+        left_eye.location.z += 0.004
+
+    if right_eye is not None:
+
+        right_eye.location.x += 0.010
+        right_eye.location.z += 0.004
+
+    # ========================================================
+    # EARS
+    #
+    # Slightly taller and wider.
+    # ========================================================
+
+    for ear_name in (
+
+        "RiverwatchV58LeftEar",
+        "RiverwatchV58RightEar"
+
+    ):
+
+        ear = bpy.data.objects.get(
+            ear_name
+        )
+
+        if ear is None:
+            continue
+
+        for vertex in ear.data.vertices:
+
+            vertex.co.x *= 1.050
+            vertex.co.z *= 1.100
+
+        ear.data.update()
+
+    # ========================================================
+    # MANE
+    #
+    # V58 mane is too small against the neck.
+    #
+    # Add hanging length but keep it controlled.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if not obj.name.startswith(
+            "RiverwatchV58ManeLock"
+        ):
+            continue
+
+        if obj.type != "MESH":
+            continue
+
+        xs = [
+            vertex.co.x
+            for vertex in obj.data.vertices
+        ]
+
+        if not xs:
+            continue
+
+        center_x = (
+            min(xs)
+            + max(xs)
+        ) * 0.5
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            # Add modest thickness.
+
+            co.x = (
+                center_x
+                + (
+                    co.x
+                    - center_x
+                )
+                * 1.18
+            )
+
+            # Hanging side drops more.
+
+            if co.x < center_x:
+
+                co.z -= 0.035
+
+        obj.data.update()
+
+    # ========================================================
+    # FORELOCK
+    # ========================================================
+
+    forelock = bpy.data.objects.get(
+        "RiverwatchV58Forelock"
+    )
+
+    if forelock is not None:
+
+        for vertex in forelock.data.vertices:
+
+            if vertex.co.z < 2.00:
+                vertex.co.z -= 0.025
+
+        forelock.data.update()
+
+    # ========================================================
+    # OPTIONAL SECOND MICRO-BEVEL ON CORE
+    #
+    # V58 intentionally retained planes.
+    #
+    # This only softens the harshest transitions.
+    # ========================================================
+
+    bpy.ops.object.select_all(
+        action="DESELECT"
+    )
+
+    core.select_set(
+        True
+    )
+
+    bpy.context.view_layer.objects.active = core
+
+    bevel_modifier = core.modifiers.new(
+        "V59 Profile Softening",
+        "BEVEL"
+    )
+
+    bevel_modifier.width = 0.008
+    bevel_modifier.segments = 2
+    bevel_modifier.limit_method = "ANGLE"
+    bevel_modifier.angle_limit = math.radians(
+        35.0
+    )
+
+    bpy.ops.object.modifier_apply(
+        modifier=bevel_modifier.name
+    )
+
+    # ========================================================
+    # RENAME V58 -> V59
+    # ========================================================
+
+    rename_prefix(
+        "RiverwatchV58",
+        "RiverwatchV59"
+    )
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V58"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V58",
+                "Riverwatch V59",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "horse_mass_stance_v59"
+
+    arm[
+        "broken_knight_horse_v59_previous_rating"
+    ] = 56
+
+    arm[
+        "broken_knight_horse_v59_base"
+    ] = "v58_explicit_profile_cage"
+
+    arm[
+        "broken_knight_horse_v59_body"
+    ] = "deeper_chest_full_ribcage_tucked_flank"
+
+    arm[
+        "broken_knight_horse_v59_shoulders"
+    ] = "increased_mass_integrated_core"
+
+    arm[
+        "broken_knight_horse_v59_withers"
+    ] = "stronger_peak"
+
+    arm[
+        "broken_knight_horse_v59_neck"
+    ] = "substantially_stronger_base_controlled_poll"
+
+    arm[
+        "broken_knight_horse_v59_head"
+    ] = "deeper_integrated_cheek_and_jaw"
+
+    arm[
+        "broken_knight_horse_v59_croup"
+    ] = "fuller_without_cow_sphere"
+
+    arm[
+        "broken_knight_horse_v59_front_legs"
+    ] = "stronger_forearm_and_cannon"
+
+    arm[
+        "broken_knight_horse_v59_hind_legs"
+    ] = "more_mass_less_tucked_vertical_cannon"
+
+    arm[
+        "broken_knight_horse_v59_hooves"
+    ] = "reduced_scale"
+
+    arm[
+        "broken_knight_horse_v59_goal"
+    ] = "turn_v58_light_build_into_sturdy_horse"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_reference_match"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V59",
+        "HORSE_MASS_STANCE_COMPLETE"
     )
 
 def reset_pose(arm):
