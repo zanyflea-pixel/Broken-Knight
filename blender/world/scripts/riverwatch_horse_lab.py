@@ -1028,6 +1028,7 @@ def create_hoof(
     return obj
 
 
+# V86_EAR_PROFILE
 def create_ear(
     name,
     side_sign,
@@ -1043,55 +1044,58 @@ def create_ear(
 
     base_outer = (
         side_sign
-        * 0.180
+        * 0.195
     )
 
     tip_x = (
         side_sign
-        * 0.132
+        * 0.135
     )
 
-    front_y = -1.035
-    rear_y = -0.965
+    base_front_y = -1.060
+    base_rear_y = -0.955
 
-    base_z = 2.135
-    tip_z = 2.360
+    tip_front_y = -1.035
+    tip_rear_y = -1.005
+
+    base_z = 2.105
+    tip_z = 2.365
 
     vertices = [
 
         (
             base_inner,
-            front_y,
+            base_front_y,
             base_z
         ),
 
         (
             base_outer,
-            front_y,
-            base_z + 0.025
+            base_front_y,
+            base_z + 0.020
         ),
 
         (
             tip_x,
-            front_y,
+            tip_front_y,
             tip_z
         ),
 
         (
             base_inner,
-            rear_y,
+            base_rear_y,
             base_z
         ),
 
         (
             base_outer,
-            rear_y,
-            base_z + 0.025
+            base_rear_y,
+            base_z + 0.020
         ),
 
         (
             tip_x,
-            rear_y,
+            tip_rear_y,
             tip_z
         ),
     ]
@@ -1158,21 +1162,21 @@ def create_ear(
     inner_vertices = [
 
         (
-            side_sign * 0.095 + inner_offset,
-            front_y - 0.004,
-            base_z + 0.050
+            side_sign * 0.098 + inner_offset,
+            base_front_y - 0.003,
+            base_z + 0.045
         ),
 
         (
-            side_sign * 0.155 + inner_offset,
-            front_y - 0.004,
-            base_z + 0.060
+            side_sign * 0.166 + inner_offset,
+            base_front_y - 0.003,
+            base_z + 0.055
         ),
 
         (
-            side_sign * 0.130 + inner_offset,
-            front_y - 0.004,
-            tip_z - 0.060
+            side_sign * 0.135 + inner_offset,
+            tip_front_y - 0.003,
+            tip_z - 0.065
         ),
     ]
 
@@ -1198,7 +1202,6 @@ def create_ear(
         ear,
         inner
     )
-
 
 def sphere_detail(
     name,
