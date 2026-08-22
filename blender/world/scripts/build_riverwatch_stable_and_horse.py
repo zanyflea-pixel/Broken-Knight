@@ -43330,7 +43330,7 @@ def build_horse_model_v36_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v42_base(arm):
 
     import bpy
     import math
@@ -46629,6 +46629,1220 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V42",
         "REFERENCE_SILHOUETTE_SURFACE_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V43
+    #
+    # IMAGE-MEASURED PROPORTION CORRECTION
+    #
+    # Reference ratio target:
+    #
+    # shoulder -> rump approximately twice
+    # shoulder -> muzzle.
+    #
+    # Major visible changes:
+    #
+    # longer torso
+    # thicker neck
+    # broader head
+    # rearward hind legs
+    # rebuilt mane
+    #
+    # ========================================================
+
+    build_horse_model_v42_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V43",
+        "V42_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def object_by_name(
+        name
+    ):
+
+        return bpy.data.objects.get(
+            name
+        )
+
+    def mesh_warp(
+        name,
+        function
+    ):
+
+        obj = object_by_name(
+            name
+        )
+
+        if obj is None:
+
+            print(
+                "V43_MISSING_OBJECT",
+                name
+            )
+
+            return
+
+        if obj.type != "MESH":
+
+            print(
+                "V43_NOT_MESH",
+                name
+            )
+
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co = Vector(
+                function(
+                    vertex.co.copy()
+                )
+            )
+
+        obj.data.update()
+
+    def transform_location_and_local_scale(
+        name,
+        location_function,
+        sx,
+        sy,
+        sz
+    ):
+
+        obj = object_by_name(
+            name
+        )
+
+        if obj is None:
+            return
+
+        obj.location = Vector(
+            location_function(
+                obj.location.copy()
+            )
+        )
+
+        if obj.type == "MESH":
+
+            for vertex in obj.data.vertices:
+
+                vertex.co.x *= sx
+                vertex.co.y *= sy
+                vertex.co.z *= sz
+
+            obj.data.update()
+
+    def bind_new(
+        obj,
+        group_name
+    ):
+
+        obj.parent = arm
+
+        group = obj.vertex_groups.new(
+            name=group_name
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def create_mesh(
+        name,
+        vertices,
+        faces,
+        material,
+        group_name
+    ):
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            vertices,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    def bevel(
+        obj,
+        width,
+        segments=3
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V43 Hair Edge",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def prism_from_side(
+        name,
+        outline,
+        x_min,
+        x_max,
+        material,
+        group_name,
+        bevel_width=0.0
+    ):
+
+        count = len(
+            outline
+        )
+
+        vertices = []
+
+        for y, z in outline:
+
+            vertices.append(
+                (
+                    x_min,
+                    y,
+                    z
+                )
+            )
+
+        for y, z in outline:
+
+            vertices.append(
+                (
+                    x_max,
+                    y,
+                    z
+                )
+            )
+
+        faces = []
+
+        faces.append(
+            tuple(
+                reversed(
+                    range(count)
+                )
+            )
+        )
+
+        faces.append(
+            tuple(
+                range(
+                    count,
+                    count * 2
+                )
+            )
+        )
+
+        for index in range(
+            count
+        ):
+
+            nxt = (
+                index + 1
+            ) % count
+
+            faces.append(
+                (
+                    index,
+                    nxt,
+                    count + nxt,
+                    count + index
+                )
+            )
+
+        obj = create_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            group_name
+        )
+
+        if bevel_width > 0.0:
+
+            bevel(
+                obj,
+                bevel_width,
+                3
+            )
+
+        return obj
+
+    # ========================================================
+    # TORSO
+    # ========================================================
+
+    def warp_torso(
+        co
+    ):
+
+        original_y = co.y
+        original_z = co.z
+
+        pivot_y = -0.20
+
+        if original_y >= pivot_y:
+
+            co.y = (
+                pivot_y
+                + (
+                    original_y
+                    - pivot_y
+                )
+                * 1.28
+            )
+
+        else:
+
+            co.y = (
+                pivot_y
+                + (
+                    original_y
+                    - pivot_y
+                )
+                * 1.04
+            )
+
+        if original_y < 0.10:
+
+            width_factor = 1.16
+
+        elif original_y < 0.75:
+
+            width_factor = 1.11
+
+        elif original_y < 1.05:
+
+            width_factor = 1.08
+
+        else:
+
+            width_factor = 1.03
+
+        co.x *= width_factor
+
+        if original_z < 0.98:
+
+            if (
+                original_y >= 0.10
+                and original_y < 0.70
+            ):
+
+                influence = min(
+                    1.0,
+                    max(
+                        0.0,
+                        (
+                            0.98
+                            - original_z
+                        )
+                        / 0.35
+                    )
+                )
+
+                co.z += (
+                    0.070
+                    * influence
+                )
+
+            elif (
+                original_y >= 0.70
+                and original_y < 1.15
+            ):
+
+                influence = min(
+                    1.0,
+                    max(
+                        0.0,
+                        (
+                            0.98
+                            - original_z
+                        )
+                        / 0.35
+                    )
+                )
+
+                co.z += (
+                    0.105
+                    * influence
+                )
+
+        if (
+            original_y > 1.10
+            and original_z > 1.55
+        ):
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        original_y
+                        - 1.10
+                    )
+                    / 0.34
+                )
+            )
+
+            co.z -= (
+                0.035
+                * influence
+            )
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV42LongReferenceTorso",
+        warp_torso
+    )
+
+    # ========================================================
+    # NECK
+    # ========================================================
+
+    def warp_neck(
+        co
+    ):
+
+        anchor_y = -0.300
+        anchor_z = 1.450
+
+        co.y = (
+            anchor_y
+            + (
+                co.y
+                - anchor_y
+            )
+            * 0.92
+        )
+
+        co.z = (
+            anchor_z
+            + (
+                co.z
+                - anchor_z
+            )
+            * 1.055
+        )
+
+        co.x *= 1.25
+
+        if co.z > 1.80:
+            co.z += 0.025
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV42ArchedNeck",
+        warp_neck
+    )
+
+    # ========================================================
+    # HEAD
+    # ========================================================
+
+    def warp_head(
+        co
+    ):
+
+        anchor_y = -0.745
+        anchor_z = 1.820
+
+        old_y = co.y
+
+        co.y = (
+            anchor_y
+            + (
+                co.y
+                - anchor_y
+            )
+            * 0.88
+        )
+
+        co.z = (
+            anchor_z
+            + (
+                co.z
+                - anchor_z
+            )
+            * 1.075
+        )
+
+        if old_y > -0.98:
+
+            co.x *= 1.23
+
+        elif old_y > -1.16:
+
+            co.x *= 1.15
+
+        else:
+
+            co.x *= 1.07
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV42ReferenceHead",
+        warp_head
+    )
+
+    # ========================================================
+    # HEAD ACCESSORIES
+    # ========================================================
+
+    def head_location(
+        location
+    ):
+
+        anchor_y = -0.745
+        anchor_z = 1.820
+
+        location.y = (
+            anchor_y
+            + (
+                location.y
+                - anchor_y
+            )
+            * 0.88
+        )
+
+        location.z = (
+            anchor_z
+            + (
+                location.z
+                - anchor_z
+            )
+            * 1.075
+        )
+
+        return location
+
+    for name in [
+        "RiverwatchV42SoftMuzzle",
+        "RiverwatchV42LeftEye",
+        "RiverwatchV42RightEye",
+        "RiverwatchV42LeftNostril",
+        "RiverwatchV42RightNostril",
+        "RiverwatchV42LeftEar",
+        "RiverwatchV42RightEar"
+    ]:
+
+        sx = 1.10
+        sy = 0.95
+        sz = 1.06
+
+        if "Eye" in name:
+
+            sx = 1.04
+            sy = 1.00
+            sz = 1.04
+
+        if "Ear" in name:
+
+            sx = 1.00
+            sy = 0.90
+            sz = 0.88
+
+        transform_location_and_local_scale(
+            name,
+            head_location,
+            sx,
+            sy,
+            sz
+        )
+
+    # ========================================================
+    # FRONT LEGS
+    # ========================================================
+
+    def make_front_leg_warp(
+        center_x
+    ):
+
+        def warp(
+            co
+        ):
+
+            delta_x = (
+                co.x
+                - center_x
+            )
+
+            if co.z > 0.62:
+
+                factor = 1.20
+
+            elif co.z > 0.45:
+
+                factor = 1.15
+
+            else:
+
+                factor = 1.09
+
+            co.x = (
+                center_x
+                + delta_x
+                * factor
+            )
+
+            if co.z < 0.58:
+                co.y += 0.020
+
+            return co
+
+        return warp
+
+    mesh_warp(
+        "RiverwatchV42FrontLeftLeg",
+        make_front_leg_warp(
+            -0.350
+        )
+    )
+
+    mesh_warp(
+        "RiverwatchV42FrontRightLeg",
+        make_front_leg_warp(
+            0.350
+        )
+    )
+
+    # ========================================================
+    # HIND LEGS
+    # ========================================================
+
+    def make_hind_leg_warp(
+        center_x
+    ):
+
+        def warp(
+            co
+        ):
+
+            original_z = co.z
+
+            delta_x = (
+                co.x
+                - center_x
+            )
+
+            if original_z > 0.85:
+
+                width_factor = 1.18
+
+            elif original_z > 0.55:
+
+                width_factor = 1.13
+
+            else:
+
+                width_factor = 1.08
+
+            co.x = (
+                center_x
+                + delta_x
+                * width_factor
+            )
+
+            co.y += 0.330
+
+            if original_z < 0.65:
+
+                extra = (
+                    0.100
+                    * (
+                        1.0
+                        - min(
+                            1.0,
+                            original_z
+                            / 0.65
+                        )
+                    )
+                )
+
+                co.y += extra
+
+            if (
+                original_z > 0.68
+                and original_z < 0.95
+            ):
+
+                co.y += 0.035
+
+            return co
+
+        return warp
+
+    mesh_warp(
+        "RiverwatchV42HindLeftLeg",
+        make_hind_leg_warp(
+            -0.370
+        )
+    )
+
+    mesh_warp(
+        "RiverwatchV42HindRightLeg",
+        make_hind_leg_warp(
+            0.370
+        )
+    )
+
+    # ========================================================
+    # FRONT HOOFS
+    # ========================================================
+
+    def make_front_hoof_warp(
+        center_x
+    ):
+
+        def warp(
+            co
+        ):
+
+            co.x = (
+                center_x
+                + (
+                    co.x
+                    - center_x
+                )
+                * 1.12
+            )
+
+            co.y = (
+                -0.10
+                + (
+                    co.y
+                    + 0.10
+                )
+                * 1.07
+            )
+
+            return co
+
+        return warp
+
+    mesh_warp(
+        "RiverwatchV42FrontLeftHoof",
+        make_front_hoof_warp(
+            -0.350
+        )
+    )
+
+    mesh_warp(
+        "RiverwatchV42FrontRightHoof",
+        make_front_hoof_warp(
+            0.350
+        )
+    )
+
+    # ========================================================
+    # HIND HOOFS
+    # ========================================================
+
+    def make_hind_hoof_warp(
+        center_x
+    ):
+
+        def warp(
+            co
+        ):
+
+            co.x = (
+                center_x
+                + (
+                    co.x
+                    - center_x
+                )
+                * 1.12
+            )
+
+            co.y += 0.420
+
+            return co
+
+        return warp
+
+    mesh_warp(
+        "RiverwatchV42HindLeftHoof",
+        make_hind_hoof_warp(
+            -0.370
+        )
+    )
+
+    mesh_warp(
+        "RiverwatchV42HindRightHoof",
+        make_hind_hoof_warp(
+            0.370
+        )
+    )
+
+    # ========================================================
+    # DELETE V42 MANE
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if (
+            obj.name.startswith(
+                "RiverwatchV42SingleFlowingMane"
+            )
+            or obj.name.startswith(
+                "RiverwatchV42ManeDetail"
+            )
+            or obj.name.startswith(
+                "RiverwatchV42Forelock"
+            )
+        ):
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V42 Dark Points"
+    )
+
+    if dark is None:
+
+        raise RuntimeError(
+            "V43 could not find V42 dark material."
+        )
+
+    # ========================================================
+    # MAIN MANE
+    # ========================================================
+
+    main_mane_outline = [
+
+        (-0.720, 2.060),
+        (-0.665, 2.070),
+        (-0.610, 2.045),
+        (-0.555, 2.010),
+        (-0.500, 1.960),
+        (-0.445, 1.900),
+        (-0.390, 1.835),
+        (-0.335, 1.765),
+        (-0.285, 1.705),
+        (-0.240, 1.655),
+
+        (-0.255, 1.500),
+        (-0.300, 1.460),
+        (-0.325, 1.350),
+        (-0.370, 1.405),
+        (-0.400, 1.300),
+        (-0.445, 1.385),
+        (-0.480, 1.300),
+        (-0.525, 1.425),
+        (-0.560, 1.350),
+        (-0.600, 1.505),
+        (-0.635, 1.465),
+        (-0.665, 1.645),
+        (-0.695, 1.620),
+    ]
+
+    prism_from_side(
+        "RiverwatchV43ReferenceManeMass",
+        main_mane_outline,
+        -0.385,
+        -0.305,
+        dark,
+        "head",
+        0.012
+    )
+
+    # ========================================================
+    # LARGE MANE LOCKS
+    # ========================================================
+
+    mane_locks = [
+
+        [
+            (-0.675, 2.045),
+            (-0.610, 1.970),
+            (-0.560, 1.565),
+            (-0.600, 1.455),
+            (-0.645, 1.720),
+        ],
+
+        [
+            (-0.610, 2.020),
+            (-0.550, 1.930),
+            (-0.490, 1.430),
+            (-0.535, 1.325),
+            (-0.580, 1.690),
+        ],
+
+        [
+            (-0.545, 1.985),
+            (-0.485, 1.875),
+            (-0.420, 1.365),
+            (-0.465, 1.285),
+            (-0.515, 1.630),
+        ],
+
+        [
+            (-0.480, 1.925),
+            (-0.420, 1.820),
+            (-0.355, 1.355),
+            (-0.395, 1.285),
+            (-0.450, 1.580),
+        ],
+
+        [
+            (-0.415, 1.850),
+            (-0.355, 1.760),
+            (-0.295, 1.420),
+            (-0.330, 1.345),
+            (-0.385, 1.555),
+        ],
+
+        [
+            (-0.355, 1.775),
+            (-0.300, 1.710),
+            (-0.250, 1.475),
+            (-0.280, 1.415),
+            (-0.330, 1.570),
+        ],
+    ]
+
+    for index, outline in enumerate(
+        mane_locks
+    ):
+
+        x_offset = (
+            0.008
+            * index
+        )
+
+        prism_from_side(
+            "RiverwatchV43ManeLock%02d"
+            % (
+                index + 1
+            ),
+            outline,
+            -0.405 - x_offset,
+            -0.330 - x_offset,
+            dark,
+            "head",
+            0.009
+        )
+
+    # ========================================================
+    # FORELOCK
+    # ========================================================
+
+    prism_from_side(
+        "RiverwatchV43Forelock",
+        [
+
+            (-0.750, 2.075),
+            (-0.700, 2.085),
+            (-0.665, 2.040),
+            (-0.685, 1.835),
+            (-0.730, 1.900),
+        ],
+        -0.065,
+        0.065,
+        dark,
+        "head",
+        0.008
+    )
+
+    # ========================================================
+    # TAIL
+    # ========================================================
+
+    def warp_tail(
+        co
+    ):
+
+        pivot_y = -0.20
+
+        co.y = (
+            pivot_y
+            + (
+                co.y
+                - pivot_y
+            )
+            * 1.28
+        )
+
+        co.x *= 0.94
+
+        if co.z < 0.55:
+            co.z -= 0.025
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV42FullTail",
+        warp_tail
+    )
+
+    mesh_warp(
+        "RiverwatchV42TailLockLeft",
+        warp_tail
+    )
+
+    mesh_warp(
+        "RiverwatchV42TailLockRight",
+        warp_tail
+    )
+
+    # ========================================================
+    # TACK
+    # ========================================================
+
+    def tack_mesh_warp(
+        co
+    ):
+
+        pivot = 0.15
+
+        co.y = (
+            pivot
+            + (
+                co.y
+                - pivot
+            )
+            * 1.15
+        )
+
+        return co
+
+    for name in [
+        "RiverwatchV42ReferenceBlanket",
+        "RiverwatchV42ReferenceSaddle",
+        "RiverwatchV42SaddleSkirtLeft",
+        "RiverwatchV42SaddleSkirtRight"
+    ]:
+
+        mesh_warp(
+            name,
+            tack_mesh_warp
+        )
+
+    def tack_location(
+        location
+    ):
+
+        pivot = 0.15
+
+        location.y = (
+            pivot
+            + (
+                location.y
+                - pivot
+            )
+            * 1.15
+        )
+
+        return location
+
+    transform_location_and_local_scale(
+        "RiverwatchV42Pommel",
+        tack_location,
+        1.08,
+        1.08,
+        1.08
+    )
+
+    transform_location_and_local_scale(
+        "RiverwatchV42Cantle",
+        tack_location,
+        1.08,
+        1.08,
+        1.08
+    )
+
+    # ========================================================
+    # BAGS
+    # ========================================================
+
+    for name in [
+        "RiverwatchV42BagL",
+        "RiverwatchV42BagR",
+        "RiverwatchV42BagFlapL",
+        "RiverwatchV42BagFlapR",
+        "RiverwatchV42BagBuckleL",
+        "RiverwatchV42BagBuckleR"
+    ]:
+
+        obj = object_by_name(
+            name
+        )
+
+        if obj is not None:
+
+            obj.location.y = (
+                0.15
+                + (
+                    obj.location.y
+                    - 0.15
+                )
+                * 1.20
+                + 0.060
+            )
+
+    # ========================================================
+    # RENAME OLD V42 OBJECTS TO V43
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV42"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV42",
+                "RiverwatchV43",
+                1
+            )
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V42"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V42",
+                "Riverwatch V43",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "image_measured_ratio_lock_v43"
+
+    arm[
+        "broken_knight_horse_v43_previous_rating"
+    ] = 41
+
+    arm[
+        "broken_knight_horse_v43_v42_regressed"
+    ] = True
+
+    arm[
+        "broken_knight_horse_v43_reference_ratio"
+    ] = "shoulder_to_rump_about_2x_shoulder_to_muzzle"
+
+    arm[
+        "broken_knight_horse_v43_torso_length_scale"
+    ] = 1.28
+
+    arm[
+        "broken_knight_horse_v43_front_projection_scale"
+    ] = 0.88
+
+    arm[
+        "broken_knight_horse_v43_neck_width_scale"
+    ] = 1.25
+
+    arm[
+        "broken_knight_horse_v43_hind_leg_rear_shift"
+    ] = 0.33
+
+    arm[
+        "broken_knight_horse_v43_mane"
+    ] = "large_continuous_reference_mass_plus_six_long_locks"
+
+    arm[
+        "broken_knight_horse_v43_goal"
+    ] = "large_visible_reference_match_jump"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_reference_match"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V43",
+        "IMAGE_MEASURED_RATIO_LOCK_COMPLETE"
     )
 
 def reset_pose(arm):
