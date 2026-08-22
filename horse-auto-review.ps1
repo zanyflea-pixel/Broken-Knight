@@ -303,6 +303,27 @@ try {
     }
 
     # ========================================================
+    # CHATGPT_HANDOFF_V8
+    #
+    # Compact image + Base64 + editable Blend inventory.
+    # ========================================================
+
+    $HandoffScript = Join-Path $Root "horse-review-handoff.ps1"
+
+    if (-not (Test-Path $HandoffScript)) {
+        throw "ChatGPT handoff script is missing."
+    }
+
+    & powershell.exe `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $HandoffScript `
+        -Version $Version
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "ChatGPT review handoff failed."
+    }
+    # ========================================================
     # REVIEW METADATA
     # ========================================================
 
@@ -335,6 +356,11 @@ try {
 
     $StagePaths = @(
         "captures/horse-auto-render.py",
+        "captures/horse-model-inventory.py",
+        "horse-review-handoff.ps1",
+        "captures/horse-review/auto/review_chat.jpg",
+        "captures/horse-review/auto/review_chat.b64.txt",
+        "captures/horse-review/auto/model_inventory.json",
         "horse-auto-review.ps1",
         "captures/horse-review/auto/review.json",
         "captures/horse-review/auto/views/01_side_left.png",

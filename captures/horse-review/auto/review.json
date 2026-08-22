@@ -1,7 +1,7 @@
 {
     "status":  "READY_FOR_CHATGPT",
-    "version":  "AUTOMATION-V7",
-    "generated_utc":  "2026-08-22T15:11:46.0794373Z",
+    "version":  "V80-INVENTORY",
+    "generated_utc":  "2026-08-22T15:23:22.2939841Z",
     "branch":  "main",
     "runtime_sha256":  "B3825BCAB7F69CA68C9D15AB1BEE7B89A9DC2DA360ED8C3AC5EEB76889ABB912",
     "review_directory":  "captures/horse-review/auto/views",
