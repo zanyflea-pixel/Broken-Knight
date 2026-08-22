@@ -1,29 +1,29 @@
-VERSION = "V86"
+﻿VERSION = "V87"
 
 # ============================================================
-# RIVERWATCH HORSE V86
+# RIVERWATCH HORSE V87
 #
-# REFERENCE SILHOUETTE PASS
+# ANATOMY BALANCE PASS
 #
-# Preserve from V85:
+# Preserve from V86:
 #
+# - compact medieval riding-horse identity
 # - narrow front stance
-# - improved hoof size
-# - deeper body
-# - compact medieval-horse identity
-#
-# Major V86 goals:
-#
-# - less deer-like
+# - deeper rib cage
 # - larger horse head
-# - lower / broader / more powerful neck
-# - stronger neck-to-withers connection
-# - fuller rounded croup
-# - croup overlaps upper hind thigh
-# - calmer hind-leg geometry
-# - stronger forearms with narrow cannons
-# - visible flowing dark mane
-# - fuller continuous tail
+# - stronger neck / withers connection
+# - substantial hooves
+# - visible mane and continuous tail
+#
+# V87 goals:
+#
+# - reduce any over-heavy V86 neck/base feeling
+# - make torso read less like one long capsule
+# - give shoulder/withers a cleaner horse transition
+# - refine skull -> cheek -> muzzle taper
+# - strengthen forearm/knee rhythm without thick cannons
+# - make hind limb read hip -> stifle -> gaskin -> hock -> cannon
+# - keep croup rounded and thigh buried into the body
 #
 # X = left/right
 # Y = front/rear
@@ -88,49 +88,47 @@ EYE_HIGHLIGHT = (
 # upper_width_factor,
 # lower_width_factor
 #
-# Strong rounded croup.
-# Mild back dip.
-# Deep rib cage.
-# High withers without excessive front width.
+# V87 keeps the V86 depth, but gives the croup/rib/shoulder
+# three clearer masses instead of a single even capsule.
 # ============================================================
 
 BODY_STATIONS = [
 
     (
-        1.100,
+        1.115,
         1.410,
-        0.220,
-        0.165,
-        0.205,
-        0.88,
-        0.80
+        0.215,
+        0.160,
+        0.200,
+        0.87,
+        0.79
     ),
 
     (
-        1.010,
-        1.465,
-        0.345,
-        0.275,
+        1.020,
+        1.468,
+        0.350,
+        0.280,
         0.300,
-        0.98,
+        0.99,
         0.90
     ),
 
     (
-        0.875,
-        1.505,
-        0.425,
-        0.350,
+        0.880,
+        1.515,
+        0.438,
+        0.360,
         0.370,
-        1.04,
+        1.05,
         0.96
     ),
 
     (
-        0.700,
-        1.500,
-        0.460,
-        0.375,
+        0.705,
+        1.505,
+        0.466,
+        0.378,
         0.395,
         1.06,
         0.99
@@ -138,82 +136,82 @@ BODY_STATIONS = [
 
     (
         0.500,
-        1.460,
-        0.460,
-        0.340,
-        0.385,
-        1.04,
+        1.465,
+        0.455,
+        0.338,
+        0.390,
+        1.03,
         0.97
     ),
 
     (
         0.285,
-        1.420,
-        0.450,
-        0.305,
-        0.395,
-        1.01,
+        1.425,
+        0.444,
+        0.302,
+        0.405,
+        1.00,
         0.95
     ),
 
     (
         0.070,
-        1.405,
-        0.445,
-        0.295,
-        0.440,
-        1.01,
+        1.408,
+        0.438,
+        0.292,
+        0.448,
+        1.00,
         0.96
     ),
 
     (
         -0.135,
-        1.415,
-        0.440,
+        1.420,
+        0.430,
         0.315,
-        0.475,
-        1.03,
+        0.482,
+        1.02,
         0.98
     ),
 
     (
         -0.315,
-        1.450,
-        0.420,
-        0.375,
-        0.470,
+        1.458,
+        0.410,
+        0.382,
+        0.468,
         1.05,
         0.97
     ),
 
     (
         -0.475,
-        1.490,
-        0.375,
-        0.435,
-        0.435,
+        1.505,
+        0.360,
+        0.448,
+        0.425,
         1.04,
-        0.94
+        0.93
     ),
 
     (
         -0.610,
-        1.460,
-        0.320,
-        0.400,
-        0.390,
-        0.99,
-        0.89
+        1.480,
+        0.305,
+        0.415,
+        0.372,
+        0.98,
+        0.88
     ),
 
     (
-        -0.710,
-        1.400,
-        0.270,
-        0.310,
-        0.345,
-        0.92,
-        0.83
+        -0.715,
+        1.415,
+        0.252,
+        0.315,
+        0.330,
+        0.91,
+        0.82
     ),
 ]
 
@@ -221,103 +219,100 @@ BODY_STATIONS = [
 # ============================================================
 # NECK
 #
-# V85 still read like a narrow upright tube.
+# V87:
 #
-# V86:
-#
-# - bigger base
-# - base sits deeper in shoulder
-# - lower poll
-# - stronger forward sweep
-# - gradual taper
+# - keeps the base buried into the shoulder
+# - trims excess lower-neck bulk
+# - adds a clearer crest and forward sweep
+# - keeps gradual taper into the poll
 # ============================================================
 
 NECK_STATIONS = [
 
     (
         0.0,
-        -0.365,
-        1.525,
-        0.330,
-        0.285,
-        0.345,
-        1.00,
-        0.95
-    ),
-
-    (
-        0.0,
-        -0.455,
-        1.625,
-        0.320,
-        0.300,
+        -0.360,
+        1.535,
         0.315,
+        0.278,
+        0.330,
         1.00,
         0.94
     ),
 
     (
         0.0,
-        -0.555,
-        1.730,
+        -0.455,
+        1.635,
+        0.308,
+        0.292,
         0.300,
-        0.305,
-        0.280,
+        1.00,
+        0.93
+    ),
+
+    (
+        0.0,
+        -0.565,
+        1.740,
+        0.290,
+        0.300,
+        0.268,
         1.00,
         0.92
     ),
 
     (
         0.0,
-        -0.670,
-        1.830,
-        0.275,
-        0.295,
-        0.245,
+        -0.680,
+        1.838,
+        0.268,
+        0.288,
+        0.238,
         0.99,
         0.91
     ),
 
     (
         0.0,
-        -0.785,
-        1.915,
-        0.245,
-        0.270,
-        0.215,
+        -0.795,
+        1.920,
+        0.240,
+        0.265,
+        0.208,
         0.98,
         0.90
     ),
 
     (
         0.0,
-        -0.890,
-        1.975,
-        0.215,
-        0.240,
-        0.190,
+        -0.900,
+        1.980,
+        0.212,
+        0.236,
+        0.186,
         0.97,
         0.89
     ),
 
     (
         0.0,
-        -0.980,
-        2.015,
-        0.190,
-        0.210,
-        0.170,
+        -0.985,
+        2.018,
+        0.188,
+        0.207,
+        0.168,
         0.96,
         0.88
     ),
 
     (
         0.0,
-        -1.045,
-        2.025,
-        0.175,
-        0.185,
-        0.155,
+        -1.047,
+        2.028,
+        0.174,
+        0.184,
+        0.154,
         0.95,
         0.88
     ),
@@ -327,9 +322,12 @@ NECK_STATIONS = [
 # ============================================================
 # HEAD
 #
-# V86 enlarges cheek/skull while keeping a smaller muzzle.
+# V87 keeps V86 head scale but gives a clearer horse profile:
 #
-# Eye coordinates in Horse Lab remain compatible with this.
+# - stronger upper cheek
+# - slightly longer face
+# - smoother taper
+# - muzzle remains smaller than cheek/skull
 # ============================================================
 
 HEAD_STATIONS = [
@@ -337,10 +335,10 @@ HEAD_STATIONS = [
     (
         0.0,
         -1.025,
-        2.030,
-        0.180,
-        0.170,
-        0.170,
+        2.032,
+        0.178,
+        0.168,
+        0.168,
         1.00,
         1.00
     ),
@@ -348,41 +346,41 @@ HEAD_STATIONS = [
     (
         0.0,
         -1.125,
-        2.040,
-        0.245,
+        2.045,
+        0.242,
         0.205,
-        0.225,
+        0.223,
         1.00,
         1.04
     ),
 
     (
         0.0,
-        -1.235,
-        2.020,
-        0.285,
-        0.220,
-        0.260,
+        -1.240,
+        2.025,
+        0.290,
+        0.222,
+        0.264,
         1.00,
         1.08
     ),
 
     (
         0.0,
-        -1.350,
-        1.970,
-        0.270,
-        0.205,
-        0.240,
+        -1.360,
+        1.975,
+        0.275,
+        0.206,
+        0.242,
         0.99,
         1.07
     ),
 
     (
         0.0,
-        -1.470,
-        1.905,
-        0.235,
+        -1.485,
+        1.910,
+        0.238,
         0.180,
         0.205,
         0.98,
@@ -391,33 +389,33 @@ HEAD_STATIONS = [
 
     (
         0.0,
-        -1.585,
-        1.840,
-        0.205,
-        0.155,
-        0.175,
+        -1.605,
+        1.842,
+        0.204,
+        0.152,
+        0.171,
         0.97,
         1.01
     ),
 
     (
         0.0,
-        -1.690,
+        -1.715,
         1.785,
-        0.180,
-        0.128,
-        0.145,
+        0.178,
+        0.124,
+        0.141,
         0.96,
         0.99
     ),
 
     (
         0.0,
-        -1.780,
-        1.750,
-        0.165,
-        0.108,
-        0.120,
+        -1.810,
+        1.748,
+        0.160,
+        0.104,
+        0.116,
         0.95,
         0.97
     ),
@@ -427,82 +425,84 @@ HEAD_STATIONS = [
 # ============================================================
 # FRONT LEGS
 #
-# Strong upper limb.
-# Defined knee.
-# Narrow cannon.
-# Slight pastern angle.
+# V87:
+#
+# - fuller upper foreleg
+# - knee clearly broader than cannon
+# - cannon stays narrow
+# - fetlock/pastern remain readable
 # ============================================================
 
 FRONT_LEG_STATIONS = [
 
     (
-        -0.415,
-        1.430,
-        0.165,
-        0.190
+        -0.410,
+        1.438,
+        0.170,
+        0.194
     ),
 
     (
-        -0.430,
-        1.250,
-        0.152,
-        0.174
+        -0.425,
+        1.255,
+        0.158,
+        0.180
     ),
 
     (
-        -0.445,
-        1.060,
-        0.137,
-        0.155
+        -0.440,
+        1.065,
+        0.143,
+        0.160
     ),
 
     (
-        -0.455,
-        0.875,
-        0.122,
-        0.137
+        -0.452,
+        0.880,
+        0.127,
+        0.142
     ),
 
     (
-        -0.460,
-        0.710,
-        0.132,
-        0.122
+        -0.458,
+        0.712,
+        0.138,
+        0.128
     ),
 
     (
-        -0.465,
+        -0.464,
         0.580,
-        0.102,
-        0.095
+        0.106,
+        0.098
     ),
 
     (
-        -0.472,
+        -0.470,
         0.440,
-        0.078,
-        0.071
+        0.077,
+        0.070
     ),
 
     (
-        -0.480,
+        -0.478,
         0.305,
-        0.073,
-        0.066
+        0.071,
+        0.064
     ),
 
     (
-        -0.495,
+        -0.492,
         0.195,
-        0.090,
-        0.078
+        0.089,
+        0.077
     ),
 
     (
-        -0.520,
+        -0.518,
         0.105,
-        0.075,
-        0.063
+        0.074,
+        0.062
     ),
 ]
 
@@ -510,104 +510,101 @@ FRONT_LEG_STATIONS = [
 # ============================================================
 # HIND LEGS
 #
-# V85 still had a sharp dog-leg.
-#
-# V86 uses a calmer horse-like sequence:
+# V87 makes the S-curve more legible:
 #
 # hip / upper thigh
 # lower thigh
-# stifle
-# gaskin
+# stifle forward
+# gaskin back
 # hock
-# cannon
+# cannon nearly vertical
 # fetlock
 # pastern
 #
-# The first three stations are intentionally buried well
-# inside the croup so the thigh reads as part of the horse.
+# Upper stations remain buried inside the rounded croup.
 # ============================================================
 
 HIND_LEG_STATIONS = [
 
     (
-        0.790,
-        1.500,
-        0.285,
-        0.305
+        0.805,
+        1.505,
+        0.292,
+        0.312
     ),
 
     (
-        0.700,
-        1.350,
-        0.265,
-        0.285
+        0.715,
+        1.355,
+        0.274,
+        0.292
     ),
 
     (
-        0.600,
-        1.190,
-        0.235,
-        0.255
+        0.610,
+        1.195,
+        0.244,
+        0.262
     ),
 
     (
-        0.505,
-        1.020,
-        0.200,
-        0.215
+        0.500,
+        1.030,
+        0.205,
+        0.220
     ),
 
     (
-        0.470,
-        0.870,
-        0.175,
-        0.185
+        0.440,
+        0.880,
+        0.177,
+        0.187
     ),
 
     (
-        0.535,
-        0.735,
-        0.155,
-        0.160
+        0.500,
+        0.742,
+        0.158,
+        0.164
     ),
 
     (
-        0.635,
-        0.600,
-        0.140,
-        0.140
+        0.610,
+        0.605,
+        0.142,
+        0.142
     ),
 
     (
-        0.675,
-        0.485,
-        0.115,
-        0.108
+        0.685,
+        0.488,
+        0.118,
+        0.110
     ),
 
     (
-        0.670,
-        0.365,
-        0.082,
-        0.074
+        0.692,
+        0.368,
+        0.084,
+        0.075
     ),
 
     (
-        0.655,
-        0.245,
+        0.686,
+        0.247,
         0.078,
         0.069
     ),
 
     (
-        0.635,
+        0.670,
         0.165,
         0.090,
         0.078
     ),
 
     (
-        0.610,
+        0.642,
         0.100,
         0.076,
         0.063
@@ -625,6 +622,9 @@ HIND_LEG_X = 0.290
 
 # ============================================================
 # HOOVES
+#
+# Keep V86 scale. They are already substantial enough to read
+# from review distance; only a tiny rear length adjustment.
 # ============================================================
 
 FRONT_HOOF = {
@@ -635,9 +635,9 @@ FRONT_HOOF = {
 }
 
 HIND_HOOF = {
-    "center_y": 0.615,
+    "center_y": 0.640,
     "width": 0.210,
-    "length": 0.325,
+    "length": 0.330,
     "height": 0.145,
 }
 
@@ -645,14 +645,9 @@ HIND_HOOF = {
 # ============================================================
 # MANE
 #
-# IMPORTANT V86 CHANGE
-#
-# Previous versions moved the mane mostly sideways in X.
-# From a true side view that kept it hidden inside the neck.
-#
-# V86 moves the hanging edge REARWARD IN Y and downward in Z.
-# It should finally make a visible dark silhouette behind the
-# crest like the reference horse.
+# Preserve the V86 rearward hanging silhouette.
+# V87 smooths the lower edge so it reads as one mane rather
+# than separate triangular pieces.
 # ============================================================
 
 MANE_ROOT = [
@@ -704,39 +699,39 @@ MANE_ROOT = [
 MANE_DROP = [
 
     (
-        -0.120,
-        -0.295,
-        1.620
+        -0.122,
+        -0.292,
+        1.625
     ),
 
     (
         -0.135,
-        -0.375,
-        1.690
+        -0.372,
+        1.695
     ),
 
     (
         -0.145,
-        -0.465,
-        1.765
+        -0.462,
+        1.770
     ),
 
     (
         -0.150,
         -0.555,
-        1.835
+        1.838
     ),
 
     (
         -0.150,
         -0.655,
-        1.895
+        1.898
     ),
 
     (
         -0.140,
         -0.755,
-        1.950
+        1.952
     ),
 
     (
@@ -750,15 +745,15 @@ MANE_DROP = [
 # ============================================================
 # TAIL
 #
-# Fuller hair mass with a rearward sweep.
-# Still continuous; no bead/sphere chain.
+# Preserve V86 continuous full tail, with a slightly cleaner
+# rearward arc through the middle and a tapered final third.
 # ============================================================
 
 TAIL_STATIONS = [
 
     (
         0.0,
-        1.010,
+        1.015,
         1.540,
         0.095,
         0.100,
@@ -769,7 +764,7 @@ TAIL_STATIONS = [
 
     (
         0.0,
-        1.100,
+        1.110,
         1.425,
         0.120,
         0.125,
@@ -780,7 +775,7 @@ TAIL_STATIONS = [
 
     (
         0.0,
-        1.175,
+        1.190,
         1.280,
         0.145,
         0.150,
@@ -791,7 +786,7 @@ TAIL_STATIONS = [
 
     (
         0.0,
-        1.225,
+        1.245,
         1.100,
         0.160,
         0.165,
@@ -802,7 +797,7 @@ TAIL_STATIONS = [
 
     (
         0.0,
-        1.255,
+        1.275,
         0.900,
         0.165,
         0.170,
@@ -813,44 +808,44 @@ TAIL_STATIONS = [
 
     (
         0.0,
-        1.265,
+        1.280,
         0.695,
-        0.155,
-        0.160,
-        0.160,
+        0.154,
+        0.159,
+        0.159,
         1.0,
         1.0
     ),
 
     (
         0.0,
-        1.255,
+        1.268,
         0.500,
-        0.130,
-        0.135,
-        0.135,
+        0.128,
+        0.133,
+        0.133,
         1.0,
         1.0
     ),
 
     (
         0.0,
-        1.230,
+        1.238,
         0.330,
-        0.100,
-        0.105,
-        0.105,
+        0.098,
+        0.103,
+        0.103,
         1.0,
         1.0
     ),
 
     (
         0.0,
-        1.195,
+        1.198,
         0.190,
-        0.065,
-        0.070,
-        0.070,
+        0.064,
+        0.069,
+        0.069,
         1.0,
         1.0
     ),
