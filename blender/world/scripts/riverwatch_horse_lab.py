@@ -1,3 +1,4 @@
+# V83_FEATURE_ALIGNMENT
 import bpy
 import bmesh
 import importlib.util
@@ -1036,24 +1037,24 @@ def create_ear(
 
     base_inner = (
         side_sign
-        * 0.095
+        * 0.075
     )
 
     base_outer = (
         side_sign
-        * 0.225
+        * 0.180
     )
 
     tip_x = (
         side_sign
-        * 0.175
+        * 0.132
     )
 
-    front_y = -1.055
-    rear_y = -0.985
+    front_y = -1.035
+    rear_y = -0.965
 
-    base_z = 2.165
-    tip_z = 2.455
+    base_z = 2.135
+    tip_z = 2.360
 
     vertices = [
 
@@ -1156,25 +1157,19 @@ def create_ear(
     inner_vertices = [
 
         (
-            side_sign
-            * 0.125
-            + inner_offset,
+            side_sign * 0.095 + inner_offset,
             front_y - 0.004,
             base_z + 0.050
         ),
 
         (
-            side_sign
-            * 0.195
-            + inner_offset,
+            side_sign * 0.155 + inner_offset,
             front_y - 0.004,
             base_z + 0.060
         ),
 
         (
-            side_sign
-            * 0.172
-            + inner_offset,
+            side_sign * 0.130 + inner_offset,
             front_y - 0.004,
             tip_z - 0.060
         ),
@@ -1588,12 +1583,12 @@ def build():
 
     assign_dark_lower_leg(
         front_near,
-        0.585
+        0.445
     )
 
     assign_dark_lower_leg(
         front_far,
-        0.585
+        0.445
     )
 
     hind_near = path_loft(
@@ -1630,12 +1625,12 @@ def build():
 
     assign_dark_lower_leg(
         hind_near,
-        0.575
+        0.420
     )
 
     assign_dark_lower_leg(
         hind_far,
-        0.575
+        0.420
     )
 
     for side_sign, suffix in (
@@ -1732,7 +1727,7 @@ def build():
 
         eye_x = (
             side_sign
-            * 0.300
+            * 0.255
         )
 
         sphere_detail(
@@ -1741,8 +1736,8 @@ def build():
 
             (
                 eye_x,
-                -1.235,
-                2.075
+                -1.205,
+                2.055
             ),
 
             (
@@ -1764,10 +1759,10 @@ def build():
 
             (
                 side_sign
-                * 0.333,
+                * 0.282,
 
-                -1.266,
-                2.092
+                -1.225,
+                2.070
             ),
 
             (
@@ -1789,10 +1784,10 @@ def build():
 
             (
                 side_sign
-                * 0.135,
+                * 0.120,
 
-                -1.783,
-                1.835
+                -1.615,
+                1.845
             ),
 
             (
