@@ -46633,7 +46633,7 @@ def build_horse_model_v42_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v44_base(arm):
 
     import bpy
     import math
@@ -49759,6 +49759,1401 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V44",
         "TRUE_SIDE_PROFILE_ANATOMY_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V45
+    #
+    # LARGE REFERENCE SILHOUETTE CORRECTION
+    #
+    # V44 provided the best recent foundation.
+    #
+    # V45 keeps that foundation but makes major visible
+    # proportion and hair changes.
+    #
+    # ========================================================
+
+    build_horse_model_v44_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V45",
+        "V44_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def get_object(
+        name
+    ):
+
+        return bpy.data.objects.get(
+            name
+        )
+
+    def mesh_warp(
+        name,
+        function
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+
+            print(
+                "V45_MISSING_OBJECT",
+                name
+            )
+
+            return
+
+        if obj.type != "MESH":
+
+            print(
+                "V45_NOT_MESH",
+                name
+            )
+
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co = Vector(
+                function(
+                    vertex.co.copy()
+                )
+            )
+
+        obj.data.update()
+
+    def local_scale(
+        name,
+        sx,
+        sy,
+        sz
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co.x *= sx
+            vertex.co.y *= sy
+            vertex.co.z *= sz
+
+        obj.data.update()
+
+    def move_location(
+        name,
+        dx,
+        dy,
+        dz
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+            return
+
+        obj.location.x += dx
+        obj.location.y += dy
+        obj.location.z += dz
+
+    def transform_location(
+        name,
+        function
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+            return
+
+        obj.location = Vector(
+            function(
+                obj.location.copy()
+            )
+        )
+
+    def delete_prefix(
+        prefix
+    ):
+
+        deleted = 0
+
+        for obj in list(
+            bpy.data.objects
+        ):
+
+            if obj.name.startswith(
+                prefix
+            ):
+
+                bpy.data.objects.remove(
+                    obj,
+                    do_unlink=True
+                )
+
+                deleted += 1
+
+        print(
+            "V45_DELETE_PREFIX",
+            prefix,
+            deleted
+        )
+
+    def smooth(
+        obj
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_new(
+        obj,
+        group_name
+    ):
+
+        obj.parent = arm
+
+        group = obj.vertex_groups.new(
+            name=group_name
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def curve_mesh(
+        name,
+        points,
+        material,
+        thickness,
+        group_name,
+        resolution=4
+    ):
+
+        curve_data = bpy.data.curves.new(
+            name=name + "Curve",
+            type="CURVE"
+        )
+
+        curve_data.dimensions = "3D"
+        curve_data.resolution_u = resolution
+        curve_data.bevel_depth = thickness
+        curve_data.bevel_resolution = 3
+        curve_data.resolution_u = 5
+
+        spline = curve_data.splines.new(
+            "BEZIER"
+        )
+
+        spline.bezier_points.add(
+            len(points) - 1
+        )
+
+        for index, point in enumerate(
+            points
+        ):
+
+            bp = spline.bezier_points[
+                index
+            ]
+
+            bp.co = point
+            bp.handle_left_type = "AUTO"
+            bp.handle_right_type = "AUTO"
+
+        obj = bpy.data.objects.new(
+            name,
+            curve_data
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        bpy.ops.object.convert(
+            target="MESH"
+        )
+
+        obj = bpy.context.object
+        obj.name = name
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    def ellipsoid(
+        name,
+        location,
+        scale,
+        material,
+        group_name
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=24,
+            ring_count=16,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V44 Dark Points"
+    )
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V44 Warm Bay"
+    )
+
+    if dark is None:
+        raise RuntimeError(
+            "V45 could not locate V44 dark material."
+        )
+
+    if coat is None:
+        raise RuntimeError(
+            "V45 could not locate V44 coat material."
+        )
+
+    # ========================================================
+    # 1. REMOVE THE V44 WITHERS PLATE
+    #
+    # The visible angular plate was contributing to the
+    # triangular neck/body silhouette.
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV44Withers"
+    )
+
+    # ========================================================
+    # 2. TORSO
+    #
+    # LARGE SHAPE CHANGE
+    #
+    # - stretch rearward
+    # - narrow barrel
+    # - retain shoulder width
+    # - lift abdomen behind ribs
+    # - reduce round croup appearance
+    #
+    # ========================================================
+
+    def warp_torso(
+        co
+    ):
+
+        original_y = co.y
+        original_z = co.z
+
+        # ----------------------------------------------------
+        # LONGER HORSE
+        # ----------------------------------------------------
+
+        pivot_y = -0.18
+
+        if original_y > pivot_y:
+
+            co.y = (
+                pivot_y
+                + (
+                    original_y
+                    - pivot_y
+                )
+                * 1.13
+            )
+
+        # ----------------------------------------------------
+        # SHOULDER SHOULD STAY BROAD
+        # MID BARREL SHOULD NOT READ LIKE COW
+        # ----------------------------------------------------
+
+        if original_y < 0.05:
+
+            co.x *= 1.035
+
+        elif original_y < 0.80:
+
+            co.x *= 0.955
+
+        elif original_y < 1.15:
+
+            co.x *= 0.965
+
+        else:
+
+            co.x *= 0.970
+
+        # ----------------------------------------------------
+        # RAISE THE ABDOMEN
+        # KEEP CHEST DEEP
+        # ----------------------------------------------------
+
+        if (
+            original_y > 0.20
+            and original_z < 1.05
+        ):
+
+            amount = min(
+                1.0,
+                (
+                    1.05
+                    - original_z
+                )
+                / 0.40
+            )
+
+            if original_y < 0.75:
+
+                co.z += (
+                    0.065
+                    * amount
+                )
+
+            elif original_y < 1.15:
+
+                co.z += (
+                    0.105
+                    * amount
+                )
+
+            else:
+
+                co.z += (
+                    0.070
+                    * amount
+                )
+
+        # ----------------------------------------------------
+        # FLATTER / LONGER CROUP
+        # ----------------------------------------------------
+
+        if (
+            original_y > 1.15
+            and original_z > 1.45
+        ):
+
+            influence = min(
+                1.0,
+                (
+                    original_y
+                    - 1.15
+                )
+                / 0.40
+            )
+
+            co.z -= (
+                0.045
+                * influence
+            )
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV44Torso",
+        warp_torso
+    )
+
+    # ========================================================
+    # 3. NECK
+    #
+    # V44 side view still has triangular geometry.
+    #
+    # V45:
+    #
+    # - extends crest slightly forward
+    # - pushes lower throat backward
+    # - increases side thickness slightly
+    # - creates visible S curve
+    #
+    # ========================================================
+
+    def warp_neck(
+        co
+    ):
+
+        original_y = co.y
+        original_z = co.z
+
+        base_y = -0.300
+
+        # Slightly longer diagonal.
+
+        co.y = (
+            base_y
+            + (
+                co.y
+                - base_y
+            )
+            * 1.075
+        )
+
+        # Slight transverse mass.
+
+        co.x *= 1.055
+
+        # Crest moves forward.
+
+        if original_z > 1.75:
+
+            factor = min(
+                1.0,
+                (
+                    original_z
+                    - 1.75
+                )
+                / 0.35
+            )
+
+            co.y -= (
+                0.065
+                * factor
+            )
+
+            co.z += (
+                0.020
+                * factor
+            )
+
+        # Lower throat moves rearward.
+
+        if original_z < 1.62:
+
+            factor = min(
+                1.0,
+                (
+                    1.62
+                    - original_z
+                )
+                / 0.30
+            )
+
+            co.y += (
+                0.075
+                * factor
+            )
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV44Neck",
+        warp_neck
+    )
+
+    # ========================================================
+    # 4. HEAD
+    #
+    # V44 still has a long narrow/deer tendency.
+    #
+    # Broader cheek.
+    # Slightly shorter face.
+    # Slightly deeper jaw.
+    #
+    # ========================================================
+
+    def warp_head(
+        co
+    ):
+
+        original_y = co.y
+
+        poll_y = -0.710
+        poll_z = 1.935
+
+        co.y = (
+            poll_y
+            + (
+                co.y
+                - poll_y
+            )
+            * 0.945
+        )
+
+        co.z = (
+            poll_z
+            + (
+                co.z
+                - poll_z
+            )
+            * 1.035
+        )
+
+        if original_y > -0.95:
+
+            co.x *= 1.105
+
+        elif original_y > -1.15:
+
+            co.x *= 1.070
+
+        else:
+
+            co.x *= 1.020
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV44Head",
+        warp_head
+    )
+
+    # ========================================================
+    # HEAD ACCESSORIES FOLLOW NEW HEAD
+    # ========================================================
+
+    def head_location_warp(
+        location
+    ):
+
+        poll_y = -0.710
+        poll_z = 1.935
+
+        location.y = (
+            poll_y
+            + (
+                location.y
+                - poll_y
+            )
+            * 0.945
+        )
+
+        location.z = (
+            poll_z
+            + (
+                location.z
+                - poll_z
+            )
+            * 1.035
+        )
+
+        return location
+
+    for name in [
+        "RiverwatchV44Muzzle",
+        "RiverwatchV44LeftEye",
+        "RiverwatchV44RightEye",
+        "RiverwatchV44LeftNostril",
+        "RiverwatchV44RightNostril",
+        "RiverwatchV44LeftEar",
+        "RiverwatchV44RightEar"
+    ]:
+
+        transform_location(
+            name,
+            head_location_warp
+        )
+
+    # ========================================================
+    # MUZZLE
+    #
+    # V44 gray muzzle is much too large.
+    # ========================================================
+
+    local_scale(
+        "RiverwatchV44Muzzle",
+        0.82,
+        0.84,
+        0.82
+    )
+
+    move_location(
+        "RiverwatchV44Muzzle",
+        0.0,
+        0.020,
+        0.005
+    )
+
+    # Ears slightly shorter.
+
+    local_scale(
+        "RiverwatchV44LeftEar",
+        0.95,
+        0.95,
+        0.88
+    )
+
+    local_scale(
+        "RiverwatchV44RightEar",
+        0.95,
+        0.95,
+        0.88
+    )
+
+    # ========================================================
+    # 5. FRONT LEGS
+    #
+    # Slightly less post-like.
+    #
+    # Knee moves forward.
+    # Cannon returns under knee.
+    # ========================================================
+
+    def front_leg_warp(
+        co
+    ):
+
+        original_z = co.z
+
+        if (
+            original_z > 0.48
+            and original_z < 0.67
+        ):
+
+            influence = (
+                1.0
+                - abs(
+                    original_z
+                    - 0.56
+                )
+                / 0.11
+            )
+
+            influence = max(
+                0.0,
+                influence
+            )
+
+            co.y -= (
+                0.040
+                * influence
+            )
+
+        if original_z < 0.40:
+
+            co.y += 0.018
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV44FrontLeftLeg",
+        front_leg_warp
+    )
+
+    mesh_warp(
+        "RiverwatchV44FrontRightLeg",
+        front_leg_warp
+    )
+
+    # ========================================================
+    # 6. HIND LEGS
+    #
+    # MAIN ANATOMY CORRECTION
+    #
+    # Current V44:
+    #
+    # foot is still too far under horse.
+    #
+    # V45:
+    #
+    # thigh stays attached to hip
+    # stifle projects forward
+    # gaskin travels rearward
+    # hock goes farther back
+    # cannon drops almost vertically
+    # foot finishes behind belly
+    #
+    # ========================================================
+
+    def hind_leg_warp(
+        co
+    ):
+
+        original_z = co.z
+
+        # Upper thigh follows longer rear body.
+
+        if original_z > 1.00:
+
+            co.y += 0.105
+
+        # Forward stifle.
+
+        elif (
+            original_z > 0.72
+            and original_z <= 1.00
+        ):
+
+            t = (
+                original_z
+                - 0.72
+            ) / 0.28
+
+            co.y += (
+                0.015
+                + 0.035
+                * t
+            )
+
+        # Gaskin drives backward.
+
+        elif (
+            original_z > 0.52
+            and original_z <= 0.72
+        ):
+
+            t = (
+                0.72
+                - original_z
+            ) / 0.20
+
+            co.y += (
+                0.080
+                + 0.105
+                * t
+            )
+
+        # Hock / lower cannon farther rearward.
+
+        elif (
+            original_z > 0.22
+            and original_z <= 0.52
+        ):
+
+            t = (
+                0.52
+                - original_z
+            ) / 0.30
+
+            co.y += (
+                0.185
+                + 0.055
+                * t
+            )
+
+        # Fetlock / pastern.
+
+        else:
+
+            co.y += 0.245
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV44HindLeftLeg",
+        hind_leg_warp
+    )
+
+    mesh_warp(
+        "RiverwatchV44HindRightLeg",
+        hind_leg_warp
+    )
+
+    # ========================================================
+    # HIND HOOFS FOLLOW NEW LOWER LIMBS
+    # ========================================================
+
+    def hind_hoof_warp(
+        co
+    ):
+
+        co.y += 0.245
+
+        # Slightly larger / stronger hoof.
+
+        co.x *= 1.06
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV44HindLeftHoof",
+        hind_hoof_warp
+    )
+
+    mesh_warp(
+        "RiverwatchV44HindRightHoof",
+        hind_hoof_warp
+    )
+
+    # ========================================================
+    # 7. DELETE V44 MANE
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV44Mane"
+    )
+
+    delete_prefix(
+        "RiverwatchV44Forelock"
+    )
+
+    # ========================================================
+    # 8. V45 MANE
+    #
+    # Smooth curves instead of rigid side plates.
+    #
+    # One crest mass plus six hanging flowing sections.
+    #
+    # ========================================================
+
+    curve_mesh(
+        "RiverwatchV45ManeCrest",
+        [
+            (
+                -0.190,
+                -0.735,
+                2.045
+            ),
+            (
+                -0.205,
+                -0.665,
+                2.060
+            ),
+            (
+                -0.220,
+                -0.590,
+                2.025
+            ),
+            (
+                -0.230,
+                -0.515,
+                1.970
+            ),
+            (
+                -0.235,
+                -0.440,
+                1.905
+            ),
+            (
+                -0.240,
+                -0.365,
+                1.830
+            ),
+            (
+                -0.240,
+                -0.300,
+                1.755
+            ),
+            (
+                -0.235,
+                -0.245,
+                1.695
+            ),
+        ],
+        dark,
+        0.050,
+        "head",
+        5
+    )
+
+    mane_strands = [
+
+        [
+            (
+                -0.215,
+                -0.680,
+                2.035
+            ),
+            (
+                -0.250,
+                -0.630,
+                1.900
+            ),
+            (
+                -0.275,
+                -0.595,
+                1.735
+            ),
+        ],
+
+        [
+            (
+                -0.230,
+                -0.605,
+                2.015
+            ),
+            (
+                -0.270,
+                -0.555,
+                1.835
+            ),
+            (
+                -0.300,
+                -0.520,
+                1.635
+            ),
+        ],
+
+        [
+            (
+                -0.240,
+                -0.525,
+                1.965
+            ),
+            (
+                -0.285,
+                -0.480,
+                1.770
+            ),
+            (
+                -0.320,
+                -0.445,
+                1.565
+            ),
+        ],
+
+        [
+            (
+                -0.245,
+                -0.445,
+                1.905
+            ),
+            (
+                -0.295,
+                -0.405,
+                1.715
+            ),
+            (
+                -0.330,
+                -0.370,
+                1.530
+            ),
+        ],
+
+        [
+            (
+                -0.245,
+                -0.365,
+                1.835
+            ),
+            (
+                -0.290,
+                -0.330,
+                1.670
+            ),
+            (
+                -0.320,
+                -0.300,
+                1.535
+            ),
+        ],
+
+        [
+            (
+                -0.240,
+                -0.295,
+                1.760
+            ),
+            (
+                -0.275,
+                -0.270,
+                1.640
+            ),
+            (
+                -0.295,
+                -0.245,
+                1.560
+            ),
+        ],
+    ]
+
+    for index, points in enumerate(
+        mane_strands
+    ):
+
+        curve_mesh(
+            "RiverwatchV45ManeFlow%02d"
+            % (
+                index + 1
+            ),
+            points,
+            dark,
+            0.032,
+            "head",
+            5
+        )
+
+    # ========================================================
+    # FORELOCK
+    # ========================================================
+
+    curve_mesh(
+        "RiverwatchV45ForelockLeft",
+        [
+            (
+                -0.050,
+                -0.745,
+                2.080
+            ),
+            (
+                -0.065,
+                -0.780,
+                1.970
+            ),
+            (
+                -0.070,
+                -0.805,
+                1.850
+            ),
+        ],
+        dark,
+        0.025,
+        "head",
+        4
+    )
+
+    curve_mesh(
+        "RiverwatchV45ForelockRight",
+        [
+            (
+                0.050,
+                -0.745,
+                2.080
+            ),
+            (
+                0.065,
+                -0.780,
+                1.975
+            ),
+            (
+                0.070,
+                -0.805,
+                1.870
+            ),
+        ],
+        dark,
+        0.025,
+        "head",
+        4
+    )
+
+    # ========================================================
+    # 9. DELETE V44 TAIL
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV44TailStrand"
+    )
+
+    delete_prefix(
+        "RiverwatchV44TailDock"
+    )
+
+    # ========================================================
+    # 10. V45 TAIL
+    #
+    # Lighter than V44.
+    # Separated curves.
+    # Narrow dock.
+    #
+    # ========================================================
+
+    ellipsoid(
+        "RiverwatchV45TailDock",
+        (
+            0.0,
+            1.685,
+            1.355
+        ),
+        (
+            0.115,
+            0.095,
+            0.115
+        ),
+        dark,
+        "body"
+    )
+
+    tail_data = [
+
+        (
+            -0.120,
+            -0.025
+        ),
+
+        (
+            -0.080,
+            -0.010
+        ),
+
+        (
+            -0.040,
+            0.005
+        ),
+
+        (
+            0.000,
+            0.020
+        ),
+
+        (
+            0.040,
+            0.005
+        ),
+
+        (
+            0.080,
+            -0.010
+        ),
+
+        (
+            0.120,
+            -0.025
+        ),
+    ]
+
+    for index, data in enumerate(
+        tail_data
+    ):
+
+        x = data[0]
+        y_offset = data[1]
+
+        thickness = (
+            0.030
+            if index in (
+                0,
+                6
+            )
+            else 0.035
+        )
+
+        curve_mesh(
+            "RiverwatchV45TailFlow%02d"
+            % (
+                index + 1
+            ),
+            [
+                (
+                    x * 0.55,
+                    1.670,
+                    1.360
+                ),
+                (
+                    x * 0.85,
+                    1.735 + y_offset,
+                    1.180
+                ),
+                (
+                    x,
+                    1.765 + y_offset,
+                    0.920
+                ),
+                (
+                    x * 1.05,
+                    1.755 + y_offset,
+                    0.650
+                ),
+                (
+                    x * 0.90,
+                    1.710 + y_offset,
+                    0.420
+                ),
+                (
+                    x * 0.65,
+                    1.640 + y_offset,
+                    0.220
+                ),
+            ],
+            dark,
+            thickness,
+            "body",
+            5
+        )
+
+    # ========================================================
+    # 11. TACK FOLLOWS SLIGHTLY LONGER BODY
+    #
+    # Keep tack mostly where it is.
+    # Move rear bags/cantle slightly rearward.
+    # ========================================================
+
+    for name in [
+        "RiverwatchV44Cantle",
+        "RiverwatchV44BagL",
+        "RiverwatchV44BagR",
+        "RiverwatchV44BagFlapL",
+        "RiverwatchV44BagFlapR",
+        "RiverwatchV44BagBuckleL",
+        "RiverwatchV44BagBuckleR"
+    ]:
+
+        move_location(
+            name,
+            0.0,
+            0.060,
+            0.0
+        )
+
+    # ========================================================
+    # 12. RENAME REMAINING V44 TO V45
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV44"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV44",
+                "RiverwatchV45",
+                1
+            )
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V44"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V44",
+                "Riverwatch V45",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "large_reference_silhouette_v45"
+
+    arm[
+        "broken_knight_horse_v45_previous_rating"
+    ] = 46
+
+    arm[
+        "broken_knight_horse_v45_body"
+    ] = "longer_narrower_raised_abdomen"
+
+    arm[
+        "broken_knight_horse_v45_neck"
+    ] = "visible_s_curve"
+
+    arm[
+        "broken_knight_horse_v45_head"
+    ] = "broader_shorter"
+
+    arm[
+        "broken_knight_horse_v45_muzzle"
+    ] = "reduced_18_percent"
+
+    arm[
+        "broken_knight_horse_v45_hindlegs"
+    ] = "forward_stifle_rear_hock_rear_hoof"
+
+    arm[
+        "broken_knight_horse_v45_mane"
+    ] = "smooth_bezier_flow_no_slab"
+
+    arm[
+        "broken_knight_horse_v45_tail"
+    ] = "seven_light_bezier_flows"
+
+    arm[
+        "broken_knight_horse_v45_goal"
+    ] = "large_visible_reference_match"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_reference_match"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V45",
+        "LARGE_REFERENCE_SILHOUETTE_COMPLETE"
     )
 
 def reset_pose(arm):
