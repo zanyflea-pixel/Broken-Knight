@@ -96998,7 +96998,7 @@ def build_horse_model_v66_1_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v67_base(arm):
 
     import bpy
     import math
@@ -99282,6 +99282,1161 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V67",
         "REFERENCE_SILHOUETTE_RESET_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V68
+    #
+    # ANATOMY FUSION
+    #
+    # V67 established the basic side-view layout.
+    #
+    # V68 fixes the assembled-piece appearance by creating
+    # one continuous anatomy core:
+    #
+    # body
+    # chest
+    # shoulders
+    # croup
+    # neck
+    # head
+    # upper forelegs
+    # thighs
+    # gaskins
+    #
+    # ========================================================
+
+    build_horse_model_v67_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V68",
+        "V67_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def select_none():
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+    def select_only(obj):
+
+        select_none()
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+    def smooth(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind(obj, region):
+
+        obj.parent = arm
+
+        obj[
+            "broken_knight_region"
+        ] = region
+
+    def make_ico(
+        name,
+        location,
+        scale,
+        mat,
+        region,
+        subdivisions=2
+    ):
+
+        bpy.ops.mesh.primitive_ico_sphere_add(
+            subdivisions=subdivisions,
+            radius=1.0,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.clear()
+
+        obj.data.materials.append(
+            mat
+        )
+
+        smooth(
+            obj
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        return obj
+
+    def world_vertex_transform(
+        obj,
+        transform_function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for vertex in obj.data.vertices:
+
+            world = (
+                matrix
+                @ vertex.co
+            )
+
+            world = transform_function(
+                world
+            )
+
+            vertex.co = (
+                inverse
+                @ world
+            )
+
+        obj.data.update()
+
+    def apply_smooth_modifier(
+        obj,
+        factor=0.35,
+        iterations=3
+    ):
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V68 Organic Smooth",
+            "SMOOTH"
+        )
+
+        modifier.factor = factor
+        modifier.iterations = iterations
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def add_bevel(
+        obj,
+        width=0.018
+    ):
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V68 Edge Softening",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = 2
+        modifier.limit_method = "ANGLE"
+        modifier.angle_limit = math.radians(
+            35.0
+        )
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    # ========================================================
+    # MATERIAL
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V67 Warm Bay"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "V67 coat material missing."
+        )
+
+    coat_highlight = bpy.data.materials.get(
+        "Riverwatch V67 Bay Highlight"
+    )
+
+    # ========================================================
+    # REMOVE THE V67 DECORATIVE SHOULDER / CROUP PATCHES
+    #
+    # They read as separate bumps.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if (
+            obj.name.startswith(
+                "RiverwatchV67ShoulderPlane"
+            )
+            or
+            obj.name.startswith(
+                "RiverwatchV67CroupPlane"
+            )
+        ):
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+    # ========================================================
+    # BODY PROPORTION CORRECTION
+    #
+    # V67 was still too long / slab-like through the barrel.
+    #
+    # Compress longitudinally.
+    # Deepen chest and belly.
+    # Widen shoulder.
+    # Increase croup volume.
+    # ========================================================
+
+    body = bpy.data.objects.get(
+        "RiverwatchV67Body"
+    )
+
+    if body is None:
+        raise RuntimeError(
+            "V67 body object missing."
+        )
+
+    def body_transform(point):
+
+        p = point.copy()
+
+        # Slightly shorter / more compact body.
+
+        body_center_y = 0.46
+
+        p.y = (
+            body_center_y
+            + (
+                p.y
+                - body_center_y
+            )
+            * 0.945
+        )
+
+        y = p.y
+        z = p.z
+
+        # Deep front chest.
+
+        if y < -0.02:
+
+            p.x *= 1.10
+
+            if z < 1.40:
+                p.z -= 0.075
+
+        # Barrel.
+
+        elif y < 0.72:
+
+            p.x *= 1.055
+
+            if z < 1.28:
+                p.z -= 0.055
+
+        # Loin / croup.
+
+        else:
+
+            p.x *= 1.105
+
+            if z > 1.42:
+                p.z += 0.050
+
+            if z < 1.24:
+                p.z -= 0.025
+
+        return p
+
+    world_vertex_transform(
+        body,
+        body_transform
+    )
+
+    # ========================================================
+    # CHEST AND SHOULDER MASSES
+    #
+    # These will be fused, not left as visible balls.
+    # ========================================================
+
+    chest_core = make_ico(
+        "RiverwatchV68ChestCore",
+        (
+            0.0,
+            -0.245,
+            1.31
+        ),
+        (
+            0.465,
+            0.33,
+            0.49
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    breast_core = make_ico(
+        "RiverwatchV68BreastCore",
+        (
+            0.0,
+            -0.405,
+            1.18
+        ),
+        (
+            0.375,
+            0.25,
+            0.37
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    left_shoulder = make_ico(
+        "RiverwatchV68LeftShoulderCore",
+        (
+            -0.315,
+            -0.17,
+            1.39
+        ),
+        (
+            0.235,
+            0.30,
+            0.40
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    right_shoulder = make_ico(
+        "RiverwatchV68RightShoulderCore",
+        (
+            0.315,
+            -0.17,
+            1.39
+        ),
+        (
+            0.235,
+            0.30,
+            0.40
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    # ========================================================
+    # CROUP AND HIP MASSES
+    # ========================================================
+
+    croup_core = make_ico(
+        "RiverwatchV68CroupCore",
+        (
+            0.0,
+            1.04,
+            1.48
+        ),
+        (
+            0.49,
+            0.39,
+            0.43
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    left_hip = make_ico(
+        "RiverwatchV68LeftHipCore",
+        (
+            -0.325,
+            1.04,
+            1.35
+        ),
+        (
+            0.225,
+            0.30,
+            0.38
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    right_hip = make_ico(
+        "RiverwatchV68RightHipCore",
+        (
+            0.325,
+            1.04,
+            1.35
+        ),
+        (
+            0.225,
+            0.30,
+            0.38
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    # ========================================================
+    # NECK CORRECTION
+    #
+    # Narrow slightly in frontal width but deepen the base.
+    #
+    # ========================================================
+
+    neck = bpy.data.objects.get(
+        "RiverwatchV67Neck"
+    )
+
+    if neck is None:
+        raise RuntimeError(
+            "V67 neck missing."
+        )
+
+    def neck_transform(point):
+
+        p = point.copy()
+
+        # Pull neck slightly back toward the body.
+        p.y += 0.025
+
+        # Less broad from the front.
+        p.x *= 0.94
+
+        # Deepen lower/base neck into chest.
+        if (
+            p.z < 1.68
+            and p.y > -0.62
+        ):
+            p.z -= 0.055
+            p.x *= 1.055
+
+        # Round crest slightly.
+        if p.z > 2.02:
+            p.z += 0.015
+
+        return p
+
+    world_vertex_transform(
+        neck,
+        neck_transform
+    )
+
+    # Add a lower neck / shoulder bridge for a real transition.
+
+    neck_bridge = make_ico(
+        "RiverwatchV68NeckBridge",
+        (
+            0.0,
+            -0.36,
+            1.58
+        ),
+        (
+            0.35,
+            0.30,
+            0.39
+        ),
+        coat,
+        "anatomy_core",
+        2
+    )
+
+    # ========================================================
+    # HEAD
+    #
+    # Keep it substantial like the reference but reduce the
+    # enormous V67 blockiness once fused.
+    # ========================================================
+
+    head = bpy.data.objects.get(
+        "RiverwatchV67Head"
+    )
+
+    cheek = bpy.data.objects.get(
+        "RiverwatchV67Cheek"
+    )
+
+    if head is None:
+        raise RuntimeError(
+            "V67 head missing."
+        )
+
+    def head_transform(point):
+
+        p = point.copy()
+
+        # Slightly narrower.
+        p.x *= 0.93
+
+        # Shorten face reach around the cheek/poll.
+        pivot_y = -0.91
+
+        p.y = (
+            pivot_y
+            + (
+                p.y
+                - pivot_y
+            )
+            * 0.925
+        )
+
+        # Slightly more vertical facial depth.
+        pivot_z = 1.95
+
+        p.z = (
+            pivot_z
+            + (
+                p.z
+                - pivot_z
+            )
+            * 1.015
+        )
+
+        p.z += 0.015
+
+        return p
+
+    world_vertex_transform(
+        head,
+        head_transform
+    )
+
+    if cheek is not None:
+
+        # Move the cheek back/up slightly so it blends under
+        # the cranium instead of reading as a separate bulb.
+
+        cheek.location.y += 0.035
+        cheek.location.z += 0.018
+
+        cheek.scale.x *= 0.94
+        cheek.scale.y *= 0.94
+        cheek.scale.z *= 0.95
+
+        select_only(
+            cheek
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+    muzzle = bpy.data.objects.get(
+        "RiverwatchV67Muzzle"
+    )
+
+    if muzzle is not None:
+
+        # Reference muzzle is substantial but not a giant
+        # round capsule.
+
+        muzzle.scale.x *= 0.90
+        muzzle.scale.y *= 0.88
+        muzzle.scale.z *= 0.91
+
+        muzzle.location.y += 0.035
+        muzzle.location.z += 0.008
+
+        select_only(
+            muzzle
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+    # Move facial details with muzzle/head adjustment.
+
+    for obj in bpy.data.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV67Eye"
+        ):
+
+            obj.location.y += 0.018
+            obj.location.z += 0.012
+
+        if obj.name.startswith(
+            "RiverwatchV67Nostril"
+        ):
+
+            obj.location.y += 0.038
+            obj.location.z += 0.008
+
+        if obj.name.startswith(
+            "RiverwatchV67Ear"
+        ):
+
+            obj.location.y += 0.020
+
+            obj.scale.x *= 0.92
+            obj.scale.y *= 0.92
+            obj.scale.z *= 0.90
+
+    # ========================================================
+    # IDENTIFY UPPER LIMBS TO FUSE
+    #
+    # These remain coat-colored.
+    #
+    # Dark cannon bones and hooves stay separate.
+    # ========================================================
+
+    anatomy_names = [
+
+        "RiverwatchV67Body",
+        "RiverwatchV67Neck",
+        "RiverwatchV67Head",
+        "RiverwatchV67Cheek",
+
+        "RiverwatchV67FrontLeftUpper",
+        "RiverwatchV67FrontRightUpper",
+
+        "RiverwatchV67HindLeftThigh",
+        "RiverwatchV67HindRightThigh",
+
+        "RiverwatchV67HindLeftGaskin",
+        "RiverwatchV67HindRightGaskin",
+
+        "RiverwatchV68ChestCore",
+        "RiverwatchV68BreastCore",
+
+        "RiverwatchV68LeftShoulderCore",
+        "RiverwatchV68RightShoulderCore",
+
+        "RiverwatchV68CroupCore",
+        "RiverwatchV68LeftHipCore",
+        "RiverwatchV68RightHipCore",
+
+        "RiverwatchV68NeckBridge",
+    ]
+
+    anatomy_objects = []
+
+    for name in anatomy_names:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if (
+            obj is not None
+            and
+            obj.type == "MESH"
+        ):
+
+            anatomy_objects.append(
+                obj
+            )
+
+    if len(anatomy_objects) < 12:
+
+        raise RuntimeError(
+            "Not enough anatomy objects found for V68 fusion."
+        )
+
+    # ========================================================
+    # JOIN ANATOMY
+    # ========================================================
+
+    select_none()
+
+    for obj in anatomy_objects:
+        obj.select_set(True)
+
+    body.select_set(True)
+
+    bpy.context.view_layer.objects.active = body
+
+    bpy.ops.object.join()
+
+    core = body
+
+    core.name = "RiverwatchV68AnatomyCore"
+
+    core.parent = arm
+
+    core[
+        "broken_knight_region"
+    ] = "anatomy_core"
+
+    # Ensure the fused surface uses a single coherent coat.
+
+    core.data.materials.clear()
+    core.data.materials.append(
+        coat
+    )
+
+    # ========================================================
+    # VOXEL REMESH
+    #
+    # This is the important V68 change.
+    #
+    # It destroys the obvious seams between:
+    #
+    # shoulder/body
+    # neck/body
+    # head/neck
+    # upper foreleg/body
+    # hindquarter/thigh
+    #
+    # ========================================================
+
+    select_only(
+        core
+    )
+
+    if not hasattr(
+        core.data,
+        "remesh_voxel_size"
+    ):
+
+        raise RuntimeError(
+            "Blender build does not expose voxel remesh settings."
+        )
+
+    core.data.remesh_voxel_size = 0.042
+
+    if hasattr(
+        core.data,
+        "remesh_voxel_adaptivity"
+    ):
+
+        core.data.remesh_voxel_adaptivity = 0.0
+
+    bpy.ops.object.voxel_remesh()
+
+    smooth(
+        core
+    )
+
+    # Gentle organic smoothing.
+
+    apply_smooth_modifier(
+        core,
+        0.30,
+        3
+    )
+
+    smooth(
+        core
+    )
+
+    # ========================================================
+    # MUSCLE SHAPING AFTER FUSION
+    #
+    # Keep the silhouette strong after remesh.
+    # ========================================================
+
+    def final_core_shape(point):
+
+        p = point.copy()
+
+        y = p.y
+        z = p.z
+
+        # Heart girth / shoulder.
+        if (
+            y > -0.43
+            and y < 0.05
+            and z > 0.95
+            and z < 1.70
+        ):
+            p.x *= 1.035
+
+        # Belly/barrel fullness.
+        if (
+            y > 0.05
+            and y < 0.67
+            and z < 1.24
+            and z > 0.72
+        ):
+            p.z -= 0.020
+
+        # Rounded croup.
+        if (
+            y > 0.78
+            and y < 1.32
+            and z > 1.20
+        ):
+
+            p.x *= 1.025
+
+            if z > 1.50:
+                p.z += 0.018
+
+        return p
+
+    world_vertex_transform(
+        core,
+        final_core_shape
+    )
+
+    smooth(
+        core
+    )
+
+    # ========================================================
+    # LOWER FRONT LEGS
+    #
+    # V67 lower legs were too thin compared with the
+    # reference's sturdy weight-bearing legs.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV67FrontLeftLower",
+        "RiverwatchV67FrontRightLower"
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj:
+
+            obj.scale.x *= 1.15
+            obj.scale.y *= 1.12
+
+            select_only(
+                obj
+            )
+
+            bpy.ops.object.transform_apply(
+                location=False,
+                rotation=False,
+                scale=True
+            )
+
+            smooth(
+                obj
+            )
+
+    # ========================================================
+    # LOWER HIND LEGS
+    # ========================================================
+
+    for name in (
+        "RiverwatchV67HindLeftCannon",
+        "RiverwatchV67HindRightCannon"
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj:
+
+            obj.scale.x *= 1.14
+            obj.scale.y *= 1.11
+
+            select_only(
+                obj
+            )
+
+            bpy.ops.object.transform_apply(
+                location=False,
+                rotation=False,
+                scale=True
+            )
+
+            smooth(
+                obj
+            )
+
+    # ========================================================
+    # HOOF IMPROVEMENT
+    #
+    # Reference has big sturdy hoof capsules rather than thin
+    # rectangular slippers.
+    # ========================================================
+
+    for obj in bpy.data.objects:
+
+        if (
+            obj.name.startswith(
+                "RiverwatchV67"
+            )
+            and
+            obj.name.endswith(
+                "Hoof"
+            )
+        ):
+
+            obj.scale.x *= 1.08
+            obj.scale.y *= 1.04
+            obj.scale.z *= 1.15
+
+            select_only(
+                obj
+            )
+
+            bpy.ops.object.transform_apply(
+                location=False,
+                rotation=False,
+                scale=True
+            )
+
+            add_bevel(
+                obj,
+                0.022
+            )
+
+            smooth(
+                obj
+            )
+
+    # ========================================================
+    # MANE
+    #
+    # Increase visual mass without making detached slabs.
+    # ========================================================
+
+    mane = bpy.data.objects.get(
+        "RiverwatchV67Mane"
+    )
+
+    if mane is not None:
+
+        def mane_transform(point):
+
+            p = point.copy()
+
+            # Slightly fuller sideways.
+            if p.x < 0.0:
+                p.x *= 1.08
+
+            # Longer hanging edge.
+            if (
+                p.z < 1.92
+                and
+                p.y < -0.30
+            ):
+                p.z -= 0.045
+
+            return p
+
+        world_vertex_transform(
+            mane,
+            mane_transform
+        )
+
+    # ========================================================
+    # TAIL
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV67Tail"
+    )
+
+    if tail is not None:
+
+        def tail_transform(point):
+
+            p = point.copy()
+
+            # More full like the reference.
+            p.x *= 1.10
+
+            if p.z < 1.20:
+                p.y += 0.020
+
+            return p
+
+        world_vertex_transform(
+            tail,
+            tail_transform
+        )
+
+    # ========================================================
+    # BLANKET
+    #
+    # Slightly reduce boxy side projection.
+    # ========================================================
+
+    for obj in bpy.data.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV67Blanket"
+        ):
+
+            if obj.type == "MESH":
+
+                def blanket_transform(point):
+
+                    p = point.copy()
+
+                    # Bring hanging panel closer to body.
+                    if abs(p.x) > 0.45:
+                        p.x *= 0.965
+
+                    return p
+
+                world_vertex_transform(
+                    obj,
+                    blanket_transform
+                )
+
+    # ========================================================
+    # SADDLEBAGS
+    #
+    # Target bags are compact.
+    # ========================================================
+
+    for obj in bpy.data.objects:
+
+        if obj.name.startswith(
+            "RiverwatchV67Bag"
+        ):
+
+            if obj.type == "MESH":
+
+                obj.scale.x *= 0.92
+                obj.scale.y *= 0.93
+                obj.scale.z *= 0.94
+
+                select_only(
+                    obj
+                )
+
+                bpy.ops.object.transform_apply(
+                    location=False,
+                    rotation=False,
+                    scale=True
+                )
+
+    # ========================================================
+    # RENAME V67 VISUAL OBJECTS TO V68
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV67"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV67",
+                "RiverwatchV68",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "anatomy_fusion_reference_v68"
+
+    arm[
+        "broken_knight_horse_v68_reference"
+    ] = "horse_turntable_reference_sheet"
+
+    arm[
+        "broken_knight_horse_v68_method"
+    ] = "joined_anatomy_voxel_fusion"
+
+    arm[
+        "broken_knight_horse_v68_core"
+    ] = "body_neck_head_shoulders_upper_legs_hindquarters"
+
+    arm[
+        "broken_knight_horse_v68_chest"
+    ] = "deep_broad_integrated"
+
+    arm[
+        "broken_knight_horse_v68_croup"
+    ] = "rounded_powerful_integrated"
+
+    arm[
+        "broken_knight_horse_v68_neck"
+    ] = "short_strong_fused"
+
+    arm[
+        "broken_knight_horse_v68_head"
+    ] = "substantial_shortened_fused"
+
+    arm[
+        "broken_knight_horse_v68_leg_roots"
+    ] = "integrated_into_body"
+
+    arm[
+        "broken_knight_horse_v68_goal"
+    ] = "remove_assembled_parts_and_match_reference_mass"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_reference_modeling"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V68",
+        "ANATOMY_FUSION_COMPLETE"
     )
 
 def reset_pose(arm):
