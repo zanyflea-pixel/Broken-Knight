@@ -377,6 +377,7 @@ try {
         "blender/world/scripts/build_riverwatch_stable_and_horse.py",
         "blender/world/scripts/riverwatch_horse_lab.py",
         "blender/world/scripts/riverwatch_horse_tuning.py",
+        "horse-v80-build.ps1",
         "blender/world/animals/riverwatch_horse.blend",
         "blender/world/animals/riverwatch_horse_lab_base_v74.glb",
         "godot/assets/animals/riverwatch_horse_awesome.bkglb"
@@ -403,27 +404,12 @@ try {
 
         Write-Host "  $Relative"
 
-        git check-ignore -q -- $Relative
+        Write-Host "    EXACT_WHITELIST_FORCE_ADD=YES" -ForegroundColor Yellow
 
-        $IgnoreExit = $LASTEXITCODE
-
-        if ($IgnoreExit -eq 0) {
-
-            Write-Host "    IGNORED=YES FORCE_ADD=YES" -ForegroundColor Yellow
-
-            git add -f -- $Relative
-        }
-        elseif ($IgnoreExit -eq 1) {
-
-            git add -- $Relative
-        }
-        else {
-
-            throw "git check-ignore failed for $Relative"
-        }
+        git add -f -- $Relative
 
         if ($LASTEXITCODE -ne 0) {
-            throw "git add failed for $Relative"
+            throw "git force-add failed for $Relative"
         }
     }
 

@@ -3,77 +3,18 @@
   "blender_version": "5.1.2",
   "blend_file": "C:\\Users\\Jimmy\\Desktop\\Broken Knight\\blender\\world\\animals\\riverwatch_horse.blend",
   "scene_name": "Scene",
-  "scene_custom_properties": {},
-  "object_count": 14,
-  "mesh_object_count": 1,
-  "armature_object_count": 1,
+  "scene_custom_properties": {
+    "broken_knight_horse_version": "V80",
+    "broken_knight_horse_checkpoint": "ANATOMY_ONLY",
+    "broken_knight_horse_tack_status": "DEFERRED"
+  },
+  "object_count": 25,
+  "mesh_object_count": 24,
+  "armature_object_count": 0,
   "objects": [
     {
-      "name": "RiverwatchHorseBody",
-      "type": "MESH",
-      "parent": "RiverwatchHorseRig",
-      "location": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "rotation_euler": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "scale": [
-        1.0,
-        1.0,
-        1.0
-      ],
-      "dimensions": [
-        1.305,
-        3.087538,
-        2.528427
-      ],
-      "world_bounds": {
-        "min": [
-          -0.6525,
-          -1.369068,
-          0.02293
-        ],
-        "max": [
-          0.6525,
-          1.71847,
-          2.551357
-        ]
-      },
-      "collections": [
-        "Collection"
-      ],
-      "custom_properties": {
-        "broken_knight_region": "anatomy"
-      },
-      "modifiers": [],
-      "materials": [
-        "Riverwatch V67 Warm Bay",
-        "Riverwatch V67 Dark Points",
-        "Riverwatch V67 Hoof",
-        "Riverwatch V67 Muzzle",
-        "Riverwatch V67 Eyes",
-        "Riverwatch V67 Royal Blue",
-        "Riverwatch V67 Saddle Leather",
-        "Riverwatch V67 Saddle Highlight",
-        "Riverwatch V67 Brass",
-        "Riverwatch V67 Steel"
-      ],
-      "mesh": {
-        "data_name": "RiverwatchHorseBodyMesh",
-        "vertices": 3208,
-        "edges": 6337,
-        "polygons": 3231,
-        "materials": 10
-      }
-    },
-    {
-      "name": "RiverwatchHorseRig",
-      "type": "ARMATURE",
+      "name": "RiverwatchHorseV80Root",
+      "type": "EMPTY",
       "parent": null,
       "location": [
         0.0,
@@ -91,371 +32,377 @@
         1.0
       ],
       "dimensions": [
-        0.6,
-        3.1,
-        1.78
+        0.0,
+        0.0,
+        0.0
       ],
       "world_bounds": null,
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_horse_rig": "reference_v10",
-        "broken_knight_horse_detail": "head_neck_shoulder_rebuild_v74",
-        "broken_knight_horse_v44_previous_rating": 43,
-        "broken_knight_horse_v44_reuses_v43_geometry": false,
-        "broken_knight_horse_v44_method": "fresh_independent_side_profile_anatomy",
-        "broken_knight_horse_v44_torso": "long_deep_chest_raised_flank_long_croup",
-        "broken_knight_horse_v44_neck": "thick_forward_diagonal",
-        "broken_knight_horse_v44_head": "large_cheek_tapered_face",
-        "broken_knight_horse_v44_forelegs": "square_forearm_knee_cannon_pastern",
-        "broken_knight_horse_v44_hindlegs": "hip_forward_stifle_rear_hock_vertical_cannon",
-        "broken_knight_horse_v44_mane": "restrained_neck_hugging_mass",
-        "broken_knight_horse_v44_tail": "seven_flowing_strands",
-        "broken_knight_horse_v44_goal": "reference_silhouette_first",
+        "broken_knight_horse_detail": "v80_fresh_anatomy_checkpoint",
+        "broken_knight_horse_version": "V80",
+        "broken_knight_horse_method": "fresh_authored_surface_cages",
+        "broken_knight_horse_base": "none_fresh_rebuild",
+        "broken_knight_horse_body": "measured_continuous_station_cage",
+        "broken_knight_horse_neck": "forward_arch_asymmetric_surface_loft",
+        "broken_knight_horse_head": "broad_cheek_short_face_integrated_muzzle",
+        "broken_knight_horse_legs": "continuous_anatomical_limb_lofts_no_ball_joints",
+        "broken_knight_horse_tack": "intentionally_removed_for_anatomy_checkpoint",
         "broken_knight_horse_animation_acceptance": "ignored_during_visual_modeling",
-        "broken_knight_horse_v45_previous_rating": 46,
-        "broken_knight_horse_v45_body": "longer_narrower_raised_abdomen",
-        "broken_knight_horse_v45_neck": "visible_s_curve",
-        "broken_knight_horse_v45_head": "broader_shorter",
-        "broken_knight_horse_v45_muzzle": "reduced_18_percent",
-        "broken_knight_horse_v45_hindlegs": "forward_stifle_rear_hock_rear_hoof",
-        "broken_knight_horse_v45_mane": "smooth_bezier_flow_no_slab",
-        "broken_knight_horse_v45_tail": "seven_light_bezier_flows",
-        "broken_knight_horse_v45_goal": "large_visible_reference_match",
-        "broken_knight_horse_v46_previous_rating": 47,
-        "broken_knight_horse_v46_hindlegs_reused": false,
-        "broken_knight_horse_v46_hindlegs": "fresh_hip_thigh_stifle_gaskin_hock_cannon_pastern",
-        "broken_knight_horse_v46_torso": "raised_abdomen_narrower_rear_longer_croup",
-        "broken_knight_horse_v46_neck": "thicker_base_softened_transition",
-        "broken_knight_horse_v46_muzzle": "reduced_again",
-        "broken_knight_horse_v46_mane": "tapered_base_plus_five_locks",
-        "broken_knight_horse_v46_tail": "full_core_plus_four_separated_locks",
-        "broken_knight_horse_v46_goal": "major_hindquarter_reference_jump",
-        "broken_knight_horse_v47_previous_rating": 48,
-        "broken_knight_horse_v47_all_legs_rebuilt": true,
-        "broken_knight_horse_v47_forelegs": "shoulder_elbow_forearm_knee_cannon_fetlock_pastern",
-        "broken_knight_horse_v47_hindlegs": "hip_forward_stifle_rearward_gaskin_hock_vertical_cannon",
-        "broken_knight_horse_v47_body": "raised_abdomen_narrower_rear_flattened_croup",
-        "broken_knight_horse_v47_head": "downward_carriage_4_5_degrees",
-        "broken_knight_horse_v47_mane": "curved_layered_no_large_slab",
-        "broken_knight_horse_v47_tail": "tapered_core_four_outer_locks",
-        "broken_knight_horse_v47_goal": "obvious_standing_horse_anatomy",
-        "broken_knight_horse_v48_previous_rating": 45,
-        "broken_knight_horse_v48_previous_regressed": true,
-        "broken_knight_horse_v48_torso_reused": false,
-        "broken_knight_horse_v48_all_legs_reused": false,
-        "broken_knight_horse_v48_body_method": "independent_topline_belly_cross_sections",
-        "broken_knight_horse_v48_belly": "deep_chest_rising_abdomen_flank_tuck",
-        "broken_knight_horse_v48_croup": "smooth_long_slope_no_flat_shelf",
-        "broken_knight_horse_v48_forelegs": "mild_upper_sweep_vertical_cannon",
-        "broken_knight_horse_v48_hindlegs": "high_stifle_high_hock_long_cannon",
-        "broken_knight_horse_v48_mane": "restrained_base_overlapping_tapered_locks",
-        "broken_knight_horse_v48_tail": "seven_rearward_bowed_flows",
-        "broken_knight_horse_v48_goal": "reference_horse_silhouette_major_reset",
-        "broken_knight_horse_v49_previous_rating": 44,
-        "broken_knight_horse_v49_previous_regressed": true,
-        "broken_knight_horse_v49_torso_reused": false,
-        "broken_knight_horse_v49_neck_reused": false,
-        "broken_knight_horse_v49_head_reused": false,
-        "broken_knight_horse_v49_legs_reused": false,
-        "broken_knight_horse_v49_body_cross_section": "broad_dorsal_and_broad_ventral_ten_point_ring",
-        "broken_knight_horse_v49_subdivision": "one_level_only",
-        "broken_knight_horse_v49_body": "deep_chest_rising_belly_long_loin_smooth_croup",
-        "broken_knight_horse_v49_neck": "fresh_broad_base_smooth_taper",
-        "broken_knight_horse_v49_head": "fresh_large_cheek_shorter_face",
-        "broken_knight_horse_v49_hindlegs": "high_stifle_high_hock_long_near_vertical_cannon",
-        "broken_knight_horse_v49_mane": "single_continuous_thin_hanging_ribbon",
-        "broken_knight_horse_v49_tail": "single_flattened_continuous_hair_volume",
-        "broken_knight_horse_v49_goal": "remove_surface_pinching_and_match_reference_silhouette",
-        "broken_knight_horse_v50_previous_rating": 51,
-        "broken_knight_horse_v50_torso_reused": true,
-        "broken_knight_horse_v50_neck_reused": false,
-        "broken_knight_horse_v50_head_reused": false,
-        "broken_knight_horse_v50_legs_reused": false,
-        "broken_knight_horse_v50_torso": "v49_clean_body_gentle_withers_croup_refine",
-        "broken_knight_horse_v50_neck": "asymmetric_broad_base_horse_crest",
-        "broken_knight_horse_v50_head": "large_cheek_shorter_face_small_muzzle",
-        "broken_knight_horse_v50_forelegs": "narrower_non_pillar_forearm_knee_cannon",
-        "broken_knight_horse_v50_hindlegs": "large_thigh_forward_stifle_rear_hock_long_cannon",
-        "broken_knight_horse_v50_mane": "three_thin_overlapping_scalloped_ribbons",
-        "broken_knight_horse_v50_tail": "three_overlapping_flowing_flattened_ribbons",
-        "broken_knight_horse_v50_goal": "large_reference_match_jump_without_destroying_v49_body",
-        "broken_knight_horse_v51_previous_rating": 50,
-        "broken_knight_horse_v51_new_method": "side_silhouette_controlled_shells",
-        "broken_knight_horse_v51_torso": "longer_rear_shorter_front_deep_shoulder_raised_belly_stretched_croup",
-        "broken_knight_horse_v51_head_neck": "single_continuous_side_profile_mesh",
-        "broken_knight_horse_v51_head": "short_wide_strong_cheek_narrow_muzzle",
-        "broken_knight_horse_v51_forelegs": "explicit_upper_forearm_knee_and_slim_lower_cannon",
-        "broken_knight_horse_v51_hindlegs": "explicit_thigh_forward_stifle_rear_hock_long_vertical_cannon",
-        "broken_knight_horse_v51_hooves": "larger_reference_scaled_angled",
-        "broken_knight_horse_v51_mane": "coherent_crest_plus_five_overlapping_long_locks",
-        "broken_knight_horse_v51_tail": "single_continuous_root_midvolume_taper",
-        "broken_knight_horse_v51_goal": "match_reference_shape_instead_of_incremental_numeric_warp",
-        "broken_knight_horse_v52_previous_rating": 46,
-        "broken_knight_horse_v52_torso_reused": true,
-        "broken_knight_horse_v52_head_neck_reused": false,
-        "broken_knight_horse_v52_legs_reused": false,
-        "broken_knight_horse_v52_head_neck_method": "ten_point_broad_dorsal_ventral_profile_cage",
-        "broken_knight_horse_v52_head": "large_cheek_short_face_downward_bridge_small_muzzle",
-        "broken_knight_horse_v52_neck": "broad_shoulder_base_smooth_crest_taper",
-        "broken_knight_horse_v52_front_legs": "volumetric_forearm_knee_cannon_pastern",
-        "broken_knight_horse_v52_hind_legs": "large_thigh_forward_stifle_rear_hock_long_cannon",
-        "broken_knight_horse_v52_mane": "small_crest_six_overlapping_locks",
-        "broken_knight_horse_v52_tail": "continuous_tapered_three_dimensional_volume",
-        "broken_knight_horse_v52_goal": "restore_round_horse_anatomy_after_v51_flat_shell_regression",
-        "broken_knight_horse_v53_previous_rating": 49,
-        "broken_knight_horse_v53_torso_reused": true,
-        "broken_knight_horse_v53_neck_reused": false,
-        "broken_knight_horse_v53_head_reused": false,
-        "broken_knight_horse_v53_legs_reused": false,
-        "broken_knight_horse_v53_neck": "shorter_more_upright_stronger_arched_crest",
-        "broken_knight_horse_v53_head": "shorter_broader_cheek_less_wedge_shaped",
-        "broken_knight_horse_v53_front_legs": "thicker_forearms_visible_knees_slender_cannons",
-        "broken_knight_horse_v53_hind_legs": "reduced_stifle_forward_offset_rearward_hock_long_straight_cannon",
-        "broken_knight_horse_v53_mane": "six_small_overlapping_hanging_locks",
-        "broken_knight_horse_v53_tail": "fuller_three_dimensional_rearward_sweeping_taper",
-        "broken_knight_horse_v53_goal": "major_visible_jump_toward_reference_horse",
-        "broken_knight_horse_v54_previous_rating": 48,
-        "broken_knight_horse_v54_torso_reused": false,
-        "broken_knight_horse_v54_neck_reused": false,
-        "broken_knight_horse_v54_head_reused": false,
-        "broken_knight_horse_v54_legs_reused": false,
-        "broken_knight_horse_v54_torso_method": "manual_horse_specific_longitudinal_control_cage",
-        "broken_knight_horse_v54_neck": "compact_upright_curved_separate_control_cage",
-        "broken_knight_horse_v54_head": "short_skull_large_cheeks_narrow_nasal_bridge",
-        "broken_knight_horse_v54_front_legs": "separate_upper_forearm_knee_cannon_fetlock_pastern",
-        "broken_knight_horse_v54_hind_legs": "separate_thigh_stifle_gaskin_hock_vertical_cannon",
-        "broken_knight_horse_v54_mane": "six_small_hanging_locks",
-        "broken_knight_horse_v54_tail": "single_continuous_volumetric_taper",
-        "broken_knight_horse_v54_goal": "large_silhouette_reset_toward_reference",
-        "broken_knight_horse_v55_previous_rating": 43,
-        "broken_knight_horse_v55_torso_reused": true,
-        "broken_knight_horse_v55_head_reused": false,
-        "broken_knight_horse_v55_neck_reused": false,
-        "broken_knight_horse_v55_legs_reused": false,
-        "broken_knight_horse_v55_head": "continuous_skull_cheek_jaw_nasal_cage",
-        "broken_knight_horse_v55_cheeks": "integrated_into_skull_no_spheres",
-        "broken_knight_horse_v55_neck": "compact_upright_continuous_taper",
-        "broken_knight_horse_v55_front_legs": "single_mesh_each_no_joint_balls",
-        "broken_knight_horse_v55_hind_legs": "single_mesh_each_calm_stifle_rear_hock_vertical_cannon",
-        "broken_knight_horse_v55_mane": "thin_crest_four_modest_locks",
-        "broken_knight_horse_v55_tail": "continuous_three_dimensional_flowing_taper",
-        "broken_knight_horse_v55_goal": "remove_assembled_parts_look_and_restore_coherent_horse",
-        "broken_knight_horse_v56_previous_rating": 50,
-        "broken_knight_horse_v56_core": "single_continuous_croup_to_muzzle_mesh",
-        "broken_knight_horse_v56_torso_separate": false,
-        "broken_knight_horse_v56_neck_separate": false,
-        "broken_knight_horse_v56_head_separate": false,
-        "broken_knight_horse_v56_cheek_objects": false,
-        "broken_knight_horse_v56_hind_leg_goal": "less_crouched_near_vertical_cannon",
-        "broken_knight_horse_v56_goal": "continuous_reference_silhouette",
-        "broken_knight_horse_v57_previous_rating": 52,
-        "broken_knight_horse_v57_core": "single_skin_rebuilt_from_reference_proportions",
-        "broken_knight_horse_v57_body": "shallower_barrel_higher_belly_deep_front_chest",
-        "broken_knight_horse_v57_croup": "rounded_compact_without_separate_hump",
-        "broken_knight_horse_v57_neck": "narrower_less_bulbous_defined_withers_and_poll",
-        "broken_knight_horse_v57_head": "defined_cheek_jaw_straighter_nasal_bridge",
-        "broken_knight_horse_v57_front_legs": "longer_visible_thick_forearm_defined_knee_thicker_cannon",
-        "broken_knight_horse_v57_hind_legs": "moderate_stifle_rear_hock_long_vertical_cannon",
-        "broken_knight_horse_v57_tail": "continuous_full_middle_natural_taper",
-        "broken_knight_horse_v57_goal": "large_reference_proportion_jump",
-        "broken_knight_horse_v58_previous_rating": 53,
-        "broken_knight_horse_v58_core_method": "explicit_side_profile_box_model",
-        "broken_knight_horse_v58_catmull_core": false,
-        "broken_knight_horse_v58_topline": "explicit_withers_lumbar_croup_profile",
-        "broken_knight_horse_v58_underline": "explicit_chest_belly_flank_throat_jaw_profile",
-        "broken_knight_horse_v58_neck": "narrower_straighter_defined_poll",
-        "broken_knight_horse_v58_head": "explicit_forehead_cheek_jaw_nasal_bridge",
-        "broken_knight_horse_v58_front_legs": "continuous_low_poly_weight_bearing",
-        "broken_knight_horse_v58_hind_legs": "moderate_stifle_rear_hock_vertical_cannon",
-        "broken_knight_horse_v58_goal": "major_reference_profile_match",
-        "broken_knight_horse_v61_previous_rating": 54,
-        "broken_knight_horse_v61_source_geometry": "direct_v58_profile_base",
-        "broken_knight_horse_v61_v59_used": false,
-        "broken_knight_horse_v61_v60_used": false,
-        "broken_knight_horse_v61_body": "controlled_rib_shoulder_croup_mass",
-        "broken_knight_horse_v61_neck": "strong_root_refined_upper_neck",
-        "broken_knight_horse_v61_head": "larger_integrated_cheek_and_jaw",
-        "broken_knight_horse_v61_hind_stance": "rear_hock_and_cannon_clearly_behind_body",
-        "broken_knight_horse_v61_goal": "recover_v58_cleanliness_and_fix_horse_proportions",
-        "broken_knight_horse_v62_previous_rating": 57,
-        "broken_knight_horse_v62_base": "v61_clean_profile",
-        "broken_knight_horse_v62_hind_leg_source": "completely_rebuilt_not_deformed",
-        "broken_knight_horse_v62_hind_leg_topology": "four_point_anatomical_profile_sections",
-        "broken_knight_horse_v62_stifle": "forward_and_low",
-        "broken_knight_horse_v62_gaskin": "long_and_rearward",
-        "broken_knight_horse_v62_hock": "clearly_behind_rump",
-        "broken_knight_horse_v62_cannon": "near_vertical_under_hock",
-        "broken_knight_horse_v62_pastern": "forward_angle",
-        "broken_knight_horse_v62_body": "small_controlled_mass_increase",
-        "broken_knight_horse_v62_goal": "fix_back_legs_without_destroying_v61",
-        "broken_knight_horse_v63_previous_rating": 55,
-        "broken_knight_horse_v63_visible_geometry_source": "fresh_from_zero",
-        "broken_knight_horse_v63_old_visible_geometry_deleted": true,
-        "broken_knight_horse_v63_tack": "temporarily_removed",
-        "broken_knight_horse_v63_mane": "temporarily_removed_for_neck_review",
-        "broken_knight_horse_v63_body": "fresh_explicit_topline_belly_shoulder_croup",
-        "broken_knight_horse_v63_neck": "fresh_strong_root_tapered_poll",
-        "broken_knight_horse_v63_head": "fresh_integrated_forehead_cheek_jaw_muzzle",
-        "broken_knight_horse_v63_front_legs": "fresh_weight_bearing_six_section_profile",
-        "broken_knight_horse_v63_hind_legs": "fresh_compact_stifle_hock_cannon_geometry",
-        "broken_knight_horse_v63_hind_stifle": "moderately_forward_not_crouched",
-        "broken_knight_horse_v63_hind_hock": "moderately_rearward_not_extreme",
-        "broken_knight_horse_v63_goal": "judge_naked_horse_before_restoring_equipment",
-        "broken_knight_horse_v64_previous_rating": 50,
-        "broken_knight_horse_v64_visible_geometry": "fresh_rebuild",
-        "broken_knight_horse_v64_identity": "compact_sturdy_medieval_riding_horse",
-        "broken_knight_horse_v64_torso": "shorter_deeper_rounder",
-        "broken_knight_horse_v64_shoulder": "larger_front_quarter",
-        "broken_knight_horse_v64_croup": "rounded_not_square",
-        "broken_knight_horse_v64_neck": "shorter_thicker_strong_root",
-        "broken_knight_horse_v64_head": "larger_shorter_deeper_cheek",
-        "broken_knight_horse_v64_front_legs": "longer_weight_bearing",
-        "broken_knight_horse_v64_hind_legs": "restrained_horse_zigzag",
-        "broken_knight_horse_v64_hock": "high_moderately_rearward",
-        "broken_knight_horse_v64_cannon": "near_vertical",
-        "broken_knight_horse_v64_mane": "single_small_continuous_crest",
-        "broken_knight_horse_v64_tail": "continuous_hanging_tail",
-        "broken_knight_horse_v64_tack": "still_removed_for_anatomy_review",
-        "broken_knight_horse_v65_previous_rating": 53,
-        "broken_knight_horse_v65_modeling_method": "explicit_side_profile_prisms",
-        "broken_knight_horse_v65_longitudinal_station_body": false,
-        "broken_knight_horse_v65_torso": "hand_drawn_side_silhouette",
-        "broken_knight_horse_v65_shoulder": "separate_planar_scapula_volume",
-        "broken_knight_horse_v65_croup": "separate_planar_hindquarter_volume",
-        "broken_knight_horse_v65_neck": "explicit_s_curve_profile",
-        "broken_knight_horse_v65_head": "explicit_skull_cheek_jaw_profile",
-        "broken_knight_horse_v65_front_legs": "single_piece_profile_limbs",
-        "broken_knight_horse_v65_hind_legs": "single_piece_compact_horse_zigzag",
-        "broken_knight_horse_v65_mane": "single_continuous_profile_mass",
-        "broken_knight_horse_v65_tail": "single_continuous_profile_mass",
-        "broken_knight_horse_v65_tack": "still_removed_for_anatomy_review",
-        "broken_knight_horse_v65_goal": "break_out_of_cross_section_iteration_plateau",
-        "broken_knight_horse_v66_reference": "generated_turntable_medieval_pack_horse",
-        "broken_knight_horse_v66_body": "short_deep_stocky",
-        "broken_knight_horse_v66_chest": "large_heart_girth",
-        "broken_knight_horse_v66_shoulder": "massive_round_reference_match",
-        "broken_knight_horse_v66_croup": "large_round_powerful",
-        "broken_knight_horse_v66_neck": "steep_thick_short_visual_length",
-        "broken_knight_horse_v66_head": "larger_deeper_reference_match",
-        "broken_knight_horse_v66_legs": "thick_segmented_weight_bearing",
-        "broken_knight_horse_v66_lower_legs": "dark_heavy_feathered",
-        "broken_knight_horse_v66_hooves": "broad_heavy",
-        "broken_knight_horse_v66_mane": "heavy_single_side_mass",
-        "broken_knight_horse_v66_tail": "full_hanging_mass",
-        "broken_knight_horse_v66_blanket": "royal_blue_gold_trim",
-        "broken_knight_horse_v66_saddle": "brown_medieval",
-        "broken_knight_horse_v66_bags": "paired_brown_saddlebags",
-        "broken_knight_horse_v66_bridle": "leather_brass_reins",
-        "broken_knight_horse_v66_goal": "match_reference_not_increment_old_shape",
-        "broken_knight_horse_v67_reference": "horse_turntable_reference_sheet",
-        "broken_knight_horse_v67_body": "single_continuous_measured_shell",
-        "broken_knight_horse_v67_chest": "deep_broad_heart_girth",
-        "broken_knight_horse_v67_neck": "short_upright_reference_angle",
-        "broken_knight_horse_v67_head": "higher_larger_shorter_reach",
-        "broken_knight_horse_v67_hind_legs": "upright_weight_bearing_not_crouched",
-        "broken_knight_horse_v67_tack": "smaller_reference_scaled",
-        "broken_knight_horse_v67_goal": "match_reference_large_forms_before_detail",
-        "broken_knight_horse_v68_reference": "horse_turntable_reference_sheet",
-        "broken_knight_horse_v68_method": "joined_anatomy_voxel_fusion",
-        "broken_knight_horse_v68_core": "body_neck_head_shoulders_upper_legs_hindquarters",
-        "broken_knight_horse_v68_chest": "deep_broad_integrated",
-        "broken_knight_horse_v68_croup": "rounded_powerful_integrated",
-        "broken_knight_horse_v68_neck": "short_strong_fused",
-        "broken_knight_horse_v68_head": "substantial_shortened_fused",
-        "broken_knight_horse_v68_leg_roots": "integrated_into_body",
-        "broken_knight_horse_v68_goal": "remove_assembled_parts_and_match_reference_mass",
-        "broken_knight_horse_v70_base": "v68_fused_anatomy_bypassing_v69",
-        "broken_knight_horse_v70_reference": "horse_turntable_reference_sheet",
-        "broken_knight_horse_v70_body": "substantial_not_overbulked",
-        "broken_knight_horse_v70_legs": "longer_visible_weight_bearing",
-        "broken_knight_horse_v70_head": "short_tapered_wider_cheek",
-        "broken_knight_horse_v70_neck": "strong_arch_not_massive_column",
-        "broken_knight_horse_v70_croup": "round_powerful_controlled",
-        "broken_knight_horse_v70_mane": "reference_dorsal_hanging_mane",
-        "broken_knight_horse_v70_color": "darker_chestnut_reference_palette",
-        "broken_knight_horse_v70_goal": "match_reference_ratios_not_maximize_mass",
-        "broken_knight_horse_v71_reference": "horse_turntable_reference_sheet",
-        "broken_knight_horse_v71_method": "delete_previous_visual_model_and_rebuild",
-        "broken_knight_horse_v71_body": "fused_ellipsoid_anatomy_reference_proportions",
-        "broken_knight_horse_v71_chest": "deep_controlled_heart_girth",
-        "broken_knight_horse_v71_barrel": "compact_oval_ribcage",
-        "broken_knight_horse_v71_croup": "high_round_powerful",
-        "broken_knight_horse_v71_neck": "upright_three_mass_arch",
-        "broken_knight_horse_v71_head": "small_tapered_cranium_face_muzzle",
-        "broken_knight_horse_v71_forelegs": "long_straight_weight_bearing",
-        "broken_knight_horse_v71_hindlegs": "hip_stifle_gaskin_hock_chain",
-        "broken_knight_horse_v71_mane": "heavy_neck_following_layered",
-        "broken_knight_horse_v71_tail": "volumetric_fused_tail",
-        "broken_knight_horse_v71_tack": "reference_scaled_medieval_tack",
-        "broken_knight_horse_v71_goal": "direct_visual_match_to_reference",
-        "broken_knight_horse_v72_method": "explicit_lowpoly_lofts_no_voxel_blobs",
-        "broken_knight_horse_v72_reference": "horse_turntable_reference_sheet",
-        "broken_knight_horse_v72_body": "explicit_dorsal_belly_croup_silhouette",
-        "broken_knight_horse_v72_neck": "continuous_arch_loft",
-        "broken_knight_horse_v72_head": "continuous_tapered_wedge_loft",
-        "broken_knight_horse_v72_forelegs": "tapered_polygonal_segments",
-        "broken_knight_horse_v72_hindlegs": "true_stifle_hock_direction_change",
-        "broken_knight_horse_v72_tail": "single_continuous_swept_mesh",
-        "broken_knight_horse_v72_mane": "layered_reference_side_mane",
-        "broken_knight_horse_v72_goal": "clean_reference_silhouette_without_blob_artifacts",
-        "broken_knight_horse_v73_base": "clean_reference_boxmodel_v72",
-        "broken_knight_horse_v73_body": "broader_deeper_raised_compact_courser",
-        "broken_knight_horse_v73_chest": "stronger_heart_girth",
-        "broken_knight_horse_v73_croup": "wider_rounder_longer",
-        "broken_knight_horse_v73_neck": "shorter_thicker_arched",
-        "broken_knight_horse_v73_head": "major_face_length_reduction_downward_angle",
-        "broken_knight_horse_v73_forelegs": "same_length_more_substance",
-        "broken_knight_horse_v73_hindlegs": "preserved_angles_more_substance",
-        "broken_knight_horse_v73_surface": "single_catmull_pass_body_neck_head_tail",
-        "broken_knight_horse_v73_goal": "large_reference_silhouette_improvement",
-        "broken_knight_horse_v74_base": "reference_silhouette_organic_v73",
-        "broken_knight_horse_v74_focus": "head_neck_shoulder_foreleg_integration",
-        "broken_knight_horse_v74_neck": "forward_arch_crested_tapered_throat",
-        "broken_knight_horse_v74_head": "shorter_lower_smaller_cheek_taper",
-        "broken_knight_horse_v74_muzzle": "smaller_narrower_less_capsule_like",
-        "broken_knight_horse_v74_shoulders": "explicit_scapula_deltoid_wedges",
-        "broken_knight_horse_v74_chest": "projected_breast_and_pectorals",
-        "broken_knight_horse_v74_forelegs": "root_integrated_into_shoulder",
-        "broken_knight_horse_v74_body": "v73_body_preserved_except_front_anatomy",
-        "broken_knight_horse_v74_goal": "reference_horse_front_half_major_improvement"
+        "broken_knight_horse_goal": "reach_strong_anatomy_before_reinstalling_tack"
       },
       "modifiers": [],
-      "materials": [],
-      "armature": {
-        "data_name": "RiverwatchHorseRigData",
-        "bones": [
-          "root",
-          "body",
-          "neck",
-          "head",
-          "tail.1",
-          "tail.2",
-          "front.L.upper",
-          "front.L.lower",
-          "front.L.hoof",
-          "front.R.upper",
-          "front.R.lower",
-          "front.R.hoof",
-          "hind.L.upper",
-          "hind.L.lower",
-          "hind.L.hoof",
-          "hind.R.upper",
-          "hind.R.lower",
-          "hind.R.hoof"
+      "materials": []
+    },
+    {
+      "name": "RiverwatchV80Body",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        1.287,
+        1.8,
+        0.895
+      ],
+      "world_bounds": {
+        "min": [
+          -0.6435,
+          -0.7,
+          0.885
         ],
-        "bone_count": 18
+        "max": [
+          0.6435,
+          1.1,
+          1.78
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "anatomy"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Warm Bay"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80BodyMesh",
+        "vertices": 120,
+        "edges": 228,
+        "polygons": 110,
+        "materials": 1
       }
     },
     {
-      "name": "RiverwatchV74BlanketTrimBottom-1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80EarFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
         0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.126389,
+        0.07,
+        0.283928
+      ],
+      "world_bounds": {
+        "min": [
+          0.097127,
+          -1.055,
+          2.166511
+        ],
+        "max": [
+          0.223517,
+          -0.985,
+          2.450438
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "ear"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Warm Bay"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80EarFarMesh",
+        "vertices": 6,
+        "edges": 9,
+        "polygons": 5,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80EarFarInner",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.07,
+        0.0,
+        0.18
+      ],
+      "world_bounds": {
+        "min": [
+          0.129,
+          -1.059,
+          2.215
+        ],
+        "max": [
+          0.199,
+          -1.059,
+          2.395
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "ear_detail"
+      },
+      "modifiers": [],
+      "materials": [
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80EarFarInnerMesh",
+        "vertices": 3,
+        "edges": 3,
+        "polygons": 1,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80EarNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.126389,
+        0.07,
+        0.283928
+      ],
+      "world_bounds": {
+        "min": [
+          -0.223517,
+          -1.055,
+          2.166511
+        ],
+        "max": [
+          -0.097127,
+          -0.985,
+          2.450438
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "ear"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Warm Bay"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80EarNearMesh",
+        "vertices": 6,
+        "edges": 9,
+        "polygons": 5,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80EarNearInner",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.07,
+        0.0,
+        0.18
+      ],
+      "world_bounds": {
+        "min": [
+          -0.199,
+          -1.059,
+          2.215
+        ],
+        "max": [
+          -0.129,
+          -1.059,
+          2.395
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "ear_detail"
+      },
+      "modifiers": [],
+      "materials": [
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80EarNearInnerMesh",
+        "vertices": 3,
+        "edges": 3,
+        "polygons": 1,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80EyeFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.3,
+        -1.235,
+        2.075
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.076,
+        0.096,
+        0.092
+      ],
+      "world_bounds": {
+        "min": [
+          0.262,
+          -1.283,
+          2.029
+        ],
+        "max": [
+          0.338,
+          -1.187,
+          2.121
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "eye"
+      },
+      "modifiers": [],
+      "materials": [
+        "Riverwatch V80 Eye"
+      ],
+      "mesh": {
+        "data_name": "Sphere.003",
+        "vertices": 114,
+        "edges": 240,
+        "polygons": 128,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80EyeHighlightFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.333,
+        -1.266,
+        2.092
       ],
       "rotation_euler": [
         0.0,
@@ -469,29 +416,47 @@
       ],
       "dimensions": [
         0.02,
-        0.85,
-        0.01732
+        0.02,
+        0.02
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          0.323,
+          -1.276,
+          2.082
+        ],
+        "max": [
+          0.343,
+          -1.256,
+          2.102
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "blanket"
+        "broken_knight_region": "eye_detail"
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V67 Brass"
-      ]
+        "Riverwatch V80 Eye Highlight"
+      ],
+      "mesh": {
+        "data_name": "Sphere.004",
+        "vertices": 62,
+        "edges": 132,
+        "polygons": 72,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74BlanketTrimBottom1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80EyeHighlightNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
-        0.0,
-        0.0,
-        0.0
+        -0.333,
+        -1.266,
+        2.092
       ],
       "rotation_euler": [
         0.0,
@@ -505,61 +470,97 @@
       ],
       "dimensions": [
         0.02,
-        0.85,
-        0.01732
-      ],
-      "world_bounds": null,
-      "collections": [
-        "Collection"
-      ],
-      "custom_properties": {
-        "broken_knight_region": "blanket"
-      },
-      "modifiers": [],
-      "materials": [
-        "Riverwatch V67 Brass"
-      ]
-    },
-    {
-      "name": "RiverwatchV74BlanketTrimTop-1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
-      "location": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "rotation_euler": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "scale": [
-        1.0,
-        1.0,
-        1.0
-      ],
-      "dimensions": [
         0.02,
-        0.975768,
-        0.14012
+        0.02
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.343,
+          -1.276,
+          2.082
+        ],
+        "max": [
+          -0.323,
+          -1.256,
+          2.102
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "blanket"
+        "broken_knight_region": "eye_detail"
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V67 Brass"
-      ]
+        "Riverwatch V80 Eye Highlight"
+      ],
+      "mesh": {
+        "data_name": "Sphere.001",
+        "vertices": 62,
+        "edges": 132,
+        "polygons": 72,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74BlanketTrimTop1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80EyeNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        -0.3,
+        -1.235,
+        2.075
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.076,
+        0.096,
+        0.092
+      ],
+      "world_bounds": {
+        "min": [
+          -0.338,
+          -1.283,
+          2.029
+        ],
+        "max": [
+          -0.262,
+          -1.187,
+          2.121
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "eye"
+      },
+      "modifiers": [],
+      "materials": [
+        "Riverwatch V80 Eye"
+      ],
+      "mesh": {
+        "data_name": "Sphere",
+        "vertices": 114,
+        "edges": 240,
+        "polygons": 128,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80Forelock",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -576,26 +577,53 @@
         1.0
       ],
       "dimensions": [
-        0.02,
-        0.975768,
-        0.14012
+        0.124672,
+        0.279877,
+        0.22014
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.074831,
+          -1.285717,
+          2.021277
+        ],
+        "max": [
+          0.049841,
+          -1.00584,
+          2.241416
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "blanket"
+        "broken_knight_region": "mane"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchForelockThickness",
+          "type": "SOLIDIFY"
+        },
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Brass"
-      ]
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80ForelockMesh",
+        "vertices": 4,
+        "edges": 4,
+        "polygons": 1,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74BridleCheek-1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80FrontHoofFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -612,26 +640,49 @@
         1.0
       ],
       "dimensions": [
-        0.087348,
-        0.422276,
-        0.526627
+        0.239349,
+        0.345192,
+        0.107
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          0.245326,
+          -0.8326,
+          0.018
+        ],
+        "max": [
+          0.484674,
+          -0.487409,
+          0.125
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "bridle"
+        "broken_knight_region": "hoof"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Hoof"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80FrontHoofFarMesh",
+        "vertices": 8,
+        "edges": 12,
+        "polygons": 6,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74BridleCheek1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80FrontHoofNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -648,26 +699,49 @@
         1.0
       ],
       "dimensions": [
-        0.087348,
-        0.422276,
-        0.526627
+        0.239349,
+        0.345192,
+        0.107
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.484674,
+          -0.8326,
+          0.018
+        ],
+        "max": [
+          -0.245326,
+          -0.487409,
+          0.125
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "bridle"
+        "broken_knight_region": "hoof"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Hoof"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80FrontHoofNearMesh",
+        "vertices": 8,
+        "edges": 12,
+        "polygons": 6,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74BrowBand",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80FrontUpperFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -684,26 +758,50 @@
         1.0
       ],
       "dimensions": [
-        0.445363,
-        0.043561,
-        0.039097
+        0.41,
+        0.488363,
+        1.432359
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          0.16,
+          -0.689807,
+          0.097296
+        ],
+        "max": [
+          0.57,
+          -0.201444,
+          1.529655
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "bridle"
+        "broken_knight_region": "front_leg"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Warm Bay",
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80FrontUpperFarMesh",
+        "vertices": 72,
+        "edges": 136,
+        "polygons": 66,
+        "materials": 2
+      }
     },
     {
-      "name": "RiverwatchV74NoseBand",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80FrontUpperNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -720,26 +818,50 @@
         1.0
       ],
       "dimensions": [
-        0.335112,
-        0.062886,
-        0.050794
+        0.41,
+        0.488363,
+        1.432359
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.57,
+          -0.689807,
+          0.097296
+        ],
+        "max": [
+          -0.16,
+          -0.201444,
+          1.529655
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "bridle"
+        "broken_knight_region": "front_leg"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Warm Bay",
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80FrontUpperNearMesh",
+        "vertices": 72,
+        "edges": 136,
+        "polygons": 66,
+        "materials": 2
+      }
     },
     {
-      "name": "RiverwatchV74Rein-1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80Head",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -756,26 +878,50 @@
         1.0
       ],
       "dimensions": [
-        0.257943,
-        1.633717,
-        0.114118
+        0.66976,
+        0.883485,
+        0.602934
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.33488,
+          -1.819829,
+          1.692069
+        ],
+        "max": [
+          0.33488,
+          -0.936344,
+          2.295003
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "bridle"
+        "broken_knight_region": "anatomy"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Warm Bay",
+        "Riverwatch V80 Muzzle"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80HeadMesh",
+        "vertices": 84,
+        "edges": 156,
+        "polygons": 74,
+        "materials": 2
+      }
     },
     {
-      "name": "RiverwatchV74Rein1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80HindHoofFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -792,26 +938,49 @@
         1.0
       ],
       "dimensions": [
-        0.257943,
-        1.633717,
-        0.114118
+        0.249379,
+        0.36515,
+        0.112
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          0.26531,
+          0.380405,
+          0.018
+        ],
+        "max": [
+          0.51469,
+          0.745555,
+          0.13
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "bridle"
+        "broken_knight_region": "hoof"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Hoof"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80HindHoofFarMesh",
+        "vertices": 8,
+        "edges": 12,
+        "polygons": 6,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74StirrupLeather-1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80HindHoofNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -828,26 +997,49 @@
         1.0
       ],
       "dimensions": [
-        0.024,
-        0.030783,
-        0.910173
+        0.249379,
+        0.36515,
+        0.112
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.51469,
+          0.380405,
+          0.018
+        ],
+        "max": [
+          -0.26531,
+          0.745555,
+          0.13
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "saddle"
+        "broken_knight_region": "hoof"
       },
-      "modifiers": [],
+      "modifiers": [
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Hoof"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80HindHoofNearMesh",
+        "vertices": 8,
+        "edges": 12,
+        "polygons": 6,
+        "materials": 1
+      }
     },
     {
-      "name": "RiverwatchV74StirrupLeather1.0",
-      "type": "CURVE",
-      "parent": "RiverwatchHorseRig",
+      "name": "RiverwatchV80Mane",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
       "location": [
         0.0,
         0.0,
@@ -864,21 +1056,394 @@
         1.0
       ],
       "dimensions": [
-        0.024,
-        0.030783,
-        0.910173
+        0.220065,
+        0.527855,
+        0.659846
       ],
-      "world_bounds": null,
+      "world_bounds": {
+        "min": [
+          -0.23035,
+          -0.951607,
+          1.625143
+        ],
+        "max": [
+          -0.010285,
+          -0.423752,
+          2.284989
+        ]
+      },
       "collections": [
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_region": "saddle"
+        "broken_knight_region": "mane"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchManeThickness",
+          "type": "SOLIDIFY"
+        },
+        {
+          "name": "RiverwatchEdgeSoftening",
+          "type": "BEVEL"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80ManeMesh",
+        "vertices": 10,
+        "edges": 13,
+        "polygons": 4,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80Neck",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.89,
+        0.919663,
+        0.938814
+      ],
+      "world_bounds": {
+        "min": [
+          -0.445,
+          -1.084383,
+          1.346471
+        ],
+        "max": [
+          0.445,
+          -0.164721,
+          2.285285
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "anatomy"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Warm Bay"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80NeckMesh",
+        "vertices": 60,
+        "edges": 108,
+        "polygons": 50,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80NostrilFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.135,
+        -1.783,
+        1.835
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.062732,
+        0.040947,
+        0.05
+      ],
+      "world_bounds": {
+        "min": [
+          0.103634,
+          -1.803473,
+          1.81
+        ],
+        "max": [
+          0.166366,
+          -1.762527,
+          1.86
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "muzzle_detail"
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V67 Saddle Leather"
-      ]
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "Sphere.005",
+        "vertices": 86,
+        "edges": 182,
+        "polygons": 98,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80NostrilNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        -0.135,
+        -1.783,
+        1.835
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.062732,
+        0.040947,
+        0.05
+      ],
+      "world_bounds": {
+        "min": [
+          -0.166366,
+          -1.803473,
+          1.81
+        ],
+        "max": [
+          -0.103634,
+          -1.762527,
+          1.86
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "muzzle_detail"
+      },
+      "modifiers": [],
+      "materials": [
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "Sphere.002",
+        "vertices": 86,
+        "edges": 182,
+        "polygons": 98,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80Tail",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.5,
+        0.677259,
+        1.487783
+      ],
+      "world_bounds": {
+        "min": [
+          -0.25,
+          0.837993,
+          0.118453
+        ],
+        "max": [
+          0.25,
+          1.515252,
+          1.606235
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "tail"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80TailMesh",
+        "vertices": 56,
+        "edges": 104,
+        "polygons": 50,
+        "materials": 1
+      }
+    },
+    {
+      "name": "RiverwatchV80ThighFar",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.54,
+        0.794802,
+        1.582981
+      ],
+      "world_bounds": {
+        "min": [
+          0.12,
+          0.127419,
+          0.084971
+        ],
+        "max": [
+          0.66,
+          0.922221,
+          1.667952
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "hind_leg"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Warm Bay",
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80ThighFarMesh",
+        "vertices": 72,
+        "edges": 136,
+        "polygons": 66,
+        "materials": 2
+      }
+    },
+    {
+      "name": "RiverwatchV80ThighNear",
+      "type": "MESH",
+      "parent": "RiverwatchHorseV80Root",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.54,
+        0.794802,
+        1.582981
+      ],
+      "world_bounds": {
+        "min": [
+          -0.66,
+          0.127419,
+          0.084971
+        ],
+        "max": [
+          -0.12,
+          0.922221,
+          1.667952
+        ]
+      },
+      "collections": [
+        "Collection"
+      ],
+      "custom_properties": {
+        "broken_knight_region": "hind_leg"
+      },
+      "modifiers": [
+        {
+          "name": "RiverwatchControlledSubdivision",
+          "type": "SUBSURF"
+        }
+      ],
+      "materials": [
+        "Riverwatch V80 Warm Bay",
+        "Riverwatch V80 Dark Points"
+      ],
+      "mesh": {
+        "data_name": "RiverwatchV80ThighNearMesh",
+        "vertices": 72,
+        "edges": 136,
+        "polygons": 66,
+        "materials": 2
+      }
     }
   ]
 }
