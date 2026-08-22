@@ -1,0 +1,23 @@
+{
+    "status":  "READY_FOR_CHATGPT",
+    "version":  "AUTOMATION-V7",
+    "generated_utc":  "2026-08-22T15:11:46.0794373Z",
+    "branch":  "main",
+    "runtime_sha256":  "B3825BCAB7F69CA68C9D15AB1BEE7B89A9DC2DA360ED8C3AC5EEB76889ABB912",
+    "review_directory":  "captures/horse-review/auto/views",
+    "review_count":  8,
+    "review_views":  [
+                         "01_side_left.png",
+                         "02_front_3q.png",
+                         "03_front.png",
+                         "04_side_right.png",
+                         "05_rear_3q.png",
+                         "06_head_detail.png",
+                         "07_front_detail.png",
+                         "08_rear_detail.png"
+                     ],
+    "capture_method":  "BLENDER_BACKGROUND",
+    "gui_windows_opened":  0,
+    "manual_image_upload_required":  false,
+    "manual_git_push_required":  false
+}
