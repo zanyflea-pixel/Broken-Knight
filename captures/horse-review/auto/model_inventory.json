@@ -4,17 +4,17 @@
   "blend_file": "C:\\Users\\Jimmy\\Desktop\\Broken Knight\\blender\\world\\animals\\riverwatch_horse.blend",
   "scene_name": "Scene",
   "scene_custom_properties": {
-    "broken_knight_horse_version": "V93",
+    "broken_knight_horse_version": "V94",
     "broken_knight_horse_checkpoint": "ANATOMY_ONLY",
     "broken_knight_horse_tack_status": "DEFERRED",
-    "broken_knight_horse_structural_pass": "V92"
+    "broken_knight_horse_structural_pass": "V94_FIXED_PLANE_LIMBS"
   },
   "object_count": 29,
   "mesh_object_count": 28,
   "armature_object_count": 0,
   "objects": [
     {
-      "name": "RiverwatchHorseV92Root",
+      "name": "RiverwatchHorseV94Root",
       "type": "EMPTY",
       "parent": null,
       "location": [
@@ -42,27 +42,26 @@
         "Collection"
       ],
       "custom_properties": {
-        "broken_knight_horse_detail": "v92_structural_geometry_checkpoint",
-        "broken_knight_horse_version": "V93",
-        "broken_knight_horse_method": "fixed_skull_buried_limbs_shaped_hooves",
+        "broken_knight_horse_detail": "v94_fixed_plane_limb_checkpoint",
+        "broken_knight_horse_version": "V94",
+        "broken_knight_horse_method": "fixed_skull_fixed_plane_limbs_shaped_hooves",
         "broken_knight_horse_base": "fresh_v80_family_rebuild",
         "broken_knight_horse_body": "measured_fixed_axis_station_cage",
         "broken_knight_horse_neck": "forward_arch_surface_loft",
         "broken_knight_horse_head": "fixed_axis_equine_skull_cage",
-        "broken_knight_horse_legs": "buried_weight_bearing_surface_lofts",
-        "broken_knight_horse_hooves": "eight_sided_tapered_hoof_wedges",
-        "broken_knight_horse_tail": "five_continuous_lofted_hair_masses",
+        "broken_knight_horse_legs": "fixed_z_anatomical_limb_cages",
+        "broken_knight_horse_hooves": "sloped_eight_sided_hoof_wedges",
+        "broken_knight_horse_tail": "five_clustered_continuous_hair_masses",
         "broken_knight_horse_tack": "intentionally_removed_for_anatomy_checkpoint",
-        "broken_knight_horse_animation_acceptance": "ignored_during_visual_modeling",
         "broken_knight_horse_goal": "reach_strong_naked_anatomy_before_tack"
       },
       "modifiers": [],
       "materials": []
     },
     {
-      "name": "RiverwatchV92Body",
+      "name": "RiverwatchV94Body",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -81,7 +80,7 @@
       "dimensions": [
         0.94976,
         1.835,
-        1.06
+        1.075
       ],
       "world_bounds": {
         "min": [
@@ -92,7 +91,7 @@
         "max": [
           0.47488,
           1.115,
-          1.995
+          2.01
         ]
       },
       "collections": [
@@ -108,10 +107,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay"
+        "Riverwatch V94 Warm Bay"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92BodyMesh",
+        "data_name": "RiverwatchV94BodyMesh",
         "vertices": 144,
         "edges": 276,
         "polygons": 134,
@@ -119,9 +118,9 @@
       }
     },
     {
-      "name": "RiverwatchV92EarFar",
+      "name": "RiverwatchV94EarFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -138,20 +137,20 @@
         1.0
       ],
       "dimensions": [
-        0.106743,
-        0.088185,
-        0.303206
+        0.106466,
+        0.088016,
+        0.278221
       ],
       "world_bounds": {
         "min": [
-          0.056433,
-          -1.074093,
-          2.14661
+          0.061705,
+          -1.074008,
+          2.15661
         ],
         "max": [
-          0.163177,
-          -0.985907,
-          2.449816
+          0.168171,
+          -0.985992,
+          2.434831
         ]
       },
       "collections": [
@@ -167,10 +166,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay"
+        "Riverwatch V94 Warm Bay"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92EarFarMesh",
+        "data_name": "RiverwatchV94EarFarMesh",
         "vertices": 6,
         "edges": 9,
         "polygons": 5,
@@ -178,9 +177,9 @@
       }
     },
     {
-      "name": "RiverwatchV92EarFarInner",
+      "name": "RiverwatchV94EarFarInner",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -197,20 +196,20 @@
         1.0
       ],
       "dimensions": [
-        0.065,
+        0.066,
         0.03,
-        0.195
+        0.175
       ],
       "world_bounds": {
         "min": [
-          0.082,
+          0.086,
           -1.078,
-          2.19
+          2.2
         ],
         "max": [
-          0.147,
+          0.152,
           -1.048,
-          2.385
+          2.375
         ]
       },
       "collections": [
@@ -221,10 +220,10 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92EarFarInnerMesh",
+        "data_name": "RiverwatchV94EarFarInnerMesh",
         "vertices": 3,
         "edges": 3,
         "polygons": 1,
@@ -232,9 +231,9 @@
       }
     },
     {
-      "name": "RiverwatchV92EarNear",
+      "name": "RiverwatchV94EarNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -251,20 +250,20 @@
         1.0
       ],
       "dimensions": [
-        0.106743,
-        0.088185,
-        0.303206
+        0.106466,
+        0.088016,
+        0.278221
       ],
       "world_bounds": {
         "min": [
-          -0.163177,
-          -1.074093,
-          2.14661
+          -0.168171,
+          -1.074008,
+          2.15661
         ],
         "max": [
-          -0.056433,
-          -0.985907,
-          2.449816
+          -0.061705,
+          -0.985992,
+          2.434831
         ]
       },
       "collections": [
@@ -280,10 +279,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay"
+        "Riverwatch V94 Warm Bay"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92EarNearMesh",
+        "data_name": "RiverwatchV94EarNearMesh",
         "vertices": 6,
         "edges": 9,
         "polygons": 5,
@@ -291,9 +290,9 @@
       }
     },
     {
-      "name": "RiverwatchV92EarNearInner",
+      "name": "RiverwatchV94EarNearInner",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -310,20 +309,20 @@
         1.0
       ],
       "dimensions": [
-        0.065,
+        0.066,
         0.03,
-        0.195
+        0.175
       ],
       "world_bounds": {
         "min": [
-          -0.147,
+          -0.152,
           -1.078,
-          2.19
+          2.2
         ],
         "max": [
-          -0.082,
+          -0.086,
           -1.048,
-          2.385
+          2.375
         ]
       },
       "collections": [
@@ -334,10 +333,10 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92EarNearInnerMesh",
+        "data_name": "RiverwatchV94EarNearInnerMesh",
         "vertices": 3,
         "edges": 3,
         "polygons": 1,
@@ -345,13 +344,13 @@
       }
     },
     {
-      "name": "RiverwatchV92EyeFar",
+      "name": "RiverwatchV94EyeFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
-        0.174,
+        0.195,
         -1.245,
-        2.055
+        2.06
       ],
       "rotation_euler": [
         0.0,
@@ -364,20 +363,20 @@
         1.0
       ],
       "dimensions": [
-        0.056,
-        0.068,
-        0.064
+        0.06,
+        0.072,
+        0.068
       ],
       "world_bounds": {
         "min": [
-          0.146,
-          -1.279,
-          2.023
+          0.165,
+          -1.281,
+          2.026
         ],
         "max": [
-          0.202,
-          -1.211,
-          2.087
+          0.225,
+          -1.209,
+          2.094
         ]
       },
       "collections": [
@@ -388,7 +387,7 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Eye"
+        "Riverwatch V94 Eye"
       ],
       "mesh": {
         "data_name": "Sphere.003",
@@ -399,13 +398,13 @@
       }
     },
     {
-      "name": "RiverwatchV92EyeHighlightFar",
+      "name": "RiverwatchV94EyeHighlightFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
-        0.193,
+        0.216,
         -1.26,
-        2.066
+        2.072
       ],
       "rotation_euler": [
         0.0,
@@ -424,14 +423,14 @@
       ],
       "world_bounds": {
         "min": [
-          0.186,
+          0.209,
           -1.267,
-          2.059
+          2.065
         ],
         "max": [
-          0.2,
+          0.223,
           -1.253,
-          2.073
+          2.079
         ]
       },
       "collections": [
@@ -442,7 +441,7 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Eye Highlight"
+        "Riverwatch V94 Eye Highlight"
       ],
       "mesh": {
         "data_name": "Sphere.004",
@@ -453,13 +452,13 @@
       }
     },
     {
-      "name": "RiverwatchV92EyeHighlightNear",
+      "name": "RiverwatchV94EyeHighlightNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
-        -0.193,
+        -0.216,
         -1.26,
-        2.066
+        2.072
       ],
       "rotation_euler": [
         0.0,
@@ -478,14 +477,14 @@
       ],
       "world_bounds": {
         "min": [
-          -0.2,
+          -0.223,
           -1.267,
-          2.059
+          2.065
         ],
         "max": [
-          -0.186,
+          -0.209,
           -1.253,
-          2.073
+          2.079
         ]
       },
       "collections": [
@@ -496,7 +495,7 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Eye Highlight"
+        "Riverwatch V94 Eye Highlight"
       ],
       "mesh": {
         "data_name": "Sphere.001",
@@ -507,13 +506,13 @@
       }
     },
     {
-      "name": "RiverwatchV92EyeNear",
+      "name": "RiverwatchV94EyeNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
-        -0.174,
+        -0.195,
         -1.245,
-        2.055
+        2.06
       ],
       "rotation_euler": [
         0.0,
@@ -526,20 +525,20 @@
         1.0
       ],
       "dimensions": [
-        0.056,
-        0.068,
-        0.064
+        0.06,
+        0.072,
+        0.068
       ],
       "world_bounds": {
         "min": [
-          -0.202,
-          -1.279,
-          2.023
+          -0.225,
+          -1.281,
+          2.026
         ],
         "max": [
-          -0.146,
-          -1.211,
-          2.087
+          -0.165,
+          -1.209,
+          2.094
         ]
       },
       "collections": [
@@ -550,7 +549,7 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Eye"
+        "Riverwatch V94 Eye"
       ],
       "mesh": {
         "data_name": "Sphere",
@@ -561,9 +560,9 @@
       }
     },
     {
-      "name": "RiverwatchV92Forelock",
+      "name": "RiverwatchV94Forelock",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -580,20 +579,20 @@
         1.0
       ],
       "dimensions": [
-        0.139302,
-        0.287831,
-        0.205109
+        0.149642,
+        0.299927,
+        0.222116
       ],
       "world_bounds": {
         "min": [
-          -0.084537,
-          -1.329157,
-          1.980868
+          -0.089713,
+          -1.340168,
+          1.979908
         ],
         "max": [
-          0.054765,
-          -1.041326,
-          2.185977
+          0.059929,
+          -1.040241,
+          2.202024
         ]
       },
       "collections": [
@@ -613,10 +612,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92ForelockMesh",
+        "data_name": "RiverwatchV94ForelockMesh",
         "vertices": 5,
         "edges": 5,
         "polygons": 1,
@@ -624,9 +623,9 @@
       }
     },
     {
-      "name": "RiverwatchV92FrontHoofFar",
+      "name": "RiverwatchV94FrontHoofFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -643,20 +642,20 @@
         1.0
       ],
       "dimensions": [
-        0.186399,
-        0.277997,
-        0.112
+        0.185733,
+        0.274134,
+        0.120421
       ],
       "world_bounds": {
         "min": [
-          0.136801,
-          -0.624265,
+          0.137133,
+          -0.652508,
           0.018
         ],
         "max": [
-          0.323199,
-          -0.346269,
-          0.13
+          0.322867,
+          -0.378374,
+          0.138421
         ]
       },
       "collections": [
@@ -672,10 +671,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Hoof"
+        "Riverwatch V94 Hoof"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92FrontHoofFarMesh",
+        "data_name": "RiverwatchV94FrontHoofFarMesh",
         "vertices": 16,
         "edges": 24,
         "polygons": 10,
@@ -683,9 +682,9 @@
       }
     },
     {
-      "name": "RiverwatchV92FrontHoofNear",
+      "name": "RiverwatchV94FrontHoofNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -702,20 +701,20 @@
         1.0
       ],
       "dimensions": [
-        0.186399,
-        0.277997,
-        0.112
+        0.185733,
+        0.274134,
+        0.120421
       ],
       "world_bounds": {
         "min": [
-          -0.323199,
-          -0.624265,
+          -0.322867,
+          -0.652508,
           0.018
         ],
         "max": [
-          -0.136801,
-          -0.346269,
-          0.13
+          -0.137133,
+          -0.378374,
+          0.138421
         ]
       },
       "collections": [
@@ -731,10 +730,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Hoof"
+        "Riverwatch V94 Hoof"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92FrontHoofNearMesh",
+        "data_name": "RiverwatchV94FrontHoofNearMesh",
         "vertices": 16,
         "edges": 24,
         "polygons": 10,
@@ -742,9 +741,9 @@
       }
     },
     {
-      "name": "RiverwatchV92FrontLegFar",
+      "name": "RiverwatchV94FrontLegFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -761,20 +760,20 @@
         1.0
       ],
       "dimensions": [
-        0.3325,
-        0.474518,
-        1.444971
+        0.323,
+        0.417,
+        1.28
       ],
       "world_bounds": {
         "min": [
-          0.06375,
-          -0.569518,
-          0.088246
+          0.0685,
+          -0.547,
+          0.11
         ],
         "max": [
-          0.39625,
-          -0.095,
-          1.533218
+          0.3915,
+          -0.13,
+          1.39
         ]
       },
       "collections": [
@@ -790,11 +789,11 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay",
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Warm Bay",
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92FrontLegFarMesh",
+        "data_name": "RiverwatchV94FrontLegFarMesh",
         "vertices": 100,
         "edges": 190,
         "polygons": 92,
@@ -802,9 +801,9 @@
       }
     },
     {
-      "name": "RiverwatchV92FrontLegNear",
+      "name": "RiverwatchV94FrontLegNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -821,20 +820,20 @@
         1.0
       ],
       "dimensions": [
-        0.3325,
-        0.474518,
-        1.444971
+        0.323,
+        0.417,
+        1.28
       ],
       "world_bounds": {
         "min": [
-          -0.39625,
-          -0.569518,
-          0.088246
+          -0.3915,
+          -0.547,
+          0.11
         ],
         "max": [
-          -0.06375,
-          -0.095,
-          1.533218
+          -0.0685,
+          -0.13,
+          1.39
         ]
       },
       "collections": [
@@ -850,11 +849,11 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay",
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Warm Bay",
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92FrontLegNearMesh",
+        "data_name": "RiverwatchV94FrontLegNearMesh",
         "vertices": 100,
         "edges": 190,
         "polygons": 92,
@@ -862,9 +861,9 @@
       }
     },
     {
-      "name": "RiverwatchV92Head",
+      "name": "RiverwatchV94Head",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -881,20 +880,20 @@
         1.0
       ],
       "dimensions": [
-        0.422464,
-        0.88,
-        0.69
+        0.453376,
+        0.875,
+        0.7
       ],
       "world_bounds": {
         "min": [
-          -0.211232,
-          -1.895,
-          1.56
+          -0.226688,
+          -1.885,
+          1.565
         ],
         "max": [
-          0.211232,
-          -1.015,
-          2.25
+          0.226688,
+          -1.01,
+          2.265
         ]
       },
       "collections": [
@@ -910,11 +909,11 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay",
-        "Riverwatch V92 Muzzle"
+        "Riverwatch V94 Warm Bay",
+        "Riverwatch V94 Muzzle"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92HeadMesh",
+        "data_name": "RiverwatchV94HeadMesh",
         "vertices": 96,
         "edges": 180,
         "polygons": 86,
@@ -922,9 +921,9 @@
       }
     },
     {
-      "name": "RiverwatchV92HindHoofFar",
+      "name": "RiverwatchV94HindHoofFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -941,20 +940,20 @@
         1.0
       ],
       "dimensions": [
-        0.19146,
-        0.288055,
-        0.117
+        0.190792,
+        0.28388,
+        0.125419
       ],
       "world_bounds": {
         "min": [
-          0.17927,
-          0.455707,
+          0.184604,
+          0.457273,
           0.018
         ],
         "max": [
-          0.37073,
-          0.743762,
-          0.135
+          0.375396,
+          0.741153,
+          0.143419
         ]
       },
       "collections": [
@@ -970,10 +969,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Hoof"
+        "Riverwatch V94 Hoof"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92HindHoofFarMesh",
+        "data_name": "RiverwatchV94HindHoofFarMesh",
         "vertices": 16,
         "edges": 24,
         "polygons": 10,
@@ -981,9 +980,9 @@
       }
     },
     {
-      "name": "RiverwatchV92HindHoofNear",
+      "name": "RiverwatchV94HindHoofNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1000,20 +999,20 @@
         1.0
       ],
       "dimensions": [
-        0.19146,
-        0.288055,
-        0.117
+        0.190792,
+        0.28388,
+        0.125419
       ],
       "world_bounds": {
         "min": [
-          -0.37073,
-          0.455707,
+          -0.375396,
+          0.457273,
           0.018
         ],
         "max": [
-          -0.17927,
-          0.743762,
-          0.135
+          -0.184604,
+          0.741153,
+          0.143419
         ]
       },
       "collections": [
@@ -1029,10 +1028,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Hoof"
+        "Riverwatch V94 Hoof"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92HindHoofNearMesh",
+        "data_name": "RiverwatchV94HindHoofNearMesh",
         "vertices": 16,
         "edges": 24,
         "polygons": 10,
@@ -1040,9 +1039,9 @@
       }
     },
     {
-      "name": "RiverwatchV92HindLegFar",
+      "name": "RiverwatchV94HindLegFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1059,20 +1058,20 @@
         1.0
       ],
       "dimensions": [
-        0.4275,
-        0.808988,
-        1.525899
+        0.437,
+        0.79,
+        1.315
       ],
       "world_bounds": {
         "min": [
-          0.06125,
-          0.147591,
-          0.098556
+          0.0615,
+          0.175,
+          0.11
         ],
         "max": [
-          0.48875,
-          0.95658,
-          1.624455
+          0.4985,
+          0.965,
+          1.425
         ]
       },
       "collections": [
@@ -1088,11 +1087,11 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay",
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Warm Bay",
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92HindLegFarMesh",
+        "data_name": "RiverwatchV94HindLegFarMesh",
         "vertices": 120,
         "edges": 230,
         "polygons": 112,
@@ -1100,9 +1099,9 @@
       }
     },
     {
-      "name": "RiverwatchV92HindLegNear",
+      "name": "RiverwatchV94HindLegNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1119,20 +1118,20 @@
         1.0
       ],
       "dimensions": [
-        0.4275,
-        0.808988,
-        1.525899
+        0.437,
+        0.79,
+        1.315
       ],
       "world_bounds": {
         "min": [
-          -0.48875,
-          0.147591,
-          0.098556
+          -0.4985,
+          0.175,
+          0.11
         ],
         "max": [
-          -0.06125,
-          0.95658,
-          1.624455
+          -0.0615,
+          0.965,
+          1.425
         ]
       },
       "collections": [
@@ -1148,11 +1147,11 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay",
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Warm Bay",
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92HindLegNearMesh",
+        "data_name": "RiverwatchV94HindLegNearMesh",
         "vertices": 120,
         "edges": 230,
         "polygons": 112,
@@ -1160,9 +1159,9 @@
       }
     },
     {
-      "name": "RiverwatchV92Mane",
+      "name": "RiverwatchV94Mane",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1179,20 +1178,20 @@
         1.0
       ],
       "dimensions": [
-        0.174292,
-        0.645629,
-        0.57072
+        0.187841,
+        0.647389,
+        0.58338
       ],
       "world_bounds": {
         "min": [
-          -0.179959,
-          -0.967524,
-          1.59804
+          -0.191891,
+          -0.967899,
+          1.591689
         ],
         "max": [
-          -0.005667,
-          -0.321895,
-          2.16876
+          -0.00405,
+          -0.320509,
+          2.175069
         ]
       },
       "collections": [
@@ -1212,10 +1211,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92ManeMesh",
+        "data_name": "RiverwatchV94ManeMesh",
         "vertices": 14,
         "edges": 19,
         "polygons": 6,
@@ -1223,9 +1222,9 @@
       }
     },
     {
-      "name": "RiverwatchV92Neck",
+      "name": "RiverwatchV94Neck",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1242,20 +1241,20 @@
         1.0
       ],
       "dimensions": [
-        0.61,
-        0.879207,
-        0.861432
+        0.63,
+        0.891185,
+        0.874987
       ],
       "world_bounds": {
         "min": [
-          -0.305,
-          -1.067218,
-          1.346853
+          -0.315,
+          -1.068092,
+          1.341168
         ],
         "max": [
-          0.305,
-          -0.188012,
-          2.208284
+          0.315,
+          -0.176907,
+          2.216155
         ]
       },
       "collections": [
@@ -1271,10 +1270,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Warm Bay"
+        "Riverwatch V94 Warm Bay"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92NeckMesh",
+        "data_name": "RiverwatchV94NeckMesh",
         "vertices": 72,
         "edges": 132,
         "polygons": 62,
@@ -1282,13 +1281,13 @@
       }
     },
     {
-      "name": "RiverwatchV92NostrilFar",
+      "name": "RiverwatchV94NostrilFar",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
-        0.09,
+        0.1,
         -1.805,
-        1.705
+        1.69
       ],
       "rotation_euler": [
         0.0,
@@ -1301,20 +1300,20 @@
         1.0
       ],
       "dimensions": [
-        0.045623,
-        0.027298,
-        0.036
+        0.049425,
+        0.029248,
+        0.038
       ],
       "world_bounds": {
         "min": [
-          0.067188,
-          -1.818649,
-          1.687
+          0.075287,
+          -1.819624,
+          1.671
         ],
         "max": [
-          0.112812,
-          -1.791351,
-          1.723
+          0.124713,
+          -1.790376,
+          1.709
         ]
       },
       "collections": [
@@ -1325,7 +1324,7 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
         "data_name": "Sphere.005",
@@ -1336,13 +1335,13 @@
       }
     },
     {
-      "name": "RiverwatchV92NostrilNear",
+      "name": "RiverwatchV94NostrilNear",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
-        -0.09,
+        -0.1,
         -1.805,
-        1.705
+        1.69
       ],
       "rotation_euler": [
         0.0,
@@ -1355,20 +1354,20 @@
         1.0
       ],
       "dimensions": [
-        0.045623,
-        0.027298,
-        0.036
+        0.049425,
+        0.029248,
+        0.038
       ],
       "world_bounds": {
         "min": [
-          -0.112812,
-          -1.818649,
-          1.687
+          -0.124713,
+          -1.819624,
+          1.671
         ],
         "max": [
-          -0.067188,
-          -1.791351,
-          1.723
+          -0.075287,
+          -1.790376,
+          1.709
         ]
       },
       "collections": [
@@ -1379,7 +1378,7 @@
       },
       "modifiers": [],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
         "data_name": "Sphere.002",
@@ -1390,9 +1389,9 @@
       }
     },
     {
-      "name": "RiverwatchV92TailStrand1",
+      "name": "RiverwatchV94TailStrand1",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1409,20 +1408,20 @@
         1.0
       ],
       "dimensions": [
-        0.134225,
-        0.290098,
-        1.311509
+        0.135504,
+        0.31175,
+        1.31944
       ],
       "world_bounds": {
         "min": [
-          -0.108465,
-          0.979463,
-          0.173944
+          -0.105856,
+          0.971245,
+          0.16999
         ],
         "max": [
-          0.02576,
-          1.269561,
-          1.485453
+          0.029648,
+          1.282994,
+          1.48943
         ]
       },
       "collections": [
@@ -1438,10 +1437,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92TailStrand1Mesh",
+        "data_name": "RiverwatchV94TailStrand1Mesh",
         "vertices": 80,
         "edges": 150,
         "polygons": 72,
@@ -1449,9 +1448,9 @@
       }
     },
     {
-      "name": "RiverwatchV92TailStrand2",
+      "name": "RiverwatchV94TailStrand2",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1468,20 +1467,20 @@
         1.0
       ],
       "dimensions": [
-        0.127774,
-        0.300127,
-        1.34068
+        0.141483,
+        0.324932,
+        1.344446
       ],
       "world_bounds": {
         "min": [
-          -0.085606,
-          0.973754,
-          0.148078
+          -0.09071,
+          0.96524,
+          0.149054
         ],
         "max": [
-          0.042168,
-          1.27388,
-          1.488759
+          0.050773,
+          1.290172,
+          1.4935
         ]
       },
       "collections": [
@@ -1497,10 +1496,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92TailStrand2Mesh",
+        "data_name": "RiverwatchV94TailStrand2Mesh",
         "vertices": 80,
         "edges": 150,
         "polygons": 72,
@@ -1508,9 +1507,9 @@
       }
     },
     {
-      "name": "RiverwatchV92TailStrand3",
+      "name": "RiverwatchV94TailStrand3",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1527,20 +1526,20 @@
         1.0
       ],
       "dimensions": [
-        0.12464,
-        0.296229,
-        1.316368
+        0.15732,
+        0.337126,
+        1.330843
       ],
       "world_bounds": {
         "min": [
-          -0.06232,
-          0.974076,
-          0.17278
+          -0.07866,
+          0.960206,
+          0.167841
         ],
         "max": [
-          0.06232,
-          1.270306,
-          1.489148
+          0.07866,
+          1.297332,
+          1.498684
         ]
       },
       "collections": [
@@ -1556,10 +1555,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92TailStrand3Mesh",
+        "data_name": "RiverwatchV94TailStrand3Mesh",
         "vertices": 80,
         "edges": 150,
         "polygons": 72,
@@ -1567,9 +1566,9 @@
       }
     },
     {
-      "name": "RiverwatchV92TailStrand4",
+      "name": "RiverwatchV94TailStrand4",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1586,20 +1585,20 @@
         1.0
       ],
       "dimensions": [
-        0.127774,
-        0.300127,
-        1.34068
+        0.141483,
+        0.324932,
+        1.344446
       ],
       "world_bounds": {
         "min": [
-          -0.042168,
-          0.973754,
-          0.148078
+          -0.050773,
+          0.96524,
+          0.149054
         ],
         "max": [
-          0.085606,
-          1.27388,
-          1.488759
+          0.09071,
+          1.290172,
+          1.4935
         ]
       },
       "collections": [
@@ -1615,10 +1614,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92TailStrand4Mesh",
+        "data_name": "RiverwatchV94TailStrand4Mesh",
         "vertices": 80,
         "edges": 150,
         "polygons": 72,
@@ -1626,9 +1625,9 @@
       }
     },
     {
-      "name": "RiverwatchV92TailStrand5",
+      "name": "RiverwatchV94TailStrand5",
       "type": "MESH",
-      "parent": "RiverwatchHorseV92Root",
+      "parent": "RiverwatchHorseV94Root",
       "location": [
         0.0,
         0.0,
@@ -1645,20 +1644,20 @@
         1.0
       ],
       "dimensions": [
-        0.134225,
-        0.290098,
-        1.311509
+        0.135504,
+        0.31175,
+        1.31944
       ],
       "world_bounds": {
         "min": [
-          -0.02576,
-          0.979463,
-          0.173944
+          -0.029648,
+          0.971245,
+          0.16999
         ],
         "max": [
-          0.108465,
-          1.269561,
-          1.485453
+          0.105856,
+          1.282994,
+          1.48943
         ]
       },
       "collections": [
@@ -1674,10 +1673,10 @@
         }
       ],
       "materials": [
-        "Riverwatch V92 Dark Points"
+        "Riverwatch V94 Dark Points"
       ],
       "mesh": {
-        "data_name": "RiverwatchV92TailStrand5Mesh",
+        "data_name": "RiverwatchV94TailStrand5Mesh",
         "vertices": 80,
         "edges": 150,
         "polygons": 72,
