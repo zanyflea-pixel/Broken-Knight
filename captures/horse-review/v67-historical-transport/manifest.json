@@ -1,0 +1,25 @@
+﻿{
+    "status":  "READY_FOR_CHATGPT_V67_HISTORICAL_REVIEW",
+    "version":  "V67",
+    "source_commit":  "73c0a658d48a2507772e780438275e19b1d7a43b",
+    "source_path":  "captures/horse-review/current/contact_sheet.png",
+    "source_png_bytes":  1512750,
+    "source_png_sha256":  "CE720893DC7EBF49F5518336E7495DFF7D2F6C7A11647AD56BC8C758172941D9",
+    "base64_length":  2017000,
+    "chunk_size":  240000,
+    "chunk_count":  9,
+    "chunks":  [
+                   "contact_sheet.part001.b64.txt",
+                   "contact_sheet.part002.b64.txt",
+                   "contact_sheet.part003.b64.txt",
+                   "contact_sheet.part004.b64.txt",
+                   "contact_sheet.part005.b64.txt",
+                   "contact_sheet.part006.b64.txt",
+                   "contact_sheet.part007.b64.txt",
+                   "contact_sheet.part008.b64.txt",
+                   "contact_sheet.part009.b64.txt"
+               ],
+    "current_v94_modified":  false,
+    "runtime_horse_modified":  false,
+    "blender_used":  false
+}
