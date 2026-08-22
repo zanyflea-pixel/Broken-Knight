@@ -90134,7 +90134,7 @@ def build_horse_model_v63_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v64_base(arm):
 
     import bpy
     import math
@@ -92359,6 +92359,2065 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V64",
         "STURDY_COURSER_REBUILD_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V65
+    #
+    # TRUE SIDE-PROFILE BOX MODEL
+    #
+    # V64 = 53 / 100
+    #
+    # V64 still fundamentally used longitudinal body stations.
+    #
+    # V65 does NOT.
+    #
+    # Every major anatomical volume is authored from a
+    # deliberate SIDE SILHOUETTE and extruded across X.
+    #
+    # ========================================================
+
+    build_horse_model_v64_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V65",
+        "V64_PIPELINE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def select_only(obj):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+    def fix_normals(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        try:
+
+            bpy.ops.object.mode_set(
+                mode="EDIT"
+            )
+
+            bpy.ops.mesh.select_all(
+                action="SELECT"
+            )
+
+            bpy.ops.mesh.normals_make_consistent(
+                inside=False
+            )
+
+            bpy.ops.object.mode_set(
+                mode="OBJECT"
+            )
+
+        except Exception:
+
+            try:
+
+                bpy.ops.object.mode_set(
+                    mode="OBJECT"
+                )
+
+            except Exception:
+                pass
+
+    def smooth(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_static(
+        obj,
+        group_name
+    ):
+
+        obj.parent = arm
+
+        obj[
+            "broken_knight_region"
+        ] = group_name
+
+    def bevel(
+        obj,
+        width,
+        segments=2,
+        angle=25.0
+    ):
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V65 Profile Bevel",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+        modifier.limit_method = "ANGLE"
+        modifier.angle_limit = math.radians(
+            angle
+        )
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def create_profile_prism(
+        name,
+        profile,
+        x_center,
+        half_width,
+        material,
+        region,
+        bevel_width=0.015,
+        bevel_segments=2
+    ):
+
+        # ----------------------------------------------------
+        # profile = list of (Y, Z) coordinates
+        #
+        # This is the CORE OF THE NEW MODELING METHOD.
+        #
+        # We are literally drawing the side silhouette.
+        #
+        # Then extruding that silhouette across X.
+        # ----------------------------------------------------
+
+        count = len(
+            profile
+        )
+
+        if count < 3:
+            raise RuntimeError(
+                name + " profile has fewer than 3 points."
+            )
+
+        left_x = (
+            x_center
+            - half_width
+        )
+
+        right_x = (
+            x_center
+            + half_width
+        )
+
+        vertices = []
+
+        # Left wall.
+
+        for y, z in profile:
+
+            vertices.append(
+                (
+                    left_x,
+                    y,
+                    z
+                )
+            )
+
+        # Right wall.
+
+        for y, z in profile:
+
+            vertices.append(
+                (
+                    right_x,
+                    y,
+                    z
+                )
+            )
+
+        faces = []
+
+        # Left cap.
+
+        faces.append(
+            tuple(
+                range(
+                    0,
+                    count
+                )
+            )
+        )
+
+        # Right cap.
+
+        faces.append(
+            tuple(
+                reversed(
+                    range(
+                        count,
+                        count * 2
+                    )
+                )
+            )
+        )
+
+        # Edge walls.
+
+        for index in range(
+            count
+        ):
+
+            next_index = (
+                index + 1
+            ) % count
+
+            faces.append(
+                (
+                    index,
+                    next_index,
+                    count + next_index,
+                    count + index
+                )
+            )
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            vertices,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind_static(
+            obj,
+            region
+        )
+
+        fix_normals(
+            obj
+        )
+
+        if bevel_width > 0.0:
+
+            bevel(
+                obj,
+                bevel_width,
+                bevel_segments,
+                24.0
+            )
+
+        smooth(
+            obj
+        )
+
+        return obj
+
+    def create_ellipsoid(
+        name,
+        location,
+        scale,
+        material,
+        region,
+        segments=16,
+        rings=8
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=segments,
+            ring_count=rings,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        smooth(
+            obj
+        )
+
+        bind_static(
+            obj,
+            region
+        )
+
+        return obj
+
+    # ========================================================
+    # GET V64 MATERIALS
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V64 Warm Bay"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V64 Dark Points"
+    )
+
+    muzzle_mat = bpy.data.materials.get(
+        "Riverwatch V64 Muzzle"
+    )
+
+    eye_mat = bpy.data.materials.get(
+        "Riverwatch V64 Eyes"
+    )
+
+    hoof_mat = bpy.data.materials.get(
+        "Riverwatch V64 Hooves"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "V65 missing V64 coat material."
+        )
+
+    if dark is None:
+        raise RuntimeError(
+            "V65 missing V64 dark material."
+        )
+
+    if muzzle_mat is None:
+        raise RuntimeError(
+            "V65 missing V64 muzzle material."
+        )
+
+    if eye_mat is None:
+        raise RuntimeError(
+            "V65 missing V64 eye material."
+        )
+
+    if hoof_mat is None:
+        raise RuntimeError(
+            "V65 missing V64 hoof material."
+        )
+
+    # Richer bay.
+
+    coat.diffuse_color = (
+        0.29,
+        0.066,
+        0.018,
+        1.0
+    )
+
+    coat.roughness = 0.62
+
+    # ========================================================
+    # DELETE ALL V64 VISIBLE MODEL OBJECTS
+    # ========================================================
+
+    deleted_count = 0
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV64"
+        ):
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+            deleted_count += 1
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V65",
+        "DELETED_V64_OBJECTS",
+        deleted_count
+    )
+
+    # ========================================================
+    # MAIN TORSO PROFILE
+    #
+    # IMPORTANT:
+    #
+    # This outline is hand-drawn from the side.
+    #
+    # Notice:
+    #
+    # withers peak
+    # gently dipped back
+    # raised loin
+    # rounded upper croup
+    # sloping rump
+    # tucked flank
+    # deeper rib cage
+    # deep front chest
+    #
+    # ========================================================
+
+    torso_profile = [
+
+        # Withers.
+        (
+            -0.31,
+            1.82
+        ),
+
+        # Back behind withers.
+        (
+            -0.12,
+            1.72
+        ),
+
+        (
+            0.15,
+            1.67
+        ),
+
+        # Mid-back.
+        (
+            0.43,
+            1.65
+        ),
+
+        (
+            0.70,
+            1.66
+        ),
+
+        # Loin rises.
+        (
+            0.91,
+            1.70
+        ),
+
+        # Upper croup.
+        (
+            1.10,
+            1.77
+        ),
+
+        (
+            1.27,
+            1.74
+        ),
+
+        # Rear quarter.
+        (
+            1.40,
+            1.62
+        ),
+
+        (
+            1.46,
+            1.47
+        ),
+
+        (
+            1.43,
+            1.31
+        ),
+
+        # Point of buttock.
+        (
+            1.33,
+            1.18
+        ),
+
+        (
+            1.20,
+            1.08
+        ),
+
+        # Flank.
+        (
+            1.02,
+            1.00
+        ),
+
+        (
+            0.84,
+            0.96
+        ),
+
+        # Belly rises toward flank.
+        (
+            0.69,
+            0.92
+        ),
+
+        # Deep barrel.
+        (
+            0.42,
+            0.84
+        ),
+
+        (
+            0.16,
+            0.82
+        ),
+
+        # Sternum / heart girth.
+        (
+            -0.04,
+            0.84
+        ),
+
+        # Chest.
+        (
+            -0.19,
+            0.96
+        ),
+
+        (
+            -0.28,
+            1.15
+        ),
+
+        # Shoulder front returns to withers.
+        (
+            -0.33,
+            1.40
+        ),
+    ]
+
+    torso = create_profile_prism(
+        "RiverwatchV65Torso",
+        torso_profile,
+        0.0,
+        0.355,
+        coat,
+        "body",
+        0.026,
+        3
+    )
+
+    # ========================================================
+    # SHOULDER VOLUME
+    #
+    # NOT a sphere.
+    #
+    # Explicit scapula / shoulder silhouette.
+    # Wider across X than the barrel.
+    # ========================================================
+
+    shoulder_profile = [
+
+        (
+            -0.31,
+            1.76
+        ),
+
+        (
+            -0.13,
+            1.68
+        ),
+
+        (
+            0.02,
+            1.55
+        ),
+
+        (
+            0.10,
+            1.37
+        ),
+
+        (
+            0.09,
+            1.18
+        ),
+
+        (
+            0.01,
+            1.00
+        ),
+
+        (
+            -0.10,
+            0.91
+        ),
+
+        (
+            -0.22,
+            1.00
+        ),
+
+        (
+            -0.31,
+            1.18
+        ),
+
+        (
+            -0.36,
+            1.42
+        ),
+    ]
+
+    shoulder = create_profile_prism(
+        "RiverwatchV65Shoulder",
+        shoulder_profile,
+        0.0,
+        0.420,
+        coat,
+        "shoulder",
+        0.021,
+        3
+    )
+
+    # ========================================================
+    # CROUP / HINDQUARTER VOLUME
+    #
+    # Again: side-profile planar anatomy.
+    # ========================================================
+
+    croup_profile = [
+
+        (
+            0.80,
+            1.66
+        ),
+
+        (
+            1.02,
+            1.76
+        ),
+
+        (
+            1.22,
+            1.79
+        ),
+
+        (
+            1.38,
+            1.70
+        ),
+
+        (
+            1.47,
+            1.54
+        ),
+
+        (
+            1.43,
+            1.34
+        ),
+
+        (
+            1.31,
+            1.17
+        ),
+
+        (
+            1.14,
+            1.05
+        ),
+
+        (
+            0.96,
+            1.05
+        ),
+
+        (
+            0.84,
+            1.24
+        ),
+    ]
+
+    croup = create_profile_prism(
+        "RiverwatchV65Croup",
+        croup_profile,
+        0.0,
+        0.425,
+        coat,
+        "hindquarter",
+        0.024,
+        3
+    )
+
+    # ========================================================
+    # NECK
+    #
+    # Explicit side silhouette.
+    #
+    # Much stronger root than V64.
+    #
+    # S-curve comes from the actual polygon, not a tube.
+    # ========================================================
+
+    neck_profile = [
+
+        # Upper withers / root.
+        (
+            -0.32,
+            1.80
+        ),
+
+        # Crest climbs.
+        (
+            -0.41,
+            1.92
+        ),
+
+        (
+            -0.53,
+            2.03
+        ),
+
+        (
+            -0.66,
+            2.10
+        ),
+
+        # Poll.
+        (
+            -0.77,
+            2.10
+        ),
+
+        (
+            -0.82,
+            2.04
+        ),
+
+        # Upper throat.
+        (
+            -0.76,
+            1.90
+        ),
+
+        (
+            -0.67,
+            1.77
+        ),
+
+        (
+            -0.58,
+            1.63
+        ),
+
+        # Lower neck.
+        (
+            -0.48,
+            1.49
+        ),
+
+        (
+            -0.38,
+            1.34
+        ),
+
+        # Neck enters chest.
+        (
+            -0.27,
+            1.20
+        ),
+
+        (
+            -0.17,
+            1.14
+        ),
+
+        (
+            -0.12,
+            1.27
+        ),
+
+        (
+            -0.17,
+            1.45
+        ),
+
+        (
+            -0.24,
+            1.63
+        ),
+    ]
+
+    neck = create_profile_prism(
+        "RiverwatchV65Neck",
+        neck_profile,
+        0.0,
+        0.270,
+        coat,
+        "neck",
+        0.024,
+        3
+    )
+
+    # ========================================================
+    # SKULL / HEAD
+    #
+    # Larger and substantially less wedge-like than V64.
+    #
+    # Explicit:
+    # forehead
+    # orbit
+    # cheek
+    # jaw
+    # nasal bridge
+    # muzzle root
+    # ========================================================
+
+    head_profile = [
+
+        # Poll attachment.
+        (
+            -0.75,
+            2.10
+        ),
+
+        # Forehead.
+        (
+            -0.85,
+            2.08
+        ),
+
+        (
+            -0.96,
+            2.02
+        ),
+
+        # Nasal bridge.
+        (
+            -1.08,
+            1.94
+        ),
+
+        (
+            -1.20,
+            1.85
+        ),
+
+        # Nose.
+        (
+            -1.32,
+            1.76
+        ),
+
+        (
+            -1.37,
+            1.68
+        ),
+
+        # Lower muzzle root.
+        (
+            -1.34,
+            1.59
+        ),
+
+        (
+            -1.23,
+            1.55
+        ),
+
+        # Jawline.
+        (
+            -1.10,
+            1.55
+        ),
+
+        (
+            -0.98,
+            1.59
+        ),
+
+        # Cheek.
+        (
+            -0.87,
+            1.67
+        ),
+
+        (
+            -0.80,
+            1.79
+        ),
+
+        (
+            -0.75,
+            1.94
+        ),
+    ]
+
+    head = create_profile_prism(
+        "RiverwatchV65Head",
+        head_profile,
+        0.0,
+        0.225,
+        coat,
+        "head",
+        0.019,
+        3
+    )
+
+    # ========================================================
+    # CHEEK / JAW VOLUME
+    #
+    # Gives the head actual horse skull depth without
+    # putting sphere-balls on its face.
+    # ========================================================
+
+    jaw_profile = [
+
+        (
+            -0.81,
+            1.88
+        ),
+
+        (
+            -0.88,
+            1.82
+        ),
+
+        (
+            -0.98,
+            1.72
+        ),
+
+        (
+            -1.07,
+            1.62
+        ),
+
+        (
+            -1.01,
+            1.55
+        ),
+
+        (
+            -0.90,
+            1.59
+        ),
+
+        (
+            -0.81,
+            1.69
+        ),
+
+        (
+            -0.76,
+            1.79
+        ),
+    ]
+
+    jaw = create_profile_prism(
+        "RiverwatchV65Jaw",
+        jaw_profile,
+        0.0,
+        0.245,
+        coat,
+        "head",
+        0.017,
+        3
+    )
+
+    # ========================================================
+    # MUZZLE
+    #
+    # Small rounded soft-tissue cap is appropriate here.
+    # ========================================================
+
+    muzzle = create_ellipsoid(
+        "RiverwatchV65Muzzle",
+        (
+            0.0,
+            -1.405,
+            1.645
+        ),
+        (
+            0.155,
+            0.075,
+            0.068
+        ),
+        muzzle_mat,
+        "head",
+        18,
+        9
+    )
+
+    # ========================================================
+    # EYES
+    # ========================================================
+
+    create_ellipsoid(
+        "RiverwatchV65LeftEye",
+        (
+            -0.228,
+            -0.895,
+            1.960
+        ),
+        (
+            0.021,
+            0.015,
+            0.021
+        ),
+        eye_mat,
+        "head",
+        12,
+        8
+    )
+
+    create_ellipsoid(
+        "RiverwatchV65RightEye",
+        (
+            0.228,
+            -0.895,
+            1.960
+        ),
+        (
+            0.021,
+            0.015,
+            0.021
+        ),
+        eye_mat,
+        "head",
+        12,
+        8
+    )
+
+    # ========================================================
+    # NOSTRILS
+    # ========================================================
+
+    create_ellipsoid(
+        "RiverwatchV65LeftNostril",
+        (
+            -0.060,
+            -1.475,
+            1.648
+        ),
+        (
+            0.016,
+            0.008,
+            0.010
+        ),
+        eye_mat,
+        "head",
+        10,
+        6
+    )
+
+    create_ellipsoid(
+        "RiverwatchV65RightNostril",
+        (
+            0.060,
+            -1.475,
+            1.648
+        ),
+        (
+            0.016,
+            0.008,
+            0.010
+        ),
+        eye_mat,
+        "head",
+        10,
+        6
+    )
+
+    # ========================================================
+    # EARS
+    #
+    # Side-profile prisms rather than cones.
+    # ========================================================
+
+    left_ear_profile = [
+
+        (
+            -0.79,
+            2.08
+        ),
+
+        (
+            -0.78,
+            2.27
+        ),
+
+        (
+            -0.72,
+            2.16
+        ),
+
+        (
+            -0.71,
+            2.08
+        ),
+    ]
+
+    right_ear_profile = [
+
+        (
+            -0.74,
+            2.09
+        ),
+
+        (
+            -0.70,
+            2.28
+        ),
+
+        (
+            -0.65,
+            2.16
+        ),
+
+        (
+            -0.66,
+            2.08
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65LeftEar",
+        left_ear_profile,
+        -0.105,
+        0.035,
+        coat,
+        "head",
+        0.006,
+        2
+    )
+
+    create_profile_prism(
+        "RiverwatchV65RightEar",
+        right_ear_profile,
+        0.105,
+        0.035,
+        coat,
+        "head",
+        0.006,
+        2
+    )
+
+    # ========================================================
+    # FRONT LEG SIDE SILHOUETTE
+    #
+    # One polygon = entire visible limb structure.
+    #
+    # Explicit:
+    # upper arm
+    # elbow
+    # forearm
+    # knee
+    # cannon
+    # fetlock
+    # pastern
+    #
+    # ========================================================
+
+    front_leg_profile = [
+
+        # Front edge of upper foreleg.
+        (
+            -0.21,
+            1.34
+        ),
+
+        (
+            -0.16,
+            1.13
+        ),
+
+        (
+            -0.12,
+            0.91
+        ),
+
+        # Knee front.
+        (
+            -0.10,
+            0.64
+        ),
+
+        # Cannon front.
+        (
+            -0.09,
+            0.27
+        ),
+
+        # Fetlock.
+        (
+            -0.11,
+            0.15
+        ),
+
+        # Pastern / toe connection.
+        (
+            -0.18,
+            0.09
+        ),
+
+        # Back of pastern.
+        (
+            -0.01,
+            0.09
+        ),
+
+        (
+            0.03,
+            0.16
+        ),
+
+        # Cannon back.
+        (
+            0.04,
+            0.47
+        ),
+
+        # Knee back.
+        (
+            0.03,
+            0.65
+        ),
+
+        # Forearm back.
+        (
+            0.02,
+            0.91
+        ),
+
+        # Elbow.
+        (
+            0.00,
+            1.11
+        ),
+
+        # Upper rear attachment.
+        (
+            -0.04,
+            1.31
+        ),
+    ]
+
+    # Near front leg.
+
+    create_profile_prism(
+        "RiverwatchV65FrontLeftLeg",
+        front_leg_profile,
+        -0.355,
+        0.095,
+        coat,
+        "front.L",
+        0.012,
+        2
+    )
+
+    # Far front leg gets a tiny longitudinal stagger.
+
+    front_far_profile = [
+
+        (
+            y + 0.075,
+            z
+        )
+
+        for y, z in front_leg_profile
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65FrontRightLeg",
+        front_far_profile,
+        0.355,
+        0.090,
+        coat,
+        "front.R",
+        0.012,
+        2
+    )
+
+    # ========================================================
+    # FRONT DARK STOCKINGS
+    # ========================================================
+
+    front_sock_profile = [
+
+        (
+            -0.105,
+            0.45
+        ),
+
+        (
+            -0.090,
+            0.22
+        ),
+
+        (
+            -0.110,
+            0.13
+        ),
+
+        (
+            0.020,
+            0.13
+        ),
+
+        (
+            0.045,
+            0.45
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65FrontLeftSock",
+        front_sock_profile,
+        -0.355,
+        0.098,
+        dark,
+        "front.L",
+        0.008,
+        2
+    )
+
+    front_far_sock = [
+
+        (
+            y + 0.075,
+            z
+        )
+
+        for y, z in front_sock_profile
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65FrontRightSock",
+        front_far_sock,
+        0.355,
+        0.093,
+        dark,
+        "front.R",
+        0.008,
+        2
+    )
+
+    # ========================================================
+    # HIND LEG
+    #
+    # Explicit horse side silhouette.
+    #
+    # IMPORTANT:
+    #
+    # This is much less crouched than V62-V64.
+    #
+    # Stifle is forward.
+    # Hock is only moderately rearward.
+    # Cannon is nearly vertical.
+    # ========================================================
+
+    hind_leg_profile = [
+
+        # Front of hip/thigh attachment.
+        (
+            1.00,
+            1.32
+        ),
+
+        # Front thigh.
+        (
+            0.96,
+            1.14
+        ),
+
+        (
+            0.93,
+            1.00
+        ),
+
+        # Stifle.
+        (
+            0.96,
+            0.87
+        ),
+
+        # Front gaskin.
+        (
+            1.04,
+            0.75
+        ),
+
+        # Hock front.
+        (
+            1.15,
+            0.58
+        ),
+
+        # Cannon front.
+        (
+            1.16,
+            0.27
+        ),
+
+        # Fetlock.
+        (
+            1.14,
+            0.15
+        ),
+
+        # Pastern front.
+        (
+            1.07,
+            0.09
+        ),
+
+        # Pastern back.
+        (
+            1.22,
+            0.09
+        ),
+
+        (
+            1.25,
+            0.15
+        ),
+
+        # Cannon back.
+        (
+            1.26,
+            0.45
+        ),
+
+        # Hock rear.
+        (
+            1.29,
+            0.59
+        ),
+
+        # Gaskin rear.
+        (
+            1.21,
+            0.77
+        ),
+
+        # Rear thigh.
+        (
+            1.31,
+            1.03
+        ),
+
+        (
+            1.33,
+            1.20
+        ),
+
+        # Hip rear.
+        (
+            1.29,
+            1.35
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65HindLeftLeg",
+        hind_leg_profile,
+        -0.365,
+        0.105,
+        coat,
+        "hind.L",
+        0.013,
+        2
+    )
+
+    # Relaxed far leg:
+    # just a little farther back, NOT huge.
+
+    hind_far_profile = [
+
+        (
+            y + 0.065,
+            z
+        )
+
+        for y, z in hind_leg_profile
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65HindRightLeg",
+        hind_far_profile,
+        0.365,
+        0.100,
+        coat,
+        "hind.R",
+        0.013,
+        2
+    )
+
+    # ========================================================
+    # HIND DARK STOCKINGS
+    # ========================================================
+
+    hind_sock_profile = [
+
+        (
+            1.155,
+            0.45
+        ),
+
+        (
+            1.155,
+            0.22
+        ),
+
+        (
+            1.135,
+            0.13
+        ),
+
+        (
+            1.245,
+            0.13
+        ),
+
+        (
+            1.265,
+            0.45
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65HindLeftSock",
+        hind_sock_profile,
+        -0.365,
+        0.108,
+        dark,
+        "hind.L",
+        0.008,
+        2
+    )
+
+    hind_far_sock = [
+
+        (
+            y + 0.065,
+            z
+        )
+
+        for y, z in hind_sock_profile
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65HindRightSock",
+        hind_far_sock,
+        0.365,
+        0.103,
+        dark,
+        "hind.R",
+        0.008,
+        2
+    )
+
+    # ========================================================
+    # HOOFS
+    #
+    # Explicit side wedges.
+    # ========================================================
+
+    front_hoof_profile = [
+
+        (
+            -0.11,
+            0.13
+        ),
+
+        (
+            -0.19,
+            0.085
+        ),
+
+        (
+            -0.27,
+            0.045
+        ),
+
+        (
+            -0.25,
+            0.015
+        ),
+
+        (
+            0.015,
+            0.015
+        ),
+
+        (
+            0.025,
+            0.065
+        ),
+
+        (
+            -0.01,
+            0.12
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65FrontLeftHoof",
+        front_hoof_profile,
+        -0.355,
+        0.120,
+        hoof_mat,
+        "front.L.hoof",
+        0.010,
+        2
+    )
+
+    front_far_hoof = [
+
+        (
+            y + 0.075,
+            z
+        )
+
+        for y, z in front_hoof_profile
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65FrontRightHoof",
+        front_far_hoof,
+        0.355,
+        0.115,
+        hoof_mat,
+        "front.R.hoof",
+        0.010,
+        2
+    )
+
+    hind_hoof_profile = [
+
+        (
+            1.14,
+            0.13
+        ),
+
+        (
+            1.07,
+            0.085
+        ),
+
+        (
+            0.99,
+            0.045
+        ),
+
+        (
+            1.00,
+            0.015
+        ),
+
+        (
+            1.24,
+            0.015
+        ),
+
+        (
+            1.25,
+            0.065
+        ),
+
+        (
+            1.22,
+            0.12
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65HindLeftHoof",
+        hind_hoof_profile,
+        -0.365,
+        0.120,
+        hoof_mat,
+        "hind.L.hoof",
+        0.010,
+        2
+    )
+
+    hind_far_hoof = [
+
+        (
+            y + 0.065,
+            z
+        )
+
+        for y, z in hind_hoof_profile
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65HindRightHoof",
+        hind_far_hoof,
+        0.365,
+        0.115,
+        hoof_mat,
+        "hind.R.hoof",
+        0.010,
+        2
+    )
+
+    # ========================================================
+    # CONTINUOUS MANE
+    #
+    # One side silhouette.
+    #
+    # No separated fingers / planks.
+    # ========================================================
+
+    mane_profile = [
+
+        # Crest side.
+        (
+            -0.77,
+            2.115
+        ),
+
+        (
+            -0.66,
+            2.115
+        ),
+
+        (
+            -0.55,
+            2.055
+        ),
+
+        (
+            -0.45,
+            1.985
+        ),
+
+        (
+            -0.36,
+            1.910
+        ),
+
+        (
+            -0.29,
+            1.835
+        ),
+
+        # Hanging edge.
+        (
+            -0.31,
+            1.715
+        ),
+
+        (
+            -0.39,
+            1.785
+        ),
+
+        (
+            -0.47,
+            1.845
+        ),
+
+        (
+            -0.56,
+            1.900
+        ),
+
+        (
+            -0.66,
+            1.955
+        ),
+
+        (
+            -0.75,
+            2.010
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65Mane",
+        mane_profile,
+        -0.205,
+        0.040,
+        dark,
+        "mane",
+        0.009,
+        2
+    )
+
+    # ========================================================
+    # FORELOCK
+    # ========================================================
+
+    forelock_profile = [
+
+        (
+            -0.79,
+            2.09
+        ),
+
+        (
+            -0.85,
+            2.01
+        ),
+
+        (
+            -0.88,
+            1.92
+        ),
+
+        (
+            -0.82,
+            1.96
+        ),
+
+        (
+            -0.76,
+            2.04
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65Forelock",
+        forelock_profile,
+        -0.015,
+        0.055,
+        dark,
+        "head",
+        0.006,
+        2
+    )
+
+    # ========================================================
+    # CONTINUOUS TAIL SIDE PROFILE
+    #
+    # One broad hanging mass.
+    # ========================================================
+
+    tail_profile = [
+
+        # Dock.
+        (
+            1.28,
+            1.52
+        ),
+
+        (
+            1.42,
+            1.49
+        ),
+
+        (
+            1.51,
+            1.36
+        ),
+
+        (
+            1.56,
+            1.18
+        ),
+
+        (
+            1.58,
+            0.98
+        ),
+
+        (
+            1.58,
+            0.78
+        ),
+
+        (
+            1.55,
+            0.60
+        ),
+
+        (
+            1.49,
+            0.43
+        ),
+
+        # Tip.
+        (
+            1.42,
+            0.40
+        ),
+
+        (
+            1.43,
+            0.58
+        ),
+
+        (
+            1.45,
+            0.79
+        ),
+
+        (
+            1.44,
+            1.00
+        ),
+
+        (
+            1.39,
+            1.21
+        ),
+
+        (
+            1.31,
+            1.39
+        ),
+    ]
+
+    create_profile_prism(
+        "RiverwatchV65Tail",
+        tail_profile,
+        0.0,
+        0.115,
+        dark,
+        "tail",
+        0.014,
+        3
+    )
+
+    # ========================================================
+    # MATERIAL RENAME
+    # ========================================================
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V64"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V64",
+                "Riverwatch V65",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "true_side_profile_box_model_v65"
+
+    arm[
+        "broken_knight_horse_v65_previous_rating"
+    ] = 53
+
+    arm[
+        "broken_knight_horse_v65_modeling_method"
+    ] = "explicit_side_profile_prisms"
+
+    arm[
+        "broken_knight_horse_v65_longitudinal_station_body"
+    ] = False
+
+    arm[
+        "broken_knight_horse_v65_torso"
+    ] = "hand_drawn_side_silhouette"
+
+    arm[
+        "broken_knight_horse_v65_shoulder"
+    ] = "separate_planar_scapula_volume"
+
+    arm[
+        "broken_knight_horse_v65_croup"
+    ] = "separate_planar_hindquarter_volume"
+
+    arm[
+        "broken_knight_horse_v65_neck"
+    ] = "explicit_s_curve_profile"
+
+    arm[
+        "broken_knight_horse_v65_head"
+    ] = "explicit_skull_cheek_jaw_profile"
+
+    arm[
+        "broken_knight_horse_v65_front_legs"
+    ] = "single_piece_profile_limbs"
+
+    arm[
+        "broken_knight_horse_v65_hind_legs"
+    ] = "single_piece_compact_horse_zigzag"
+
+    arm[
+        "broken_knight_horse_v65_mane"
+    ] = "single_continuous_profile_mass"
+
+    arm[
+        "broken_knight_horse_v65_tail"
+    ] = "single_continuous_profile_mass"
+
+    arm[
+        "broken_knight_horse_v65_tack"
+    ] = "still_removed_for_anatomy_review"
+
+    arm[
+        "broken_knight_horse_v65_goal"
+    ] = "break_out_of_cross_section_iteration_plateau"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_anatomy_review"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V65",
+        "TRUE_SIDE_PROFILE_BOX_MODEL_COMPLETE"
     )
 
 def reset_pose(arm):
