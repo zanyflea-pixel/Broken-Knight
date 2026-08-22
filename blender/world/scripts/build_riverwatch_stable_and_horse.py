@@ -60682,7 +60682,7 @@ def build_horse_model_v49_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v50_base(arm):
 
     import bpy
     import math
@@ -63721,6 +63721,2449 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V50",
         "REFERENCE_ANATOMY_REBUILD_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V51
+    #
+    # REFERENCE SHAPE LOCK
+    #
+    # New modeling approach:
+    #
+    # SIDE-SILHOUETTE-CONTROLLED SHELLS
+    #
+    # Neck/head and limbs are no longer built primarily
+    # from circular cross-section chains.
+    #
+    # ========================================================
+
+    build_horse_model_v50_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V51",
+        "V50_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def get_object(
+        name
+    ):
+
+        return bpy.data.objects.get(
+            name
+        )
+
+    def delete_prefix(
+        prefix
+    ):
+
+        deleted = 0
+
+        for obj in list(
+            bpy.data.objects
+        ):
+
+            if obj.name.startswith(
+                prefix
+            ):
+
+                bpy.data.objects.remove(
+                    obj,
+                    do_unlink=True
+                )
+
+                deleted += 1
+
+        print(
+            "V51_DELETE",
+            prefix,
+            deleted
+        )
+
+    def smooth(
+        obj
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_new(
+        obj,
+        group_name
+    ):
+
+        obj.parent = arm
+
+        group = obj.vertex_groups.new(
+            name=group_name
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def create_mesh(
+        name,
+        vertices,
+        faces,
+        material,
+        group_name
+    ):
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            vertices,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    def bevel(
+        obj,
+        width,
+        segments=3
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V51 Bevel",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def mesh_warp(
+        name,
+        function
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+
+            print(
+                "V51_MISSING_OBJECT",
+                name
+            )
+
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co = Vector(
+                function(
+                    vertex.co.copy()
+                )
+            )
+
+        obj.data.update()
+
+    def ellipsoid(
+        name,
+        location,
+        scale,
+        material,
+        group_name
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=28,
+            ring_count=18,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    # ========================================================
+    # SIDE SHELL
+    #
+    # outline item:
+    #
+    # (
+    #   y,
+    #   z,
+    #   half-width-x
+    # )
+    #
+    # Gives exact side silhouette while preserving
+    # dimensional width.
+    #
+    # ========================================================
+
+    def build_side_shell(
+        name,
+        outline,
+        center_x,
+        material,
+        group_name,
+        bevel_width=0.0
+    ):
+
+        count = len(
+            outline
+        )
+
+        vertices = []
+
+        # Left surface.
+
+        for y, z, half_width in outline:
+
+            vertices.append(
+                (
+                    center_x - half_width,
+                    y,
+                    z
+                )
+            )
+
+        # Right surface.
+
+        for y, z, half_width in outline:
+
+            vertices.append(
+                (
+                    center_x + half_width,
+                    y,
+                    z
+                )
+            )
+
+        faces = [
+
+            tuple(
+                reversed(
+                    range(
+                        count
+                    )
+                )
+            ),
+
+            tuple(
+                range(
+                    count,
+                    count * 2
+                )
+            ),
+        ]
+
+        for index in range(
+            count
+        ):
+
+            nxt = (
+                index + 1
+            ) % count
+
+            faces.append(
+                (
+                    index,
+                    nxt,
+                    count + nxt,
+                    count + index
+                )
+            )
+
+        obj = create_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            group_name
+        )
+
+        if bevel_width > 0.0:
+
+            bevel(
+                obj,
+                bevel_width,
+                3
+            )
+
+        smooth(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V50 Warm Bay"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V50 Dark Points"
+    )
+
+    muzzle_mat = bpy.data.materials.get(
+        "Riverwatch V50 Muzzle"
+    )
+
+    eye_mat = bpy.data.materials.get(
+        "Riverwatch V50 Eyes"
+    )
+
+    hoof_mat = bpy.data.materials.get(
+        "Riverwatch V50 Hooves"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "V51 missing V50 Warm Bay material."
+        )
+
+    if dark is None:
+        raise RuntimeError(
+            "V51 missing V50 Dark Points material."
+        )
+
+    if muzzle_mat is None:
+        raise RuntimeError(
+            "V51 missing V50 Muzzle material."
+        )
+
+    if eye_mat is None:
+        raise RuntimeError(
+            "V51 missing V50 Eyes material."
+        )
+
+    if hoof_mat is None:
+        raise RuntimeError(
+            "V51 missing V50 Hooves material."
+        )
+
+    # ========================================================
+    # 1. V50 TORSO
+    #
+    # KEEP CLEAN SURFACE.
+    #
+    # REFERENCE PROPORTION CORRECTION:
+    #
+    # longer rear half
+    # shorter front projection
+    # stronger shoulder
+    # raised belly
+    # wider / stretched croup
+    #
+    # ========================================================
+
+    def torso_reference_warp(
+        co
+    ):
+
+        y = co.y
+        z = co.z
+
+        original_y = y
+
+        # ----------------------------------------------------
+        # SHORTEN FRONT PROJECTION
+        # ----------------------------------------------------
+
+        if y < -0.08:
+
+            pivot = -0.08
+
+            co.y = (
+                pivot
+                + (
+                    y - pivot
+                )
+                * 0.93
+            )
+
+        # ----------------------------------------------------
+        # LENGTHEN REAR BODY
+        # ----------------------------------------------------
+
+        elif y > 0.72:
+
+            pivot = 0.72
+
+            co.y = (
+                pivot
+                + (
+                    y - pivot
+                )
+                * 1.085
+            )
+
+        # ----------------------------------------------------
+        # DEEPER / WIDER SHOULDER
+        # ----------------------------------------------------
+
+        if (
+            original_y > -0.35
+            and original_y < 0.14
+        ):
+
+            co.x *= 1.045
+
+            if z < 1.03:
+
+                co.z -= 0.025
+
+        # ----------------------------------------------------
+        # FULLER RIB CAGE
+        # ----------------------------------------------------
+
+        if (
+            original_y > 0.10
+            and original_y < 0.72
+        ):
+
+            co.x *= 1.025
+
+        # ----------------------------------------------------
+        # RAISED ABDOMEN BEHIND CHEST
+        # ----------------------------------------------------
+
+        if (
+            original_y > 0.55
+            and original_y < 1.18
+            and z < 0.97
+        ):
+
+            center = 0.88
+            radius = 0.36
+
+            influence = (
+                1.0
+                - abs(
+                    original_y - center
+                ) / radius
+            )
+
+            influence = max(
+                0.0,
+                influence
+            )
+
+            co.z += (
+                0.060
+                * influence
+            )
+
+        # ----------------------------------------------------
+        # STRONGER LOIN
+        # ----------------------------------------------------
+
+        if (
+            original_y > 0.95
+            and original_y < 1.30
+            and z > 1.40
+        ):
+
+            co.z += 0.018
+
+            co.x *= 1.020
+
+        # ----------------------------------------------------
+        # WIDER CROUP
+        # ----------------------------------------------------
+
+        if original_y > 1.20:
+
+            co.x *= 1.045
+
+        # ----------------------------------------------------
+        # STRETCHED CROUP
+        #
+        # Avoid a round ball.
+        # ----------------------------------------------------
+
+        if original_y > 1.30:
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        original_y - 1.30
+                    )
+                    / 0.38
+                )
+            )
+
+            co.y += (
+                0.045
+                * influence
+            )
+
+            if z > 1.46:
+
+                co.z -= (
+                    0.030
+                    * influence
+                )
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV50Torso",
+        torso_reference_warp
+    )
+
+    # ========================================================
+    # 2. DELETE V50 HEAD / NECK
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV50Neck"
+    )
+
+    delete_prefix(
+        "RiverwatchV50Head"
+    )
+
+    delete_prefix(
+        "RiverwatchV50Muzzle"
+    )
+
+    delete_prefix(
+        "RiverwatchV50LeftEye"
+    )
+
+    delete_prefix(
+        "RiverwatchV50RightEye"
+    )
+
+    delete_prefix(
+        "RiverwatchV50LeftNostril"
+    )
+
+    delete_prefix(
+        "RiverwatchV50RightNostril"
+    )
+
+    delete_prefix(
+        "RiverwatchV50LeftEar"
+    )
+
+    delete_prefix(
+        "RiverwatchV50RightEar"
+    )
+
+    # ========================================================
+    # 3. ONE-PIECE NECK + HEAD
+    #
+    # EXPLICIT REFERENCE SIDE SILHOUETTE.
+    #
+    # Clockwise around complete horse neck/head.
+    #
+    # ========================================================
+
+    neck_head_outline = [
+
+        # ----------------------------------------------------
+        # LOWER SHOULDER ROOT
+        # ----------------------------------------------------
+
+        (
+            -0.245,
+            1.305,
+            0.345
+        ),
+
+        # Lower neck / chest connection.
+
+        (
+            -0.390,
+            1.360,
+            0.365
+        ),
+
+        (
+            -0.535,
+            1.445,
+            0.350
+        ),
+
+        # Throat.
+
+        (
+            -0.675,
+            1.535,
+            0.315
+        ),
+
+        (
+            -0.800,
+            1.600,
+            0.285
+        ),
+
+        # Jaw underside.
+
+        (
+            -0.925,
+            1.595,
+            0.270
+        ),
+
+        # Strong cheek / jaw.
+
+        (
+            -1.035,
+            1.575,
+            0.255
+        ),
+
+        (
+            -1.140,
+            1.555,
+            0.220
+        ),
+
+        # Narrow lower face.
+
+        (
+            -1.235,
+            1.545,
+            0.175
+        ),
+
+        (
+            -1.315,
+            1.565,
+            0.135
+        ),
+
+        # ----------------------------------------------------
+        # MUZZLE / NOSE UPPER EDGE
+        # ----------------------------------------------------
+
+        (
+            -1.345,
+            1.605,
+            0.125
+        ),
+
+        (
+            -1.300,
+            1.655,
+            0.135
+        ),
+
+        # Nose bridge.
+
+        (
+            -1.225,
+            1.700,
+            0.160
+        ),
+
+        (
+            -1.145,
+            1.755,
+            0.190
+        ),
+
+        (
+            -1.065,
+            1.815,
+            0.225
+        ),
+
+        # Eye / forehead region.
+
+        (
+            -0.985,
+            1.875,
+            0.260
+        ),
+
+        (
+            -0.905,
+            1.930,
+            0.260
+        ),
+
+        # Poll.
+
+        (
+            -0.830,
+            1.975,
+            0.225
+        ),
+
+        (
+            -0.770,
+            2.000,
+            0.220
+        ),
+
+        # ----------------------------------------------------
+        # CREST
+        # ----------------------------------------------------
+
+        (
+            -0.690,
+            1.995,
+            0.260
+        ),
+
+        (
+            -0.600,
+            1.955,
+            0.300
+        ),
+
+        (
+            -0.510,
+            1.890,
+            0.335
+        ),
+
+        (
+            -0.425,
+            1.805,
+            0.365
+        ),
+
+        (
+            -0.350,
+            1.710,
+            0.385
+        ),
+
+        # Upper shoulder connection.
+
+        (
+            -0.285,
+            1.605,
+            0.390
+        ),
+
+        (
+            -0.235,
+            1.515,
+            0.375
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51NeckHead",
+        neck_head_outline,
+        0.0,
+        coat,
+        "head",
+        0.024
+    )
+
+    # ========================================================
+    # 4. MUZZLE
+    #
+    # Reference wants:
+    #
+    # wider head
+    # SHORTER head
+    # narrow muzzle
+    #
+    # ========================================================
+
+    ellipsoid(
+        "RiverwatchV51Muzzle",
+        (
+            0.0,
+            -1.365,
+            1.600
+        ),
+        (
+            0.115,
+            0.058,
+            0.060
+        ),
+        muzzle_mat,
+        "head"
+    )
+
+    # ========================================================
+    # 5. EYES
+    # ========================================================
+
+    ellipsoid(
+        "RiverwatchV51LeftEye",
+        (
+            -0.252,
+            -0.955,
+            1.900
+        ),
+        (
+            0.022,
+            0.014,
+            0.022
+        ),
+        eye_mat,
+        "head"
+    )
+
+    ellipsoid(
+        "RiverwatchV51RightEye",
+        (
+            0.252,
+            -0.955,
+            1.900
+        ),
+        (
+            0.022,
+            0.014,
+            0.022
+        ),
+        eye_mat,
+        "head"
+    )
+
+    # ========================================================
+    # 6. NOSTRILS
+    # ========================================================
+
+    ellipsoid(
+        "RiverwatchV51LeftNostril",
+        (
+            -0.047,
+            -1.416,
+            1.600
+        ),
+        (
+            0.014,
+            0.008,
+            0.010
+        ),
+        eye_mat,
+        "head"
+    )
+
+    ellipsoid(
+        "RiverwatchV51RightNostril",
+        (
+            0.047,
+            -1.416,
+            1.600
+        ),
+        (
+            0.014,
+            0.008,
+            0.010
+        ),
+        eye_mat,
+        "head"
+    )
+
+    # ========================================================
+    # 7. SHORTER EARS
+    # ========================================================
+
+    for side in (
+        -1,
+        1
+    ):
+
+        bpy.ops.mesh.primitive_cone_add(
+            vertices=8,
+            radius1=0.050,
+            radius2=0.003,
+            depth=0.175,
+            location=(
+                side * 0.105,
+                -0.790,
+                2.120
+            )
+        )
+
+        ear = bpy.context.object
+
+        ear.name = (
+            "RiverwatchV51LeftEar"
+            if side < 0
+            else "RiverwatchV51RightEar"
+        )
+
+        ear.scale.x = 0.82
+        ear.scale.y = 0.60
+
+        ear.rotation_euler.x = math.radians(
+            -6.0
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        ear.data.materials.append(
+            coat
+        )
+
+        smooth(
+            ear
+        )
+
+        bind_new(
+            ear,
+            "head"
+        )
+
+    # ========================================================
+    # 8. DELETE ALL V50 LIMBS
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV50FrontLeftLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV50FrontRightLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV50HindLeftLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV50HindRightLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV50FrontLeftHoof"
+    )
+
+    delete_prefix(
+        "RiverwatchV50FrontRightHoof"
+    )
+
+    delete_prefix(
+        "RiverwatchV50HindLeftHoof"
+    )
+
+    delete_prefix(
+        "RiverwatchV50HindRightHoof"
+    )
+
+    # ========================================================
+    # 9. FORELEG SILHOUETTE
+    #
+    # TWO PIECES:
+    #
+    # upper coat section
+    # dark lower section
+    #
+    # Clearer knee and tapered cannon.
+    #
+    # ========================================================
+
+    front_upper_left = [
+
+        # Shoulder front.
+
+        (
+            -0.285,
+            1.370,
+            0.175
+        ),
+
+        (
+            -0.225,
+            1.175,
+            0.165
+        ),
+
+        (
+            -0.175,
+            0.975,
+            0.145
+        ),
+
+        (
+            -0.160,
+            0.775,
+            0.125
+        ),
+
+        # Knee front.
+
+        (
+            -0.190,
+            0.610,
+            0.125
+        ),
+
+        (
+            -0.180,
+            0.545,
+            0.135
+        ),
+
+        # Knee rear.
+
+        (
+            -0.055,
+            0.545,
+            0.135
+        ),
+
+        (
+            -0.045,
+            0.620,
+            0.120
+        ),
+
+        (
+            -0.035,
+            0.790,
+            0.125
+        ),
+
+        (
+            -0.045,
+            0.995,
+            0.145
+        ),
+
+        (
+            -0.090,
+            1.190,
+            0.165
+        ),
+
+        # Shoulder rear.
+
+        (
+            -0.150,
+            1.365,
+            0.175
+        ),
+    ]
+
+    front_upper_right = [
+
+        (
+            -0.200,
+            1.370,
+            0.175
+        ),
+
+        (
+            -0.140,
+            1.175,
+            0.165
+        ),
+
+        (
+            -0.090,
+            0.975,
+            0.145
+        ),
+
+        (
+            -0.075,
+            0.775,
+            0.125
+        ),
+
+        (
+            -0.105,
+            0.610,
+            0.125
+        ),
+
+        (
+            -0.095,
+            0.545,
+            0.135
+        ),
+
+        (
+            0.030,
+            0.545,
+            0.135
+        ),
+
+        (
+            0.040,
+            0.620,
+            0.120
+        ),
+
+        (
+            0.050,
+            0.790,
+            0.125
+        ),
+
+        (
+            0.040,
+            0.995,
+            0.145
+        ),
+
+        (
+            -0.005,
+            1.190,
+            0.165
+        ),
+
+        (
+            -0.065,
+            1.365,
+            0.175
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51FrontLeftUpper",
+        front_upper_left,
+        -0.350,
+        coat,
+        "front.L",
+        0.014
+    )
+
+    build_side_shell(
+        "RiverwatchV51FrontRightUpper",
+        front_upper_right,
+        0.350,
+        coat,
+        "front.R",
+        0.014
+    )
+
+    # ========================================================
+    # FRONT LOWER LEGS
+    #
+    # Slim cannon.
+    # Slightly enlarged fetlock.
+    # Sloped pastern.
+    #
+    # ========================================================
+
+    front_lower_left = [
+
+        # Front knee.
+
+        (
+            -0.185,
+            0.580,
+            0.105
+        ),
+
+        # Cannon front.
+
+        (
+            -0.165,
+            0.450,
+            0.075
+        ),
+
+        (
+            -0.150,
+            0.280,
+            0.068
+        ),
+
+        # Fetlock front.
+
+        (
+            -0.155,
+            0.155,
+            0.085
+        ),
+
+        # Pastern / toe side.
+
+        (
+            -0.220,
+            0.080,
+            0.070
+        ),
+
+        # Rear pastern.
+
+        (
+            -0.090,
+            0.080,
+            0.070
+        ),
+
+        # Rear fetlock.
+
+        (
+            -0.070,
+            0.160,
+            0.085
+        ),
+
+        # Rear cannon.
+
+        (
+            -0.065,
+            0.285,
+            0.068
+        ),
+
+        (
+            -0.060,
+            0.450,
+            0.075
+        ),
+
+        # Rear knee.
+
+        (
+            -0.060,
+            0.580,
+            0.105
+        ),
+    ]
+
+    front_lower_right = [
+
+        (
+            -0.100,
+            0.580,
+            0.105
+        ),
+
+        (
+            -0.080,
+            0.450,
+            0.075
+        ),
+
+        (
+            -0.065,
+            0.280,
+            0.068
+        ),
+
+        (
+            -0.070,
+            0.155,
+            0.085
+        ),
+
+        (
+            -0.135,
+            0.080,
+            0.070
+        ),
+
+        (
+            -0.005,
+            0.080,
+            0.070
+        ),
+
+        (
+            0.015,
+            0.160,
+            0.085
+        ),
+
+        (
+            0.020,
+            0.285,
+            0.068
+        ),
+
+        (
+            0.025,
+            0.450,
+            0.075
+        ),
+
+        (
+            0.025,
+            0.580,
+            0.105
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51FrontLeftLower",
+        front_lower_left,
+        -0.350,
+        dark,
+        "front.L",
+        0.010
+    )
+
+    build_side_shell(
+        "RiverwatchV51FrontRightLower",
+        front_lower_right,
+        0.350,
+        dark,
+        "front.R",
+        0.010
+    )
+
+    # ========================================================
+    # 10. HIND UPPER LEG SILHOUETTES
+    #
+    # Large thigh.
+    # Forward stifle.
+    # Rearward gaskin.
+    # Defined hock.
+    #
+    # Much straighter stance than earlier versions.
+    #
+    # ========================================================
+
+    hind_upper_left = [
+
+        # Upper/front hip.
+
+        (
+            1.250,
+            1.360,
+            0.185
+        ),
+
+        # Front thigh.
+
+        (
+            1.150,
+            1.170,
+            0.175
+        ),
+
+        # Forward stifle.
+
+        (
+            1.015,
+            0.980,
+            0.150
+        ),
+
+        (
+            1.015,
+            0.900,
+            0.140
+        ),
+
+        # Gaskin front.
+
+        (
+            1.110,
+            0.785,
+            0.120
+        ),
+
+        (
+            1.245,
+            0.680,
+            0.108
+        ),
+
+        # Hock front.
+
+        (
+            1.360,
+            0.605,
+            0.120
+        ),
+
+        # Hock underside.
+
+        (
+            1.420,
+            0.565,
+            0.130
+        ),
+
+        # Hock rear.
+
+        (
+            1.485,
+            0.610,
+            0.135
+        ),
+
+        # Rear gaskin.
+
+        (
+            1.385,
+            0.730,
+            0.120
+        ),
+
+        (
+            1.275,
+            0.850,
+            0.130
+        ),
+
+        # Rear thigh.
+
+        (
+            1.245,
+            1.025,
+            0.165
+        ),
+
+        (
+            1.340,
+            1.210,
+            0.185
+        ),
+
+        # Rear hip.
+
+        (
+            1.505,
+            1.355,
+            0.195
+        ),
+    ]
+
+    hind_upper_right = [
+
+        (
+            1.300,
+            1.360,
+            0.185
+        ),
+
+        (
+            1.200,
+            1.170,
+            0.175
+        ),
+
+        (
+            1.065,
+            0.980,
+            0.150
+        ),
+
+        (
+            1.065,
+            0.900,
+            0.140
+        ),
+
+        (
+            1.160,
+            0.785,
+            0.120
+        ),
+
+        (
+            1.295,
+            0.680,
+            0.108
+        ),
+
+        (
+            1.410,
+            0.605,
+            0.120
+        ),
+
+        (
+            1.470,
+            0.565,
+            0.130
+        ),
+
+        (
+            1.535,
+            0.610,
+            0.135
+        ),
+
+        (
+            1.435,
+            0.730,
+            0.120
+        ),
+
+        (
+            1.325,
+            0.850,
+            0.130
+        ),
+
+        (
+            1.295,
+            1.025,
+            0.165
+        ),
+
+        (
+            1.390,
+            1.210,
+            0.185
+        ),
+
+        (
+            1.555,
+            1.355,
+            0.195
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51HindLeftUpper",
+        hind_upper_left,
+        -0.370,
+        coat,
+        "hind.L",
+        0.016
+    )
+
+    build_side_shell(
+        "RiverwatchV51HindRightUpper",
+        hind_upper_right,
+        0.370,
+        coat,
+        "hind.R",
+        0.016
+    )
+
+    # ========================================================
+    # 11. HIND LOWER LEGS
+    #
+    # LONG.
+    # NEAR-VERTICAL.
+    #
+    # The previous versions folded the entire leg under
+    # the horse.
+    #
+    # ========================================================
+
+    hind_lower_left = [
+
+        # Hock front.
+
+        (
+            1.355,
+            0.610,
+            0.105
+        ),
+
+        # Cannon front.
+
+        (
+            1.355,
+            0.485,
+            0.074
+        ),
+
+        (
+            1.345,
+            0.340,
+            0.066
+        ),
+
+        (
+            1.330,
+            0.210,
+            0.065
+        ),
+
+        # Fetlock.
+
+        (
+            1.310,
+            0.145,
+            0.082
+        ),
+
+        # Pastern forward.
+
+        (
+            1.240,
+            0.075,
+            0.068
+        ),
+
+        # Rear pastern.
+
+        (
+            1.355,
+            0.075,
+            0.068
+        ),
+
+        # Rear fetlock.
+
+        (
+            1.400,
+            0.150,
+            0.082
+        ),
+
+        # Rear cannon.
+
+        (
+            1.425,
+            0.220,
+            0.065
+        ),
+
+        (
+            1.440,
+            0.350,
+            0.066
+        ),
+
+        (
+            1.450,
+            0.490,
+            0.074
+        ),
+
+        # Rear hock.
+
+        (
+            1.475,
+            0.610,
+            0.105
+        ),
+    ]
+
+    hind_lower_right = [
+
+        (
+            1.405,
+            0.610,
+            0.105
+        ),
+
+        (
+            1.405,
+            0.485,
+            0.074
+        ),
+
+        (
+            1.395,
+            0.340,
+            0.066
+        ),
+
+        (
+            1.380,
+            0.210,
+            0.065
+        ),
+
+        (
+            1.360,
+            0.145,
+            0.082
+        ),
+
+        (
+            1.290,
+            0.075,
+            0.068
+        ),
+
+        (
+            1.405,
+            0.075,
+            0.068
+        ),
+
+        (
+            1.450,
+            0.150,
+            0.082
+        ),
+
+        (
+            1.475,
+            0.220,
+            0.065
+        ),
+
+        (
+            1.490,
+            0.350,
+            0.066
+        ),
+
+        (
+            1.500,
+            0.490,
+            0.074
+        ),
+
+        (
+            1.525,
+            0.610,
+            0.105
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51HindLeftLower",
+        hind_lower_left,
+        -0.370,
+        dark,
+        "hind.L",
+        0.010
+    )
+
+    build_side_shell(
+        "RiverwatchV51HindRightLower",
+        hind_lower_right,
+        0.370,
+        dark,
+        "hind.R",
+        0.010
+    )
+
+    # ========================================================
+    # 12. LARGE ANGLED HOOFS
+    # ========================================================
+
+    front_left_hoof = [
+
+        (
+            -0.220,
+            0.125,
+            0.100
+        ),
+
+        (
+            -0.070,
+            0.115,
+            0.095
+        ),
+
+        (
+            -0.045,
+            0.035,
+            0.105
+        ),
+
+        (
+            -0.295,
+            0.018,
+            0.140
+        ),
+
+        (
+            -0.315,
+            0.060,
+            0.142
+        ),
+    ]
+
+    front_right_hoof = [
+
+        (
+            -0.135,
+            0.125,
+            0.100
+        ),
+
+        (
+            0.015,
+            0.115,
+            0.095
+        ),
+
+        (
+            0.040,
+            0.035,
+            0.105
+        ),
+
+        (
+            -0.210,
+            0.018,
+            0.140
+        ),
+
+        (
+            -0.230,
+            0.060,
+            0.142
+        ),
+    ]
+
+    hind_left_hoof = [
+
+        (
+            1.245,
+            0.125,
+            0.100
+        ),
+
+        (
+            1.395,
+            0.115,
+            0.095
+        ),
+
+        (
+            1.420,
+            0.035,
+            0.105
+        ),
+
+        (
+            1.175,
+            0.018,
+            0.140
+        ),
+
+        (
+            1.155,
+            0.060,
+            0.142
+        ),
+    ]
+
+    hind_right_hoof = [
+
+        (
+            1.295,
+            0.125,
+            0.100
+        ),
+
+        (
+            1.445,
+            0.115,
+            0.095
+        ),
+
+        (
+            1.470,
+            0.035,
+            0.105
+        ),
+
+        (
+            1.225,
+            0.018,
+            0.140
+        ),
+
+        (
+            1.205,
+            0.060,
+            0.142
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51FrontLeftHoof",
+        front_left_hoof,
+        -0.350,
+        hoof_mat,
+        "front.L.hoof",
+        0.012
+    )
+
+    build_side_shell(
+        "RiverwatchV51FrontRightHoof",
+        front_right_hoof,
+        0.350,
+        hoof_mat,
+        "front.R.hoof",
+        0.012
+    )
+
+    build_side_shell(
+        "RiverwatchV51HindLeftHoof",
+        hind_left_hoof,
+        -0.370,
+        hoof_mat,
+        "hind.L.hoof",
+        0.012
+    )
+
+    build_side_shell(
+        "RiverwatchV51HindRightHoof",
+        hind_right_hoof,
+        0.370,
+        hoof_mat,
+        "hind.R.hoof",
+        0.012
+    )
+
+    # ========================================================
+    # 13. DELETE V50 MANE
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV50Mane"
+    )
+
+    delete_prefix(
+        "RiverwatchV50Forelock"
+    )
+
+    # ========================================================
+    # 14. MANE CREST
+    #
+    # Thin coherent base.
+    # ========================================================
+
+    mane_crest = [
+
+        (
+            -0.790,
+            2.035,
+            0.025
+        ),
+
+        (
+            -0.720,
+            2.050,
+            0.026
+        ),
+
+        (
+            -0.650,
+            2.035,
+            0.028
+        ),
+
+        (
+            -0.580,
+            2.000,
+            0.030
+        ),
+
+        (
+            -0.510,
+            1.950,
+            0.032
+        ),
+
+        (
+            -0.440,
+            1.885,
+            0.034
+        ),
+
+        (
+            -0.375,
+            1.815,
+            0.034
+        ),
+
+        (
+            -0.315,
+            1.745,
+            0.032
+        ),
+
+        (
+            -0.300,
+            1.680,
+            0.030
+        ),
+
+        (
+            -0.350,
+            1.710,
+            0.030
+        ),
+
+        (
+            -0.410,
+            1.775,
+            0.032
+        ),
+
+        (
+            -0.475,
+            1.840,
+            0.032
+        ),
+
+        (
+            -0.545,
+            1.900,
+            0.030
+        ),
+
+        (
+            -0.615,
+            1.950,
+            0.028
+        ),
+
+        (
+            -0.685,
+            1.985,
+            0.026
+        ),
+
+        (
+            -0.750,
+            2.000,
+            0.025
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51ManeCrest",
+        mane_crest,
+        -0.265,
+        dark,
+        "head",
+        0.004
+    )
+
+    # ========================================================
+    # 15. OVERLAPPING MANE LOCKS
+    #
+    # Large enough to read like the reference,
+    # small enough not to become one giant leaf.
+    #
+    # ========================================================
+
+    mane_locks = [
+
+        [
+            (-0.740, 2.020, 0.026),
+            (-0.670, 2.000, 0.026),
+            (-0.620, 1.735, 0.030),
+            (-0.650, 1.680, 0.030),
+            (-0.700, 1.840, 0.028),
+        ],
+
+        [
+            (-0.665, 2.015, 0.028),
+            (-0.590, 1.985, 0.028),
+            (-0.535, 1.650, 0.032),
+            (-0.570, 1.600, 0.032),
+            (-0.625, 1.805, 0.030),
+        ],
+
+        [
+            (-0.590, 1.980, 0.030),
+            (-0.515, 1.940, 0.030),
+            (-0.455, 1.610, 0.034),
+            (-0.490, 1.565, 0.034),
+            (-0.545, 1.770, 0.032),
+        ],
+
+        [
+            (-0.510, 1.930, 0.030),
+            (-0.440, 1.875, 0.030),
+            (-0.380, 1.615, 0.033),
+            (-0.415, 1.580, 0.033),
+            (-0.465, 1.740, 0.031),
+        ],
+
+        [
+            (-0.435, 1.865, 0.028),
+            (-0.370, 1.800, 0.028),
+            (-0.320, 1.640, 0.030),
+            (-0.350, 1.610, 0.030),
+            (-0.400, 1.710, 0.029),
+        ],
+    ]
+
+    for index, outline in enumerate(
+        mane_locks
+    ):
+
+        build_side_shell(
+            "RiverwatchV51ManeLock%02d"
+            % (
+                index + 1
+            ),
+            outline,
+            -0.315,
+            dark,
+            "head",
+            0.004
+        )
+
+    # ========================================================
+    # 16. FORELOCK
+    # ========================================================
+
+    forelock_outline = [
+
+        (
+            -0.810,
+            2.065,
+            0.040
+        ),
+
+        (
+            -0.755,
+            2.065,
+            0.045
+        ),
+
+        (
+            -0.735,
+            1.890,
+            0.035
+        ),
+
+        (
+            -0.775,
+            1.925,
+            0.035
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51Forelock",
+        forelock_outline,
+        0.0,
+        dark,
+        "head",
+        0.004
+    )
+
+    # ========================================================
+    # 17. DELETE V50 TAIL
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV50Tail"
+    )
+
+    # ========================================================
+    # 18. CONTINUOUS TAIL
+    #
+    # Explicit side silhouette:
+    #
+    # continuous root
+    # full mid-tail
+    # natural taper
+    #
+    # ========================================================
+
+    tail_outline = [
+
+        # Root upper/front.
+
+        (
+            1.690,
+            1.380,
+            0.075
+        ),
+
+        # Upper rear bow.
+
+        (
+            1.770,
+            1.250,
+            0.105
+        ),
+
+        (
+            1.820,
+            1.070,
+            0.135
+        ),
+
+        (
+            1.835,
+            0.860,
+            0.155
+        ),
+
+        (
+            1.815,
+            0.640,
+            0.165
+        ),
+
+        (
+            1.765,
+            0.435,
+            0.150
+        ),
+
+        # Tip.
+
+        (
+            1.670,
+            0.210,
+            0.075
+        ),
+
+        (
+            1.610,
+            0.200,
+            0.060
+        ),
+
+        # Front/lower return.
+
+        (
+            1.655,
+            0.410,
+            0.120
+        ),
+
+        (
+            1.690,
+            0.625,
+            0.135
+        ),
+
+        (
+            1.705,
+            0.840,
+            0.125
+        ),
+
+        (
+            1.690,
+            1.050,
+            0.105
+        ),
+
+        (
+            1.645,
+            1.230,
+            0.085
+        ),
+
+        # Root lower/front.
+
+        (
+            1.625,
+            1.350,
+            0.070
+        ),
+    ]
+
+    build_side_shell(
+        "RiverwatchV51Tail",
+        tail_outline,
+        0.0,
+        dark,
+        "body",
+        0.012
+    )
+
+    # ========================================================
+    # 19. BRIDLE / TACK
+    #
+    # New head remains deliberately close to V50 coordinates.
+    #
+    # New torso rear is longer but saddle center remains
+    # essentially unchanged.
+    #
+    # ========================================================
+
+    # No broad tack transformation here.
+    #
+    # Prevents another anatomy pass from breaking the
+    # already readable saddle / blanket / bags.
+
+    # ========================================================
+    # 20. RENAME REMAINING V50 OBJECTS
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV50"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV50",
+                "RiverwatchV51",
+                1
+            )
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V50"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V50",
+                "Riverwatch V51",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "reference_shape_lock_v51"
+
+    arm[
+        "broken_knight_horse_v51_previous_rating"
+    ] = 50
+
+    arm[
+        "broken_knight_horse_v51_new_method"
+    ] = "side_silhouette_controlled_shells"
+
+    arm[
+        "broken_knight_horse_v51_torso"
+    ] = "longer_rear_shorter_front_deep_shoulder_raised_belly_stretched_croup"
+
+    arm[
+        "broken_knight_horse_v51_head_neck"
+    ] = "single_continuous_side_profile_mesh"
+
+    arm[
+        "broken_knight_horse_v51_head"
+    ] = "short_wide_strong_cheek_narrow_muzzle"
+
+    arm[
+        "broken_knight_horse_v51_forelegs"
+    ] = "explicit_upper_forearm_knee_and_slim_lower_cannon"
+
+    arm[
+        "broken_knight_horse_v51_hindlegs"
+    ] = "explicit_thigh_forward_stifle_rear_hock_long_vertical_cannon"
+
+    arm[
+        "broken_knight_horse_v51_hooves"
+    ] = "larger_reference_scaled_angled"
+
+    arm[
+        "broken_knight_horse_v51_mane"
+    ] = "coherent_crest_plus_five_overlapping_long_locks"
+
+    arm[
+        "broken_knight_horse_v51_tail"
+    ] = "single_continuous_root_midvolume_taper"
+
+    arm[
+        "broken_knight_horse_v51_goal"
+    ] = "match_reference_shape_instead_of_incremental_numeric_warp"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_reference_match"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V51",
+        "REFERENCE_SHAPE_LOCK_COMPLETE"
     )
 
 def reset_pose(arm):
