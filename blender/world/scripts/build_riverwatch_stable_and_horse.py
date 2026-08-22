@@ -103449,7 +103449,7 @@ def build_horse_model_v70_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v71_base(arm):
 
     import bpy
     import math
@@ -105903,6 +105903,2670 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V71",
         "FULL_REFERENCE_REBUILD_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V72
+    #
+    # CLEAN REFERENCE BOX-MODEL REBUILD
+    #
+    # V71 is invoked ONLY to initialize existing materials and
+    # the established horse export environment.
+    #
+    # Every V71 visible object is then deleted.
+    #
+    # V72 DOES NOT USE:
+    #
+    # voxel remesh
+    # ball joints
+    # sphere-chain tails
+    # sphere-chain necks
+    #
+    # ========================================================
+
+    build_horse_model_v71_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V72",
+        "PIPELINE_READY"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def deselect():
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+    def select_only(obj):
+
+        deselect()
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+    def bind(
+        obj,
+        region
+    ):
+
+        obj.parent = arm
+
+        obj[
+            "broken_knight_region"
+        ] = region
+
+    def shade_flat(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = False
+
+    def shade_smooth(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bevel(
+        obj,
+        width=0.018,
+        segments=2
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V72 Soft Edge",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+        modifier.limit_method = "ANGLE"
+        modifier.angle_limit = math.radians(
+            34.0
+        )
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def set_material(
+        material,
+        color,
+        roughness=0.62,
+        metallic=0.0
+    ):
+
+        if material is None:
+            return
+
+        material.use_nodes = True
+
+        bsdf = material.node_tree.nodes.get(
+            "Principled BSDF"
+        )
+
+        if bsdf is None:
+
+            for node in material.node_tree.nodes:
+
+                if node.type == "BSDF_PRINCIPLED":
+
+                    bsdf = node
+                    break
+
+        if bsdf is None:
+            return
+
+        if bsdf.inputs.get("Base Color"):
+
+            bsdf.inputs[
+                "Base Color"
+            ].default_value = color
+
+        if bsdf.inputs.get("Roughness"):
+
+            bsdf.inputs[
+                "Roughness"
+            ].default_value = roughness
+
+        if bsdf.inputs.get("Metallic"):
+
+            bsdf.inputs[
+                "Metallic"
+            ].default_value = metallic
+
+        material.diffuse_color = color
+        material.roughness = roughness
+        material.metallic = metallic
+
+    def make_mesh(
+        name,
+        vertices,
+        faces,
+        material,
+        region,
+        smooth=False
+    ):
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            vertices,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        if smooth:
+            shade_smooth(obj)
+        else:
+            shade_flat(obj)
+
+        return obj
+
+    # ========================================================
+    # DELETE V71 VISIBLE OBJECTS
+    # ========================================================
+
+    deleted = 0
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV71"
+        ):
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True
+            )
+
+            deleted += 1
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V72",
+        "DELETED_V71",
+        deleted
+    )
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V67 Warm Bay"
+    )
+
+    highlight = bpy.data.materials.get(
+        "Riverwatch V67 Bay Highlight"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V67 Dark Points"
+    )
+
+    hoof_mat = bpy.data.materials.get(
+        "Riverwatch V67 Hoof"
+    )
+
+    muzzle_mat = bpy.data.materials.get(
+        "Riverwatch V67 Muzzle"
+    )
+
+    eye_mat = bpy.data.materials.get(
+        "Riverwatch V67 Eyes"
+    )
+
+    blue = bpy.data.materials.get(
+        "Riverwatch V67 Royal Blue"
+    )
+
+    leather = bpy.data.materials.get(
+        "Riverwatch V67 Saddle Leather"
+    )
+
+    leather_light = bpy.data.materials.get(
+        "Riverwatch V67 Saddle Highlight"
+    )
+
+    gold = bpy.data.materials.get(
+        "Riverwatch V67 Brass"
+    )
+
+    steel = bpy.data.materials.get(
+        "Riverwatch V67 Steel"
+    )
+
+    required = [
+        coat,
+        dark,
+        hoof_mat,
+        muzzle_mat,
+        eye_mat,
+        blue,
+        leather,
+        gold,
+        steel,
+    ]
+
+    if any(
+        material is None
+        for material in required
+    ):
+
+        raise RuntimeError(
+            "V72 required horse materials missing."
+        )
+
+    set_material(
+        coat,
+        (
+            0.165,
+            0.046,
+            0.014,
+            1.0
+        ),
+        0.64
+    )
+
+    set_material(
+        highlight,
+        (
+            0.255,
+            0.078,
+            0.024,
+            1.0
+        ),
+        0.61
+    )
+
+    set_material(
+        dark,
+        (
+            0.012,
+            0.007,
+            0.005,
+            1.0
+        ),
+        0.70
+    )
+
+    set_material(
+        hoof_mat,
+        (
+            0.055,
+            0.050,
+            0.045,
+            1.0
+        ),
+        0.74
+    )
+
+    set_material(
+        muzzle_mat,
+        (
+            0.090,
+            0.082,
+            0.074,
+            1.0
+        ),
+        0.70
+    )
+
+    set_material(
+        eye_mat,
+        (
+            0.002,
+            0.001,
+            0.001,
+            1.0
+        ),
+        0.20
+    )
+
+    set_material(
+        blue,
+        (
+            0.018,
+            0.080,
+            0.280,
+            1.0
+        ),
+        0.58
+    )
+
+    set_material(
+        leather,
+        (
+            0.060,
+            0.023,
+            0.011,
+            1.0
+        ),
+        0.63
+    )
+
+    set_material(
+        leather_light,
+        (
+            0.145,
+            0.063,
+            0.030,
+            1.0
+        ),
+        0.60
+    )
+
+    set_material(
+        gold,
+        (
+            0.48,
+            0.25,
+            0.035,
+            1.0
+        ),
+        0.34,
+        0.70
+    )
+
+    set_material(
+        steel,
+        (
+            0.20,
+            0.21,
+            0.22,
+            1.0
+        ),
+        0.35,
+        0.68
+    )
+
+    # ========================================================
+    # BODY LOFT
+    #
+    # Each station:
+    #
+    # y
+    # center z
+    # half width
+    # upper depth
+    # lower depth
+    #
+    # Explicit reference silhouette rather than intersecting
+    # spheres.
+    # ========================================================
+
+    def torso_loft(
+        name,
+        stations,
+        material
+    ):
+
+        sides = 8
+
+        vertices = []
+        faces = []
+
+        for station in stations:
+
+            y = station[0]
+            center_z = station[1]
+            half_width = station[2]
+            upper = station[3]
+            lower = station[4]
+
+            for side_index in range(
+                sides
+            ):
+
+                angle = (
+                    2.0
+                    * math.pi
+                    * side_index
+                    / sides
+                )
+
+                cosine = math.cos(
+                    angle
+                )
+
+                sine = math.sin(
+                    angle
+                )
+
+                x = (
+                    half_width
+                    * cosine
+                )
+
+                vertical_radius = (
+                    upper
+                    if sine >= 0.0
+                    else lower
+                )
+
+                z = (
+                    center_z
+                    + sine
+                    * vertical_radius
+                )
+
+                vertices.append(
+                    (
+                        x,
+                        y,
+                        z
+                    )
+                )
+
+        count = len(
+            stations
+        )
+
+        for station_index in range(
+            count - 1
+        ):
+
+            start = (
+                station_index
+                * sides
+            )
+
+            next_start = (
+                start
+                + sides
+            )
+
+            for side_index in range(
+                sides
+            ):
+
+                next_side = (
+                    side_index + 1
+                ) % sides
+
+                faces.append(
+                    (
+                        start + side_index,
+                        start + next_side,
+                        next_start + next_side,
+                        next_start + side_index
+                    )
+                )
+
+        faces.append(
+            tuple(
+                reversed(
+                    range(
+                        0,
+                        sides
+                    )
+                )
+            )
+        )
+
+        last = (
+            count - 1
+        ) * sides
+
+        faces.append(
+            tuple(
+                range(
+                    last,
+                    last + sides
+                )
+            )
+        )
+
+        return make_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            "anatomy",
+            False
+        )
+
+    body_stations = [
+
+        # chest front
+        (
+            -0.58,
+            1.46,
+            0.355,
+            0.37,
+            0.48
+        ),
+
+        # shoulder / heart girth
+        (
+            -0.36,
+            1.44,
+            0.455,
+            0.46,
+            0.54
+        ),
+
+        # front rib cage
+        (
+            -0.05,
+            1.42,
+            0.475,
+            0.43,
+            0.51
+        ),
+
+        # barrel
+        (
+            0.32,
+            1.40,
+            0.470,
+            0.39,
+            0.47
+        ),
+
+        # rear barrel
+        (
+            0.62,
+            1.41,
+            0.445,
+            0.37,
+            0.43
+        ),
+
+        # loin
+        (
+            0.82,
+            1.44,
+            0.430,
+            0.36,
+            0.40
+        ),
+
+        # croup peak
+        (
+            1.03,
+            1.47,
+            0.495,
+            0.43,
+            0.45
+        ),
+
+        # rounded rump
+        (
+            1.25,
+            1.43,
+            0.475,
+            0.38,
+            0.42
+        ),
+
+        # tail root taper
+        (
+            1.37,
+            1.41,
+            0.350,
+            0.30,
+            0.34
+        ),
+    ]
+
+    body = torso_loft(
+        "RiverwatchV72Body",
+        body_stations,
+        coat
+    )
+
+    # ========================================================
+    # PATH LOFT
+    #
+    # Used for neck, head and tail.
+    #
+    # The ring is perpendicular to the Y/Z path so the neck
+    # doesn't look like stacked balls.
+    # ========================================================
+
+    def path_loft(
+        name,
+        centers,
+        radii_x,
+        radii_normal,
+        material,
+        region,
+        sides=8,
+        smooth=False
+    ):
+
+        vertices = []
+        faces = []
+
+        x_axis = Vector(
+            (
+                1.0,
+                0.0,
+                0.0
+            )
+        )
+
+        for index, center_tuple in enumerate(
+            centers
+        ):
+
+            center = Vector(
+                center_tuple
+            )
+
+            if index == 0:
+
+                tangent = (
+                    Vector(
+                        centers[1]
+                    )
+                    - center
+                )
+
+            elif index == len(centers) - 1:
+
+                tangent = (
+                    center
+                    - Vector(
+                        centers[index - 1]
+                    )
+                )
+
+            else:
+
+                tangent = (
+                    Vector(
+                        centers[index + 1]
+                    )
+                    - Vector(
+                        centers[index - 1]
+                    )
+                )
+
+            tangent.normalize()
+
+            normal = Vector(
+                (
+                    0.0,
+                    -tangent.z,
+                    tangent.y
+                )
+            )
+
+            if normal.length < 0.0001:
+
+                normal = Vector(
+                    (
+                        0.0,
+                        0.0,
+                        1.0
+                    )
+                )
+
+            normal.normalize()
+
+            for side_index in range(
+                sides
+            ):
+
+                angle = (
+                    2.0
+                    * math.pi
+                    * side_index
+                    / sides
+                )
+
+                offset = (
+                    x_axis
+                    * math.cos(angle)
+                    * radii_x[index]
+                    +
+                    normal
+                    * math.sin(angle)
+                    * radii_normal[index]
+                )
+
+                point = (
+                    center
+                    + offset
+                )
+
+                vertices.append(
+                    tuple(
+                        point
+                    )
+                )
+
+        ring_count = len(
+            centers
+        )
+
+        for ring_index in range(
+            ring_count - 1
+        ):
+
+            start = (
+                ring_index
+                * sides
+            )
+
+            next_start = (
+                start
+                + sides
+            )
+
+            for side_index in range(
+                sides
+            ):
+
+                next_side = (
+                    side_index + 1
+                ) % sides
+
+                faces.append(
+                    (
+                        start + side_index,
+                        start + next_side,
+                        next_start + next_side,
+                        next_start + side_index
+                    )
+                )
+
+        faces.append(
+            tuple(
+                reversed(
+                    range(
+                        sides
+                    )
+                )
+            )
+        )
+
+        last = (
+            ring_count - 1
+        ) * sides
+
+        faces.append(
+            tuple(
+                range(
+                    last,
+                    last + sides
+                )
+            )
+        )
+
+        return make_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            region,
+            smooth
+        )
+
+    # ========================================================
+    # NECK
+    #
+    # Reference:
+    # strong base
+    # narrow poll
+    # visible arch
+    # ========================================================
+
+    neck_centers = [
+
+        (
+            0.0,
+            -0.43,
+            1.58
+        ),
+
+        (
+            0.0,
+            -0.51,
+            1.77
+        ),
+
+        (
+            0.0,
+            -0.62,
+            1.96
+        ),
+
+        (
+            0.0,
+            -0.74,
+            2.12
+        ),
+
+        (
+            0.0,
+            -0.84,
+            2.23
+        ),
+    ]
+
+    neck = path_loft(
+        "RiverwatchV72Neck",
+        neck_centers,
+        [
+            0.350,
+            0.335,
+            0.300,
+            0.255,
+            0.215
+        ],
+        [
+            0.310,
+            0.295,
+            0.265,
+            0.225,
+            0.190
+        ],
+        coat,
+        "neck",
+        8,
+        False
+    )
+
+    # ========================================================
+    # HEAD
+    #
+    # Deliberately angular and tapered.
+    # No giant forehead sphere.
+    # ========================================================
+
+    head_centers = [
+
+        (
+            0.0,
+            -0.84,
+            2.24
+        ),
+
+        (
+            0.0,
+            -0.97,
+            2.18
+        ),
+
+        (
+            0.0,
+            -1.12,
+            2.08
+        ),
+
+        (
+            0.0,
+            -1.28,
+            1.97
+        ),
+
+        (
+            0.0,
+            -1.40,
+            1.91
+        ),
+    ]
+
+    head = path_loft(
+        "RiverwatchV72Head",
+        head_centers,
+        [
+            0.220,
+            0.225,
+            0.195,
+            0.155,
+            0.125
+        ],
+        [
+            0.235,
+            0.250,
+            0.215,
+            0.170,
+            0.130
+        ],
+        coat,
+        "head",
+        8,
+        False
+    )
+
+    # ========================================================
+    # TAPERED LIMB SEGMENT
+    #
+    # Polygonal prism following actual bone direction.
+    # ========================================================
+
+    def tapered_segment(
+        name,
+        start,
+        end,
+        start_radius_x,
+        start_radius_n,
+        end_radius_x,
+        end_radius_n,
+        material,
+        region,
+        sides=6
+    ):
+
+        a = Vector(
+            start
+        )
+
+        b = Vector(
+            end
+        )
+
+        direction = (
+            b - a
+        )
+
+        direction.normalize()
+
+        x_axis = Vector(
+            (
+                1.0,
+                0.0,
+                0.0
+            )
+        )
+
+        normal = Vector(
+            (
+                0.0,
+                -direction.z,
+                direction.y
+            )
+        )
+
+        if normal.length < 0.0001:
+
+            normal = Vector(
+                (
+                    0.0,
+                    0.0,
+                    1.0
+                )
+            )
+
+        normal.normalize()
+
+        vertices = []
+
+        for center, rx, rn in (
+            (
+                a,
+                start_radius_x,
+                start_radius_n
+            ),
+            (
+                b,
+                end_radius_x,
+                end_radius_n
+            )
+        ):
+
+            for side_index in range(
+                sides
+            ):
+
+                angle = (
+                    2.0
+                    * math.pi
+                    * side_index
+                    / sides
+                )
+
+                point = (
+                    center
+                    + x_axis
+                    * math.cos(angle)
+                    * rx
+                    + normal
+                    * math.sin(angle)
+                    * rn
+                )
+
+                vertices.append(
+                    tuple(
+                        point
+                    )
+                )
+
+        faces = []
+
+        for side_index in range(
+            sides
+        ):
+
+            next_side = (
+                side_index + 1
+            ) % sides
+
+            faces.append(
+                (
+                    side_index,
+                    next_side,
+                    sides + next_side,
+                    sides + side_index
+                )
+            )
+
+        faces.append(
+            tuple(
+                reversed(
+                    range(
+                        sides
+                    )
+                )
+            )
+        )
+
+        faces.append(
+            tuple(
+                range(
+                    sides,
+                    sides * 2
+                )
+            )
+        )
+
+        return make_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            region,
+            False
+        )
+
+    # ========================================================
+    # HOOF WEDGE
+    # ========================================================
+
+    def hoof_wedge(
+        name,
+        x,
+        y,
+        width,
+        length,
+        height,
+        material
+    ):
+
+        bottom_z = 0.025
+        top_z = (
+            bottom_z
+            + height
+        )
+
+        half_width_bottom = (
+            width * 0.5
+        )
+
+        half_width_top = (
+            width * 0.41
+        )
+
+        front_bottom = (
+            y
+            - length * 0.60
+        )
+
+        back_bottom = (
+            y
+            + length * 0.43
+        )
+
+        front_top = (
+            y
+            - length * 0.39
+        )
+
+        back_top = (
+            y
+            + length * 0.32
+        )
+
+        vertices = [
+
+            (
+                x - half_width_bottom,
+                front_bottom,
+                bottom_z
+            ),
+
+            (
+                x + half_width_bottom,
+                front_bottom,
+                bottom_z
+            ),
+
+            (
+                x + half_width_bottom,
+                back_bottom,
+                bottom_z
+            ),
+
+            (
+                x - half_width_bottom,
+                back_bottom,
+                bottom_z
+            ),
+
+            (
+                x - half_width_top,
+                front_top,
+                top_z
+            ),
+
+            (
+                x + half_width_top,
+                front_top,
+                top_z
+            ),
+
+            (
+                x + half_width_top,
+                back_top,
+                top_z
+            ),
+
+            (
+                x - half_width_top,
+                back_top,
+                top_z
+            ),
+        ]
+
+        faces = [
+
+            (
+                0,
+                1,
+                2,
+                3
+            ),
+
+            (
+                4,
+                7,
+                6,
+                5
+            ),
+
+            (
+                0,
+                4,
+                5,
+                1
+            ),
+
+            (
+                1,
+                5,
+                6,
+                2
+            ),
+
+            (
+                2,
+                6,
+                7,
+                3
+            ),
+
+            (
+                3,
+                7,
+                4,
+                0
+            ),
+        ]
+
+        obj = make_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            "hoof",
+            False
+        )
+
+        bevel(
+            obj,
+            0.018,
+            2
+        )
+
+        return obj
+
+    # ========================================================
+    # FORELEGS
+    #
+    # shoulder -> knee -> cannon -> pastern -> hoof
+    # ========================================================
+
+    front_legs = [
+
+        {
+            "name": "Near",
+            "x": -0.325,
+            "shoulder_y": -0.28,
+            "knee_y": -0.23
+        },
+
+        {
+            "name": "Far",
+            "x": 0.325,
+            "shoulder_y": -0.12,
+            "knee_y": -0.10
+        },
+    ]
+
+    for leg in front_legs:
+
+        x = leg["x"]
+
+        shoulder_y = leg[
+            "shoulder_y"
+        ]
+
+        knee_y = leg[
+            "knee_y"
+        ]
+
+        tapered_segment(
+            "RiverwatchV72FrontUpper" + leg["name"],
+            (
+                x,
+                shoulder_y,
+                1.46
+            ),
+            (
+                x,
+                knee_y,
+                0.78
+            ),
+            0.165,
+            0.155,
+            0.125,
+            0.120,
+            coat,
+            "front_leg"
+        )
+
+        tapered_segment(
+            "RiverwatchV72FrontCannon" + leg["name"],
+            (
+                x,
+                knee_y,
+                0.79
+            ),
+            (
+                x,
+                knee_y - 0.015,
+                0.265
+            ),
+            0.110,
+            0.105,
+            0.078,
+            0.074,
+            dark,
+            "front_leg"
+        )
+
+        tapered_segment(
+            "RiverwatchV72FrontPastern" + leg["name"],
+            (
+                x,
+                knee_y - 0.015,
+                0.275
+            ),
+            (
+                x,
+                knee_y - 0.070,
+                0.145
+            ),
+            0.082,
+            0.080,
+            0.090,
+            0.085,
+            dark,
+            "front_leg"
+        )
+
+        hoof_wedge(
+            "RiverwatchV72FrontHoof" + leg["name"],
+            x,
+            knee_y - 0.090,
+            0.270,
+            0.305,
+            0.135,
+            hoof_mat
+        )
+
+    # ========================================================
+    # HIND LEGS
+    #
+    # hip -> stifle -> hock -> cannon -> pastern -> hoof
+    # ========================================================
+
+    hind_legs = [
+
+        {
+            "name": "Near",
+            "x": -0.350,
+            "hip_y": 1.02
+        },
+
+        {
+            "name": "Far",
+            "x": 0.350,
+            "hip_y": 1.12
+        },
+    ]
+
+    for leg in hind_legs:
+
+        x = leg["x"]
+
+        hip_y = leg[
+            "hip_y"
+        ]
+
+        stifle_y = (
+            hip_y
+            - 0.245
+        )
+
+        hock_y = (
+            hip_y
+            + 0.115
+        )
+
+        fetlock_y = (
+            hip_y
+            + 0.035
+        )
+
+        tapered_segment(
+            "RiverwatchV72Thigh" + leg["name"],
+            (
+                x,
+                hip_y,
+                1.48
+            ),
+            (
+                x,
+                stifle_y,
+                0.99
+            ),
+            0.215,
+            0.205,
+            0.155,
+            0.145,
+            coat,
+            "hind_leg"
+        )
+
+        tapered_segment(
+            "RiverwatchV72Gaskin" + leg["name"],
+            (
+                x,
+                stifle_y,
+                1.00
+            ),
+            (
+                x,
+                hock_y,
+                0.66
+            ),
+            0.150,
+            0.140,
+            0.115,
+            0.108,
+            coat,
+            "hind_leg"
+        )
+
+        tapered_segment(
+            "RiverwatchV72HindCannon" + leg["name"],
+            (
+                x,
+                hock_y,
+                0.67
+            ),
+            (
+                x,
+                fetlock_y,
+                0.265
+            ),
+            0.100,
+            0.095,
+            0.075,
+            0.072,
+            dark,
+            "hind_leg"
+        )
+
+        tapered_segment(
+            "RiverwatchV72HindPastern" + leg["name"],
+            (
+                x,
+                fetlock_y,
+                0.275
+            ),
+            (
+                x,
+                hip_y - 0.055,
+                0.145
+            ),
+            0.082,
+            0.078,
+            0.092,
+            0.086,
+            dark,
+            "hind_leg"
+        )
+
+        hoof_wedge(
+            "RiverwatchV72HindHoof" + leg["name"],
+            x,
+            hip_y - 0.080,
+            0.275,
+            0.320,
+            0.138,
+            hoof_mat
+        )
+
+    # ========================================================
+    # MUZZLE
+    #
+    # Small low-poly capsule, not oversized.
+    # ========================================================
+
+    bpy.ops.mesh.primitive_ico_sphere_add(
+        subdivisions=2,
+        radius=1.0,
+        location=(
+            0.0,
+            -1.485,
+            1.895
+        )
+    )
+
+    muzzle = bpy.context.object
+
+    muzzle.name = "RiverwatchV72Muzzle"
+
+    muzzle.scale = Vector(
+        (
+            0.175,
+            0.110,
+            0.105
+        )
+    )
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True
+    )
+
+    muzzle.data.materials.append(
+        muzzle_mat
+    )
+
+    bind(
+        muzzle,
+        "head"
+    )
+
+    shade_flat(
+        muzzle
+    )
+
+    # ========================================================
+    # EYES + NOSTRILS
+    # ========================================================
+
+    for side in (
+        -1.0,
+        1.0
+    ):
+
+        bpy.ops.mesh.primitive_ico_sphere_add(
+            subdivisions=2,
+            radius=1.0,
+            location=(
+                side * 0.222,
+                -0.965,
+                2.215
+            )
+        )
+
+        eye = bpy.context.object
+
+        eye.name = (
+            "RiverwatchV72EyeLeft"
+            if side < 0.0
+            else
+            "RiverwatchV72EyeRight"
+        )
+
+        eye.scale = Vector(
+            (
+                0.026,
+                0.017,
+                0.026
+            )
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        eye.data.materials.append(
+            eye_mat
+        )
+
+        bind(
+            eye,
+            "head"
+        )
+
+        bpy.ops.mesh.primitive_ico_sphere_add(
+            subdivisions=1,
+            radius=1.0,
+            location=(
+                side * 0.064,
+                -1.580,
+                1.905
+            )
+        )
+
+        nostril = bpy.context.object
+
+        nostril.name = (
+            "RiverwatchV72NostrilLeft"
+            if side < 0.0
+            else
+            "RiverwatchV72NostrilRight"
+        )
+
+        nostril.scale = Vector(
+            (
+                0.016,
+                0.009,
+                0.012
+            )
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        nostril.data.materials.append(
+            eye_mat
+        )
+
+        bind(
+            nostril,
+            "head"
+        )
+
+    # ========================================================
+    # EARS
+    # ========================================================
+
+    for side in (
+        -1.0,
+        1.0
+    ):
+
+        bpy.ops.mesh.primitive_cone_add(
+            vertices=6,
+            radius1=0.070,
+            radius2=0.008,
+            depth=0.230,
+            location=(
+                side * 0.105,
+                -0.825,
+                2.475
+            )
+        )
+
+        ear = bpy.context.object
+
+        ear.name = (
+            "RiverwatchV72EarLeft"
+            if side < 0.0
+            else
+            "RiverwatchV72EarRight"
+        )
+
+        ear.scale.x = 0.80
+        ear.scale.y = 0.60
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        ear.data.materials.append(
+            coat
+        )
+
+        bind(
+            ear,
+            "head"
+        )
+
+        shade_flat(
+            ear
+        )
+
+    # ========================================================
+    # PROFILE PLATE
+    #
+    # Used for the reference-style mane.
+    # ========================================================
+
+    def profile_plate(
+        name,
+        profile,
+        x_center,
+        half_width,
+        material,
+        region
+    ):
+
+        count = len(
+            profile
+        )
+
+        left = (
+            x_center
+            - half_width
+        )
+
+        right = (
+            x_center
+            + half_width
+        )
+
+        vertices = []
+
+        for y, z in profile:
+
+            vertices.append(
+                (
+                    left,
+                    y,
+                    z
+                )
+            )
+
+        for y, z in profile:
+
+            vertices.append(
+                (
+                    right,
+                    y,
+                    z
+                )
+            )
+
+        faces = [
+
+            tuple(
+                reversed(
+                    range(
+                        count
+                    )
+                )
+            ),
+
+            tuple(
+                range(
+                    count,
+                    count * 2
+                )
+            ),
+        ]
+
+        for index in range(
+            count
+        ):
+
+            nxt = (
+                index + 1
+            ) % count
+
+            faces.append(
+                (
+                    index,
+                    nxt,
+                    count + nxt,
+                    count + index
+                )
+            )
+
+        obj = make_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            region,
+            False
+        )
+
+        bevel(
+            obj,
+            0.006,
+            1
+        )
+
+        return obj
+
+    # ========================================================
+    # MANE
+    #
+    # Several overlapping locks on ONE side.
+    # Much closer to the reference.
+    # ========================================================
+
+    mane_profiles = [
+
+        [
+            (-0.82, 2.38),
+            (-0.69, 2.34),
+            (-0.56, 2.23),
+            (-0.46, 2.08),
+            (-0.40, 1.86),
+            (-0.48, 1.92),
+            (-0.57, 2.02),
+            (-0.69, 2.17),
+        ],
+
+        [
+            (-0.65, 2.32),
+            (-0.54, 2.25),
+            (-0.44, 2.10),
+            (-0.37, 1.82),
+            (-0.45, 1.90),
+            (-0.54, 2.03),
+        ],
+
+        [
+            (-0.50, 2.20),
+            (-0.40, 2.11),
+            (-0.31, 1.96),
+            (-0.27, 1.74),
+            (-0.35, 1.83),
+            (-0.43, 1.98),
+        ],
+    ]
+
+    mane_x = [
+        -0.255,
+        -0.310,
+        -0.355
+    ]
+
+    mane_widths = [
+        0.045,
+        0.038,
+        0.032
+    ]
+
+    for index in range(
+        len(mane_profiles)
+    ):
+
+        profile_plate(
+            "RiverwatchV72Mane%02d" % index,
+            mane_profiles[index],
+            mane_x[index],
+            mane_widths[index],
+            dark,
+            "mane"
+        )
+
+    # Dorsal crest strip.
+
+    profile_plate(
+        "RiverwatchV72ManeCrest",
+        [
+            (-0.84, 2.39),
+            (-0.70, 2.37),
+            (-0.56, 2.28),
+            (-0.43, 2.14),
+            (-0.30, 1.99),
+            (-0.28, 1.92),
+            (-0.43, 2.06),
+            (-0.58, 2.20),
+            (-0.72, 2.31),
+        ],
+        0.0,
+        0.035,
+        dark,
+        "mane"
+    )
+
+    # Small forelock.
+
+    profile_plate(
+        "RiverwatchV72Forelock",
+        [
+            (-0.83, 2.40),
+            (-0.92, 2.34),
+            (-0.99, 2.18),
+            (-0.91, 2.23),
+            (-0.83, 2.32),
+        ],
+        -0.030,
+        0.050,
+        dark,
+        "mane"
+    )
+
+    # ========================================================
+    # CONTINUOUS TAIL
+    #
+    # One swept mesh, no ball chain.
+    # ========================================================
+
+    tail = path_loft(
+        "RiverwatchV72Tail",
+        [
+            (
+                0.0,
+                1.31,
+                1.58
+            ),
+
+            (
+                0.0,
+                1.46,
+                1.43
+            ),
+
+            (
+                0.0,
+                1.55,
+                1.18
+            ),
+
+            (
+                0.0,
+                1.57,
+                0.91
+            ),
+
+            (
+                0.0,
+                1.54,
+                0.65
+            ),
+
+            (
+                0.0,
+                1.47,
+                0.39
+            ),
+        ],
+        [
+            0.135,
+            0.165,
+            0.185,
+            0.180,
+            0.150,
+            0.100
+        ],
+        [
+            0.115,
+            0.140,
+            0.160,
+            0.155,
+            0.130,
+            0.085
+        ],
+        dark,
+        "tail",
+        8,
+        False
+    )
+
+    # ========================================================
+    # BOX HELPER
+    # ========================================================
+
+    def box(
+        name,
+        location,
+        dimensions,
+        material,
+        region,
+        bevel_width=0.015
+    ):
+
+        bpy.ops.mesh.primitive_cube_add(
+            size=1.0,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+
+        obj.dimensions = dimensions
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        if bevel_width > 0.0:
+
+            bevel(
+                obj,
+                bevel_width,
+                2
+            )
+
+        return obj
+
+    # ========================================================
+    # BLUE BLANKET
+    # ========================================================
+
+    blanket_side_profile = [
+
+        (-0.04, 1.81),
+
+        (0.83, 1.81),
+
+        (0.93, 1.70),
+
+        (0.91, 1.32),
+
+        (0.05, 1.32),
+    ]
+
+    profile_plate(
+        "RiverwatchV72BlanketLeft",
+        blanket_side_profile,
+        -0.485,
+        0.025,
+        blue,
+        "blanket"
+    )
+
+    profile_plate(
+        "RiverwatchV72BlanketRight",
+        blanket_side_profile,
+        0.485,
+        0.025,
+        blue,
+        "blanket"
+    )
+
+    box(
+        "RiverwatchV72BlanketTop",
+        (
+            0.0,
+            0.42,
+            1.815
+        ),
+        (
+            0.79,
+            0.87,
+            0.055
+        ),
+        blue,
+        "blanket",
+        0.012
+    )
+
+    # Gold blanket trim.
+
+    def curve(
+        name,
+        points,
+        material,
+        thickness,
+        region
+    ):
+
+        data = bpy.data.curves.new(
+            name + "Curve",
+            "CURVE"
+        )
+
+        data.dimensions = "3D"
+        data.resolution_u = 1
+        data.bevel_depth = thickness
+        data.bevel_resolution = 1
+
+        spline = data.splines.new(
+            "POLY"
+        )
+
+        spline.points.add(
+            len(points) - 1
+        )
+
+        for index, point in enumerate(
+            points
+        ):
+
+            spline.points[
+                index
+            ].co = (
+                point[0],
+                point[1],
+                point[2],
+                1.0
+            )
+
+        obj = bpy.data.objects.new(
+            name,
+            data
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        return obj
+
+    for side in (
+        -1.0,
+        1.0
+    ):
+
+        x = (
+            side
+            * 0.515
+        )
+
+        curve(
+            "RiverwatchV72BlanketTrimTop" + str(side),
+            [
+                (
+                    x,
+                    -0.03,
+                    1.825
+                ),
+                (
+                    x,
+                    0.80,
+                    1.825
+                ),
+                (
+                    x,
+                    0.94,
+                    1.70
+                ),
+            ],
+            gold,
+            0.010,
+            "blanket"
+        )
+
+        curve(
+            "RiverwatchV72BlanketTrimBottom" + str(side),
+            [
+                (
+                    x,
+                    0.04,
+                    1.305
+                ),
+                (
+                    x,
+                    0.89,
+                    1.305
+                ),
+            ],
+            gold,
+            0.010,
+            "blanket"
+        )
+
+    # ========================================================
+    # SADDLE
+    # ========================================================
+
+    saddle_profile = [
+
+        (-0.02, 1.83),
+
+        (0.10, 1.97),
+
+        (0.25, 2.02),
+
+        (0.43, 1.98),
+
+        (0.61, 1.99),
+
+        (0.75, 2.07),
+
+        (0.84, 2.02),
+
+        (0.85, 1.84),
+
+        (0.73, 1.79),
+
+        (0.10, 1.79),
+    ]
+
+    profile_plate(
+        "RiverwatchV72SaddleTree",
+        saddle_profile,
+        0.0,
+        0.330,
+        leather,
+        "saddle"
+    )
+
+    box(
+        "RiverwatchV72SaddleSeat",
+        (
+            0.0,
+            0.43,
+            2.015
+        ),
+        (
+            0.52,
+            0.47,
+            0.105
+        ),
+        leather_light,
+        "saddle",
+        0.045
+    )
+
+    box(
+        "RiverwatchV72Pommel",
+        (
+            0.0,
+            0.14,
+            2.065
+        ),
+        (
+            0.48,
+            0.115,
+            0.170
+        ),
+        leather,
+        "saddle",
+        0.035
+    )
+
+    box(
+        "RiverwatchV72Cantle",
+        (
+            0.0,
+            0.73,
+            2.085
+        ),
+        (
+            0.50,
+            0.120,
+            0.195
+        ),
+        leather,
+        "saddle",
+        0.040
+    )
+
+    # ========================================================
+    # BAGS
+    # ========================================================
+
+    for side in (
+        -1.0,
+        1.0
+    ):
+
+        side_name = (
+            "Left"
+            if side < 0.0
+            else
+            "Right"
+        )
+
+        x = (
+            side
+            * 0.555
+        )
+
+        box(
+            "RiverwatchV72Bag" + side_name,
+            (
+                x,
+                0.70,
+                1.52
+            ),
+            (
+                0.155,
+                0.325,
+                0.290
+            ),
+            leather,
+            "bag",
+            0.026
+        )
+
+        box(
+            "RiverwatchV72BagFlap" + side_name,
+            (
+                x + side * 0.010,
+                0.66,
+                1.665
+            ),
+            (
+                0.170,
+                0.335,
+                0.075
+            ),
+            leather_light,
+            "bag",
+            0.018
+        )
+
+        box(
+            "RiverwatchV72BagBuckle" + side_name,
+            (
+                x + side * 0.085,
+                0.60,
+                1.52
+            ),
+            (
+                0.025,
+                0.060,
+                0.070
+            ),
+            gold,
+            "bag",
+            0.004
+        )
+
+    # ========================================================
+    # STIRRUPS
+    # ========================================================
+
+    def torus(
+        name,
+        location,
+        major_radius,
+        minor_radius,
+        material,
+        region
+    ):
+
+        bpy.ops.mesh.primitive_torus_add(
+            major_segments=16,
+            minor_segments=6,
+            major_radius=major_radius,
+            minor_radius=minor_radius,
+            location=location,
+            rotation=(
+                0.0,
+                math.radians(90.0),
+                0.0
+            )
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        return obj
+
+    for side in (
+        -1.0,
+        1.0
+    ):
+
+        x = (
+            side
+            * 0.465
+        )
+
+        curve(
+            "RiverwatchV72StirrupLeather" + str(side),
+            [
+                (
+                    x,
+                    0.40,
+                    1.94
+                ),
+                (
+                    x,
+                    0.41,
+                    1.34
+                ),
+                (
+                    x,
+                    0.41,
+                    1.03
+                ),
+            ],
+            leather,
+            0.012,
+            "saddle"
+        )
+
+        torus(
+            "RiverwatchV72Stirrup" + str(side),
+            (
+                x,
+                0.41,
+                0.955
+            ),
+            0.090,
+            0.013,
+            steel,
+            "saddle"
+        )
+
+    # ========================================================
+    # BRIDLE + REINS
+    # ========================================================
+
+    for side in (
+        -1.0,
+        1.0
+    ):
+
+        x = (
+            side
+            * 0.205
+        )
+
+        curve(
+            "RiverwatchV72BridleCheek" + str(side),
+            [
+                (
+                    x,
+                    -0.85,
+                    2.34
+                ),
+                (
+                    x,
+                    -0.98,
+                    2.21
+                ),
+                (
+                    x,
+                    -1.18,
+                    2.04
+                ),
+                (
+                    side * 0.165,
+                    -1.47,
+                    1.91
+                ),
+            ],
+            leather,
+            0.012,
+            "bridle"
+        )
+
+        torus(
+            "RiverwatchV72BitRing" + str(side),
+            (
+                side * 0.174,
+                -1.475,
+                1.91
+            ),
+            0.048,
+            0.008,
+            gold,
+            "bridle"
+        )
+
+        curve(
+            "RiverwatchV72Rein" + str(side),
+            [
+                (
+                    side * 0.174,
+                    -1.48,
+                    1.91
+                ),
+                (
+                    side * 0.230,
+                    -1.12,
+                    1.88
+                ),
+                (
+                    side * 0.310,
+                    -0.63,
+                    1.82
+                ),
+                (
+                    side * 0.390,
+                    -0.05,
+                    1.81
+                ),
+                (
+                    side * 0.405,
+                    0.33,
+                    1.88
+                ),
+            ],
+            leather,
+            0.010,
+            "bridle"
+        )
+
+    curve(
+        "RiverwatchV72BrowBand",
+        [
+            (
+                -0.205,
+                -0.87,
+                2.33
+            ),
+            (
+                0.0,
+                -0.90,
+                2.355
+            ),
+            (
+                0.205,
+                -0.87,
+                2.33
+            ),
+        ],
+        leather,
+        0.012,
+        "bridle"
+    )
+
+    curve(
+        "RiverwatchV72NoseBand",
+        [
+            (
+                -0.165,
+                -1.39,
+                1.97
+            ),
+            (
+                0.0,
+                -1.45,
+                1.95
+            ),
+            (
+                0.165,
+                -1.39,
+                1.97
+            ),
+        ],
+        leather,
+        0.012,
+        "bridle"
+    )
+
+    # ========================================================
+    # FINAL MODEL METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "clean_reference_boxmodel_v72"
+
+    arm[
+        "broken_knight_horse_v72_method"
+    ] = "explicit_lowpoly_lofts_no_voxel_blobs"
+
+    arm[
+        "broken_knight_horse_v72_reference"
+    ] = "horse_turntable_reference_sheet"
+
+    arm[
+        "broken_knight_horse_v72_body"
+    ] = "explicit_dorsal_belly_croup_silhouette"
+
+    arm[
+        "broken_knight_horse_v72_neck"
+    ] = "continuous_arch_loft"
+
+    arm[
+        "broken_knight_horse_v72_head"
+    ] = "continuous_tapered_wedge_loft"
+
+    arm[
+        "broken_knight_horse_v72_forelegs"
+    ] = "tapered_polygonal_segments"
+
+    arm[
+        "broken_knight_horse_v72_hindlegs"
+    ] = "true_stifle_hock_direction_change"
+
+    arm[
+        "broken_knight_horse_v72_tail"
+    ] = "single_continuous_swept_mesh"
+
+    arm[
+        "broken_knight_horse_v72_mane"
+    ] = "layered_reference_side_mane"
+
+    arm[
+        "broken_knight_horse_v72_goal"
+    ] = "clean_reference_silhouette_without_blob_artifacts"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_modeling"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V72",
+        "CLEAN_REFERENCE_REBUILD_COMPLETE"
     )
 
 def reset_pose(arm):
