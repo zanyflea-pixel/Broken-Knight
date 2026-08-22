@@ -105907,7 +105907,7 @@ def build_horse_model_v71_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v72_base(arm):
 
     import bpy
     import math
@@ -108567,6 +108567,1415 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V72",
         "CLEAN_REFERENCE_REBUILD_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V73
+    #
+    # REFERENCE SILHOUETTE + ORGANIC FORM PASS
+    #
+    # V72 finally established the correct modeling METHOD:
+    #
+    # explicit loft body
+    # continuous neck
+    # tapered head
+    # tapered limbs
+    # continuous tail
+    #
+    # V73 keeps that topology and makes a LARGE reference
+    # proportion correction.
+    # ========================================================
+
+    build_horse_model_v72_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V73",
+        "V72_BASE_READY"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def deselect():
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+    def select_only(obj):
+
+        deselect()
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+    def shade_smooth(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def shade_flat(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = False
+
+    def world_mesh_transform(
+        obj,
+        function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for vertex in obj.data.vertices:
+
+            world = (
+                matrix
+                @ vertex.co
+            )
+
+            world = function(
+                world
+            )
+
+            vertex.co = (
+                inverse
+                @ world
+            )
+
+        obj.data.update()
+
+    def world_curve_transform(
+        obj,
+        function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "CURVE"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for spline in obj.data.splines:
+
+            if spline.type == "BEZIER":
+
+                for point in spline.bezier_points:
+
+                    world = (
+                        matrix
+                        @ point.co
+                    )
+
+                    world = function(
+                        world
+                    )
+
+                    point.co = (
+                        inverse
+                        @ world
+                    )
+
+            else:
+
+                for point in spline.points:
+
+                    world = (
+                        matrix
+                        @ Vector(
+                            (
+                                point.co.x,
+                                point.co.y,
+                                point.co.z
+                            )
+                        )
+                    )
+
+                    world = function(
+                        world
+                    )
+
+                    local = (
+                        inverse
+                        @ world
+                    )
+
+                    point.co = (
+                        local.x,
+                        local.y,
+                        local.z,
+                        1.0
+                    )
+
+    def world_transform(
+        obj,
+        function
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type == "MESH":
+
+            world_mesh_transform(
+                obj,
+                function
+            )
+
+        elif obj.type == "CURVE":
+
+            world_curve_transform(
+                obj,
+                function
+            )
+
+    def world_bounds_center(obj):
+
+        matrix = obj.matrix_world
+
+        points = [
+            matrix @ Vector(corner)
+            for corner in obj.bound_box
+        ]
+
+        center = Vector(
+            (
+                0.0,
+                0.0,
+                0.0
+            )
+        )
+
+        for point in points:
+            center += point
+
+        center /= len(
+            points
+        )
+
+        return center
+
+    def scale_about(
+        obj,
+        sx,
+        sy,
+        sz
+    ):
+
+        if obj is None:
+            return
+
+        center = world_bounds_center(
+            obj
+        )
+
+        def transform(point):
+
+            delta = (
+                point
+                - center
+            )
+
+            return Vector(
+                (
+                    center.x + delta.x * sx,
+                    center.y + delta.y * sy,
+                    center.z + delta.z * sz
+                )
+            )
+
+        world_transform(
+            obj,
+            transform
+        )
+
+    def translate(
+        obj,
+        amount
+    ):
+
+        offset = Vector(
+            amount
+        )
+
+        def transform(point):
+
+            return (
+                point
+                + offset
+            )
+
+        world_transform(
+            obj,
+            transform
+        )
+
+    def catmull_round(
+        obj,
+        smooth_after=True
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V73 Organic Surface",
+            "SUBSURF"
+        )
+
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = 1
+        modifier.render_levels = 1
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+        if smooth_after:
+
+            shade_smooth(
+                obj
+            )
+
+    def bevel(
+        obj,
+        width=0.014,
+        segments=2
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V73 Soft Edge",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+        modifier.limit_method = "ANGLE"
+        modifier.angle_limit = math.radians(
+            32.0
+        )
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def clamp01(value):
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                value
+            )
+        )
+
+    # ========================================================
+    # MATERIAL TUNING
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V67 Warm Bay"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V67 Dark Points"
+    )
+
+    blue = bpy.data.materials.get(
+        "Riverwatch V67 Royal Blue"
+    )
+
+    leather = bpy.data.materials.get(
+        "Riverwatch V67 Saddle Leather"
+    )
+
+    if coat is not None:
+
+        coat.use_nodes = True
+
+        bsdf = coat.node_tree.nodes.get(
+            "Principled BSDF"
+        )
+
+        if bsdf is not None:
+
+            if bsdf.inputs.get(
+                "Base Color"
+            ):
+
+                bsdf.inputs[
+                    "Base Color"
+                ].default_value = (
+                    0.145,
+                    0.037,
+                    0.012,
+                    1.0
+                )
+
+            if bsdf.inputs.get(
+                "Roughness"
+            ):
+
+                bsdf.inputs[
+                    "Roughness"
+                ].default_value = 0.58
+
+    if blue is not None:
+
+        blue.use_nodes = True
+
+        bsdf = blue.node_tree.nodes.get(
+            "Principled BSDF"
+        )
+
+        if (
+            bsdf is not None
+            and
+            bsdf.inputs.get(
+                "Base Color"
+            )
+        ):
+
+            bsdf.inputs[
+                "Base Color"
+            ].default_value = (
+                0.012,
+                0.055,
+                0.235,
+                1.0
+            )
+
+    # ========================================================
+    # BODY
+    #
+    # V72 BODY:
+    #
+    # too small
+    # too shallow
+    # too straight-backed
+    # croup too angular
+    #
+    # V73:
+    #
+    # broader rib cage
+    # deeper heart girth
+    # fuller croup
+    # slightly raised body so legs remain visible
+    # ========================================================
+
+    body = bpy.data.objects.get(
+        "RiverwatchV72Body"
+    )
+
+    if body is None:
+
+        raise RuntimeError(
+            "V72 body missing."
+        )
+
+    def body_transform(point):
+
+        p = point.copy()
+
+        y = p.y
+        original_z = p.z
+
+        # ---------------------------------------------
+        # WIDTH
+        # ---------------------------------------------
+
+        width_scale = 1.08
+
+        # Strong chest.
+
+        if y < -0.15:
+
+            width_scale = 1.13
+
+        # Rib cage.
+
+        elif y < 0.68:
+
+            width_scale = 1.10
+
+        # Loin.
+
+        elif y < 0.86:
+
+            width_scale = 1.08
+
+        # Powerful croup.
+
+        else:
+
+            width_scale = 1.15
+
+        p.x *= width_scale
+
+        # ---------------------------------------------
+        # DEPTH / BACK
+        # ---------------------------------------------
+
+        center_z = 1.42
+
+        p.z = (
+            center_z
+            + (
+                p.z
+                - center_z
+            )
+            * 1.075
+        )
+
+        # Raise whole torso enough to preserve leg length.
+
+        p.z += 0.045
+
+        # ---------------------------------------------
+        # CHEST DROP
+        # ---------------------------------------------
+
+        if (
+            y < -0.18
+            and
+            original_z < 1.30
+        ):
+
+            p.z -= 0.035
+
+        # ---------------------------------------------
+        # WITHERS
+        # ---------------------------------------------
+
+        if (
+            y > -0.42
+            and
+            y < -0.12
+            and
+            original_z > 1.62
+        ):
+
+            p.z += 0.045
+
+        # ---------------------------------------------
+        # BACK DIP
+        # ---------------------------------------------
+
+        if (
+            y > 0.12
+            and
+            y < 0.60
+            and
+            original_z > 1.60
+        ):
+
+            p.z -= 0.028
+
+        # ---------------------------------------------
+        # CROUP ROUNDING
+        # ---------------------------------------------
+
+        if y > 0.78:
+
+            t = clamp01(
+                (
+                    y - 0.78
+                )
+                / 0.62
+            )
+
+            if original_z > 1.38:
+
+                p.z += (
+                    0.065
+                    * math.sin(
+                        t
+                        * math.pi
+                    )
+                )
+
+            # Make rear silhouette slightly longer and
+            # rounder instead of chopping off vertically.
+
+            p.y += (
+                0.045
+                * t
+            )
+
+        return p
+
+    world_mesh_transform(
+        body,
+        body_transform
+    )
+
+    catmull_round(
+        body,
+        True
+    )
+
+    # ========================================================
+    # NECK
+    #
+    # V72 neck is too long/narrow.
+    #
+    # Pull poll toward shoulders while thickening whole neck.
+    # ========================================================
+
+    neck = bpy.data.objects.get(
+        "RiverwatchV72Neck"
+    )
+
+    if neck is None:
+
+        raise RuntimeError(
+            "V72 neck missing."
+        )
+
+    neck_base_y = -0.43
+    neck_base_z = 1.58
+
+    def neck_transform(point):
+
+        p = point.copy()
+
+        original_y = p.y
+        original_z = p.z
+
+        # Shorten reach toward head by ~17%.
+
+        p.y = (
+            neck_base_y
+            + (
+                p.y
+                - neck_base_y
+            )
+            * 0.83
+        )
+
+        # Thicker neck.
+
+        p.x *= 1.17
+
+        # Slightly more vertical depth.
+
+        p.z = (
+            neck_base_z
+            + (
+                p.z
+                - neck_base_z
+            )
+            * 1.035
+        )
+
+        # Follow raised torso.
+
+        p.z += 0.045
+
+        # More crest through middle/upper neck.
+
+        if (
+            original_y < -0.53
+            and
+            original_y > -0.79
+            and
+            original_z > 1.90
+        ):
+
+            p.z += 0.040
+
+        # Throat base heavier.
+
+        if (
+            original_y > -0.62
+            and
+            original_z < 1.82
+        ):
+
+            p.x *= 1.05
+
+        return p
+
+    world_mesh_transform(
+        neck,
+        neck_transform
+    )
+
+    catmull_round(
+        neck,
+        True
+    )
+
+    # ========================================================
+    # HEAD
+    #
+    # Biggest V72 problem:
+    #
+    # long donkey-like face.
+    #
+    # Compress face length heavily.
+    # Broaden cheek slightly.
+    # Lower nose.
+    # ========================================================
+
+    head = bpy.data.objects.get(
+        "RiverwatchV72Head"
+    )
+
+    if head is None:
+
+        raise RuntimeError(
+            "V72 head missing."
+        )
+
+    head_pivot_y = -0.79
+
+    def head_transform(point):
+
+        p = point.copy()
+
+        original_y = p.y
+
+        # Shorten entire face.
+
+        p.y = (
+            head_pivot_y
+            + (
+                p.y
+                - head_pivot_y
+            )
+            * 0.76
+        )
+
+        # Amount toward nose.
+
+        face_t = clamp01(
+            (
+                -original_y
+                - 0.82
+            )
+            / 0.62
+        )
+
+        # Slightly wider cheek,
+        # tapering toward muzzle.
+
+        cheek_scale = (
+            1.09
+            - 0.13
+            * face_t
+        )
+
+        p.x *= cheek_scale
+
+        # Bring head with shortened neck.
+
+        p.y += 0.050
+
+        # Downward nose angle.
+
+        p.z += 0.045
+        p.z -= (
+            0.105
+            * face_t
+        )
+
+        return p
+
+    world_mesh_transform(
+        head,
+        head_transform
+    )
+
+    catmull_round(
+        head,
+        True
+    )
+
+    # ========================================================
+    # HEAD ATTACHMENTS
+    # ========================================================
+
+    head_prefixes = (
+
+        "RiverwatchV72Muzzle",
+        "RiverwatchV72Eye",
+        "RiverwatchV72Nostril",
+        "RiverwatchV72Ear",
+        "RiverwatchV72Forelock",
+        "RiverwatchV72BridleCheek",
+        "RiverwatchV72BitRing",
+        "RiverwatchV72BrowBand",
+        "RiverwatchV72NoseBand",
+    )
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            head_prefixes
+        ):
+
+            world_transform(
+                obj,
+                head_transform
+            )
+
+    # ========================================================
+    # MUZZLE
+    #
+    # Reduce the grey nose capsule slightly.
+    # ========================================================
+
+    muzzle = bpy.data.objects.get(
+        "RiverwatchV72Muzzle"
+    )
+
+    if muzzle is not None:
+
+        scale_about(
+            muzzle,
+            0.94,
+            0.80,
+            0.91
+        )
+
+        shade_smooth(
+            muzzle
+        )
+
+    # ========================================================
+    # EARS
+    # ========================================================
+
+    for name in (
+        "RiverwatchV72EarLeft",
+        "RiverwatchV72EarRight"
+    ):
+
+        ear = bpy.data.objects.get(
+            name
+        )
+
+        if ear is not None:
+
+            scale_about(
+                ear,
+                1.08,
+                1.03,
+                0.86
+            )
+
+    # ========================================================
+    # REINS
+    #
+    # Blend head correction into untouched saddle end.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV72Rein"
+        ):
+
+            def rein_transform(point):
+
+                p = point.copy()
+
+                # Full head correction near bit.
+
+                if p.y < -0.82:
+
+                    return head_transform(
+                        p
+                    )
+
+                # Partial blend behind jaw.
+
+                if p.y < -0.40:
+
+                    corrected = head_transform(
+                        p
+                    )
+
+                    t = clamp01(
+                        (
+                            -p.y
+                            - 0.40
+                        )
+                        / 0.42
+                    )
+
+                    return (
+                        p * (
+                            1.0 - t
+                        )
+                        +
+                        corrected * t
+                    )
+
+                # Tack end follows raised body.
+
+                p.z += 0.045
+
+                return p
+
+            world_curve_transform(
+                obj,
+                rein_transform
+            )
+
+    # ========================================================
+    # MANE
+    #
+    # Shortened neck means mane must follow it.
+    # Increase side volume.
+    # ========================================================
+
+    mane_names = (
+
+        "RiverwatchV72Mane00",
+        "RiverwatchV72Mane01",
+        "RiverwatchV72Mane02",
+        "RiverwatchV72ManeCrest",
+    )
+
+    for name in mane_names:
+
+        mane = bpy.data.objects.get(
+            name
+        )
+
+        if mane is not None:
+
+            world_transform(
+                mane,
+                neck_transform
+            )
+
+            scale_about(
+                mane,
+                1.10,
+                1.00,
+                1.04
+            )
+
+    # ========================================================
+    # FORELEGS
+    #
+    # Preserve V72 length.
+    # Increase substance.
+    # ========================================================
+
+    front_upper = (
+
+        "RiverwatchV72FrontUpperNear",
+        "RiverwatchV72FrontUpperFar",
+    )
+
+    front_cannon = (
+
+        "RiverwatchV72FrontCannonNear",
+        "RiverwatchV72FrontCannonFar",
+    )
+
+    front_pastern = (
+
+        "RiverwatchV72FrontPasternNear",
+        "RiverwatchV72FrontPasternFar",
+    )
+
+    front_hooves = (
+
+        "RiverwatchV72FrontHoofNear",
+        "RiverwatchV72FrontHoofFar",
+    )
+
+    for name in front_upper:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.19,
+                1.16,
+                1.00
+            )
+
+            translate(
+                obj,
+                (
+                    0.0,
+                    0.0,
+                    0.025
+                )
+            )
+
+    for name in front_cannon:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.14,
+                1.12,
+                1.00
+            )
+
+    for name in front_pastern:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.11,
+                1.09,
+                1.00
+            )
+
+    for name in front_hooves:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.08,
+                1.07,
+                1.03
+            )
+
+    # ========================================================
+    # HIND LEGS
+    #
+    # V72 angles are much better than old versions.
+    # Give them enough muscle to support the body.
+    # ========================================================
+
+    hind_thigh = (
+
+        "RiverwatchV72ThighNear",
+        "RiverwatchV72ThighFar",
+    )
+
+    hind_gaskin = (
+
+        "RiverwatchV72GaskinNear",
+        "RiverwatchV72GaskinFar",
+    )
+
+    hind_cannon = (
+
+        "RiverwatchV72HindCannonNear",
+        "RiverwatchV72HindCannonFar",
+    )
+
+    hind_pastern = (
+
+        "RiverwatchV72HindPasternNear",
+        "RiverwatchV72HindPasternFar",
+    )
+
+    hind_hooves = (
+
+        "RiverwatchV72HindHoofNear",
+        "RiverwatchV72HindHoofFar",
+    )
+
+    for name in hind_thigh:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.20,
+                1.18,
+                1.025
+            )
+
+            translate(
+                obj,
+                (
+                    0.0,
+                    0.0,
+                    0.025
+                )
+            )
+
+    for name in hind_gaskin:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.16,
+                1.14,
+                1.00
+            )
+
+    for name in hind_cannon:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.12,
+                1.11,
+                1.00
+            )
+
+    for name in hind_pastern:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.10,
+                1.08,
+                1.00
+            )
+
+    for name in hind_hooves:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                1.08,
+                1.08,
+                1.03
+            )
+
+    # ========================================================
+    # TAIL
+    #
+    # Fuller without turning into a ball chain.
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV72Tail"
+    )
+
+    if tail is not None:
+
+        center = world_bounds_center(
+            tail
+        )
+
+        def tail_transform(point):
+
+            p = point.copy()
+
+            delta_x = (
+                p.x
+                - center.x
+            )
+
+            p.x = (
+                center.x
+                + delta_x
+                * 1.28
+            )
+
+            # Croup/root follows body upward.
+
+            if p.z > 1.10:
+
+                p.z += 0.055
+
+            # Slight rear sweep.
+
+            if p.z < 1.10:
+
+                p.y += 0.025
+
+            return p
+
+        world_mesh_transform(
+            tail,
+            tail_transform
+        )
+
+        catmull_round(
+            tail,
+            True
+        )
+
+    # ========================================================
+    # BODY GEAR
+    #
+    # Follow slightly raised/full body.
+    # ========================================================
+
+    gear_prefixes = (
+
+        "RiverwatchV72Blanket",
+        "RiverwatchV72Saddle",
+        "RiverwatchV72Pommel",
+        "RiverwatchV72Cantle",
+        "RiverwatchV72Bag",
+        "RiverwatchV72StirrupLeather",
+        "RiverwatchV72Stirrup",
+    )
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            gear_prefixes
+        ):
+
+            translate(
+                obj,
+                (
+                    0.0,
+                    0.0,
+                    0.055
+                )
+            )
+
+    # ========================================================
+    # SADDLE SHAPE
+    # ========================================================
+
+    saddle_seat = bpy.data.objects.get(
+        "RiverwatchV72SaddleSeat"
+    )
+
+    if saddle_seat is not None:
+
+        scale_about(
+            saddle_seat,
+            1.06,
+            1.10,
+            0.94
+        )
+
+        bevel(
+            saddle_seat,
+            0.018,
+            2
+        )
+
+    pommel = bpy.data.objects.get(
+        "RiverwatchV72Pommel"
+    )
+
+    if pommel is not None:
+
+        scale_about(
+            pommel,
+            1.04,
+            0.94,
+            1.03
+        )
+
+    cantle = bpy.data.objects.get(
+        "RiverwatchV72Cantle"
+    )
+
+    if cantle is not None:
+
+        scale_about(
+            cantle,
+            1.05,
+            0.95,
+            1.04
+        )
+
+    # ========================================================
+    # BAGS
+    # ========================================================
+
+    for name in (
+        "RiverwatchV72BagLeft",
+        "RiverwatchV72BagRight"
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                0.94,
+                0.94,
+                0.95
+            )
+
+    # ========================================================
+    # RENAME V72 -> V73
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV72"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV72",
+                "RiverwatchV73",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "reference_silhouette_organic_v73"
+
+    arm[
+        "broken_knight_horse_v73_base"
+    ] = "clean_reference_boxmodel_v72"
+
+    arm[
+        "broken_knight_horse_v73_body"
+    ] = "broader_deeper_raised_compact_courser"
+
+    arm[
+        "broken_knight_horse_v73_chest"
+    ] = "stronger_heart_girth"
+
+    arm[
+        "broken_knight_horse_v73_croup"
+    ] = "wider_rounder_longer"
+
+    arm[
+        "broken_knight_horse_v73_neck"
+    ] = "shorter_thicker_arched"
+
+    arm[
+        "broken_knight_horse_v73_head"
+    ] = "major_face_length_reduction_downward_angle"
+
+    arm[
+        "broken_knight_horse_v73_forelegs"
+    ] = "same_length_more_substance"
+
+    arm[
+        "broken_knight_horse_v73_hindlegs"
+    ] = "preserved_angles_more_substance"
+
+    arm[
+        "broken_knight_horse_v73_surface"
+    ] = "single_catmull_pass_body_neck_head_tail"
+
+    arm[
+        "broken_knight_horse_v73_goal"
+    ] = "large_reference_silhouette_improvement"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_modeling"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V73",
+        "REFERENCE_SILHOUETTE_ORGANIC_PASS_COMPLETE"
     )
 
 def reset_pose(arm):
