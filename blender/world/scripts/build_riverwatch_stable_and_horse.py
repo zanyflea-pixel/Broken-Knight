@@ -108571,7 +108571,7 @@ def build_horse_model_v72_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v73_base(arm):
 
     import bpy
     import math
@@ -109976,6 +109976,1705 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V73",
         "REFERENCE_SILHOUETTE_ORGANIC_PASS_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V74
+    #
+    # HEAD + NECK + SHOULDER REBUILD PASS
+    #
+    # V73 body/croup proportions are retained.
+    #
+    # Main problems addressed:
+    #
+    # vertical pipe neck
+    # oversized long head
+    # bulbous muzzle
+    # weak shoulder definition
+    # forelegs appearing glued below torso
+    #
+    # ========================================================
+
+    build_horse_model_v73_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V74",
+        "V73_BASE_READY"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def deselect():
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+    def select_only(obj):
+
+        deselect()
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+    def bind(
+        obj,
+        region
+    ):
+
+        obj.parent = arm
+
+        obj[
+            "broken_knight_region"
+        ] = region
+
+    def shade_smooth(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def shade_flat(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = False
+
+    def clamp01(value):
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                value
+            )
+        )
+
+    def smoothstep(value):
+
+        value = clamp01(
+            value
+        )
+
+        return (
+            value
+            * value
+            * (
+                3.0
+                - 2.0
+                * value
+            )
+        )
+
+    def world_mesh_transform(
+        obj,
+        function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for vertex in obj.data.vertices:
+
+            world = (
+                matrix
+                @ vertex.co
+            )
+
+            transformed = function(
+                world
+            )
+
+            vertex.co = (
+                inverse
+                @ transformed
+            )
+
+        obj.data.update()
+
+    def world_curve_transform(
+        obj,
+        function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "CURVE"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for spline in obj.data.splines:
+
+            if spline.type == "BEZIER":
+
+                for point in spline.bezier_points:
+
+                    world = (
+                        matrix
+                        @ point.co
+                    )
+
+                    transformed = function(
+                        world
+                    )
+
+                    point.co = (
+                        inverse
+                        @ transformed
+                    )
+
+            else:
+
+                for point in spline.points:
+
+                    world = (
+                        matrix
+                        @ Vector(
+                            (
+                                point.co.x,
+                                point.co.y,
+                                point.co.z
+                            )
+                        )
+                    )
+
+                    transformed = function(
+                        world
+                    )
+
+                    local = (
+                        inverse
+                        @ transformed
+                    )
+
+                    point.co = (
+                        local.x,
+                        local.y,
+                        local.z,
+                        1.0
+                    )
+
+    def world_transform(
+        obj,
+        function
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type == "MESH":
+
+            world_mesh_transform(
+                obj,
+                function
+            )
+
+        elif obj.type == "CURVE":
+
+            world_curve_transform(
+                obj,
+                function
+            )
+
+    def world_bounds_center(obj):
+
+        matrix = obj.matrix_world
+
+        points = [
+            matrix @ Vector(corner)
+            for corner in obj.bound_box
+        ]
+
+        center = Vector(
+            (
+                0.0,
+                0.0,
+                0.0
+            )
+        )
+
+        for point in points:
+            center += point
+
+        center /= len(
+            points
+        )
+
+        return center
+
+    def scale_about(
+        obj,
+        sx,
+        sy,
+        sz
+    ):
+
+        if obj is None:
+            return
+
+        center = world_bounds_center(
+            obj
+        )
+
+        def transform(point):
+
+            delta = (
+                point
+                - center
+            )
+
+            return Vector(
+                (
+                    center.x + delta.x * sx,
+                    center.y + delta.y * sy,
+                    center.z + delta.z * sz
+                )
+            )
+
+        world_transform(
+            obj,
+            transform
+        )
+
+    def translate(
+        obj,
+        amount
+    ):
+
+        offset = Vector(
+            amount
+        )
+
+        def transform(point):
+
+            return (
+                point
+                + offset
+            )
+
+        world_transform(
+            obj,
+            transform
+        )
+
+    def bevel(
+        obj,
+        width=0.015,
+        segments=2
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V74 Soft Edge",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+        modifier.limit_method = "ANGLE"
+        modifier.angle_limit = math.radians(
+            31.0
+        )
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def make_mesh(
+        name,
+        vertices,
+        faces,
+        material,
+        region,
+        smooth=True
+    ):
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            vertices,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        if smooth:
+            shade_smooth(
+                obj
+            )
+        else:
+            shade_flat(
+                obj
+            )
+
+        return obj
+
+    def profile_wedge(
+        name,
+        profile,
+        x_center,
+        inner_half_width,
+        outer_half_width,
+        material,
+        region
+    ):
+
+        count = len(
+            profile
+        )
+
+        sign = (
+            -1.0
+            if x_center < 0.0
+            else 1.0
+        )
+
+        inside_x = (
+            x_center
+            - sign
+            * inner_half_width
+        )
+
+        outside_x = (
+            x_center
+            + sign
+            * outer_half_width
+        )
+
+        vertices = []
+
+        for y, z in profile:
+
+            vertices.append(
+                (
+                    inside_x,
+                    y,
+                    z
+                )
+            )
+
+        for y, z in profile:
+
+            vertices.append(
+                (
+                    outside_x,
+                    y,
+                    z
+                )
+            )
+
+        faces = []
+
+        faces.append(
+            tuple(
+                reversed(
+                    range(
+                        count
+                    )
+                )
+            )
+        )
+
+        faces.append(
+            tuple(
+                range(
+                    count,
+                    count * 2
+                )
+            )
+        )
+
+        for index in range(
+            count
+        ):
+
+            nxt = (
+                index + 1
+            ) % count
+
+            faces.append(
+                (
+                    index,
+                    nxt,
+                    count + nxt,
+                    count + index
+                )
+            )
+
+        obj = make_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            region,
+            True
+        )
+
+        bevel(
+            obj,
+            0.022,
+            3
+        )
+
+        return obj
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V67 Warm Bay"
+    )
+
+    highlight = bpy.data.materials.get(
+        "Riverwatch V67 Bay Highlight"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V67 Dark Points"
+    )
+
+    muzzle_mat = bpy.data.materials.get(
+        "Riverwatch V67 Muzzle"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "V74 coat material missing."
+        )
+
+    # ========================================================
+    # BODY
+    #
+    # Do NOT globally inflate the horse again.
+    #
+    # Only rebuild the FRONT anatomy:
+    #
+    # withers
+    # shoulder
+    # breast
+    # neck root
+    # ========================================================
+
+    body = bpy.data.objects.get(
+        "RiverwatchV73Body"
+    )
+
+    if body is None:
+
+        raise RuntimeError(
+            "V73 body missing."
+        )
+
+    def body_front_transform(point):
+
+        p = point.copy()
+
+        original_y = p.y
+        original_z = p.z
+
+        # ----------------------------------------------------
+        # SHOULDER / CHEST WIDTH
+        # ----------------------------------------------------
+
+        chest_amount = smoothstep(
+            (
+                0.15
+                - original_y
+            )
+            / 0.72
+        )
+
+        if original_y < 0.15:
+
+            p.x *= (
+                1.0
+                + 0.045
+                * chest_amount
+            )
+
+        # ----------------------------------------------------
+        # FORWARD BREAST PROJECTION
+        #
+        # Only lower/front vertices.
+        # ----------------------------------------------------
+
+        if (
+            original_y < -0.24
+            and
+            original_z < 1.48
+        ):
+
+            front_t = smoothstep(
+                (
+                    -original_y
+                    - 0.24
+                )
+                / 0.40
+            )
+
+            lower_t = smoothstep(
+                (
+                    1.48
+                    - original_z
+                )
+                / 0.48
+            )
+
+            p.y -= (
+                0.075
+                * front_t
+                * lower_t
+            )
+
+            p.z -= (
+                0.028
+                * front_t
+                * lower_t
+            )
+
+        # ----------------------------------------------------
+        # WITHERS PEAK
+        # ----------------------------------------------------
+
+        if (
+            original_y > -0.48
+            and
+            original_y < -0.12
+            and
+            original_z > 1.70
+        ):
+
+            center_t = (
+                1.0
+                - min(
+                    1.0,
+                    abs(
+                        original_y
+                        + 0.30
+                    )
+                    / 0.20
+                )
+            )
+
+            p.z += (
+                0.055
+                * center_t
+            )
+
+        # ----------------------------------------------------
+        # BELLY JUST BEHIND CHEST
+        #
+        # Slight lift so front leg root is readable.
+        # ----------------------------------------------------
+
+        if (
+            original_y > -0.06
+            and
+            original_y < 0.22
+            and
+            original_z < 1.18
+        ):
+
+            p.z += 0.025
+
+        return p
+
+    world_mesh_transform(
+        body,
+        body_front_transform
+    )
+
+    shade_smooth(
+        body
+    )
+
+    # ========================================================
+    # NECK
+    #
+    # Major structural correction.
+    #
+    # V73 is too upright.
+    #
+    # Push upper neck forward while preserving shoulder root.
+    # Add dorsal arch.
+    # Make throat narrower than crest.
+    # ========================================================
+
+    neck = bpy.data.objects.get(
+        "RiverwatchV73Neck"
+    )
+
+    if neck is None:
+
+        raise RuntimeError(
+            "V73 neck missing."
+        )
+
+    def neck_transform(point):
+
+        p = point.copy()
+
+        original = point.copy()
+
+        # Approximate position from base to poll using height.
+
+        t = clamp01(
+            (
+                original.z
+                - 1.50
+            )
+            / 0.78
+        )
+
+        t_smooth = smoothstep(
+            t
+        )
+
+        # ----------------------------------------------------
+        # FORWARD LEAN
+        #
+        # Upper neck moves much farther toward head.
+        # Base remains planted in shoulder.
+        # ----------------------------------------------------
+
+        p.y -= (
+            0.135
+            * (
+                t_smooth ** 1.25
+            )
+        )
+
+        # ----------------------------------------------------
+        # DORSAL CREST
+        #
+        # Top vertices receive a stronger arch.
+        # ----------------------------------------------------
+
+        estimated_center_z = (
+            1.62
+            + 0.63
+            * t
+        )
+
+        vertical_offset = (
+            original.z
+            - estimated_center_z
+        )
+
+        if vertical_offset > 0.0:
+
+            crest_amount = clamp01(
+                vertical_offset
+                / 0.30
+            )
+
+            p.z += (
+                0.070
+                * math.sin(
+                    math.pi
+                    * clamp01(
+                        t
+                    )
+                )
+                * crest_amount
+            )
+
+            p.x *= (
+                1.0
+                + 0.045
+                * crest_amount
+            )
+
+        else:
+
+            # Pull throat inward slightly.
+
+            throat_amount = clamp01(
+                -vertical_offset
+                / 0.28
+            )
+
+            p.x *= (
+                1.0
+                - 0.060
+                * throat_amount
+                * t_smooth
+            )
+
+            # Slight upward throat tuck.
+
+            p.z += (
+                0.020
+                * throat_amount
+                * t_smooth
+            )
+
+        # ----------------------------------------------------
+        # BASE THICKNESS
+        # ----------------------------------------------------
+
+        base_amount = (
+            1.0
+            - t_smooth
+        )
+
+        p.x *= (
+            1.0
+            + 0.085
+            * base_amount
+        )
+
+        return p
+
+    world_mesh_transform(
+        neck,
+        neck_transform
+    )
+
+    shade_smooth(
+        neck
+    )
+
+    # ========================================================
+    # HEAD
+    #
+    # Large correction:
+    #
+    # shorter
+    # lower
+    # slightly farther forward
+    # less vertically oval
+    # fuller cheek
+    # narrower nose
+    # ========================================================
+
+    head = bpy.data.objects.get(
+        "RiverwatchV73Head"
+    )
+
+    if head is None:
+
+        raise RuntimeError(
+            "V73 head missing."
+        )
+
+    head_center = world_bounds_center(
+        head
+    )
+
+    head_pivot_y = (
+        head_center.y
+        + 0.15
+    )
+
+    head_pivot_z = (
+        head_center.z
+        + 0.11
+    )
+
+    def head_transform(point):
+
+        p = point.copy()
+
+        original = point.copy()
+
+        # ----------------------------------------------------
+        # SHORTER FACE LENGTH
+        # ----------------------------------------------------
+
+        p.y = (
+            head_pivot_y
+            + (
+                p.y
+                - head_pivot_y
+            )
+            * 0.86
+        )
+
+        # ----------------------------------------------------
+        # LESS TALL / BULBOUS
+        # ----------------------------------------------------
+
+        p.z = (
+            head_pivot_z
+            + (
+                p.z
+                - head_pivot_z
+            )
+            * 0.92
+        )
+
+        # ----------------------------------------------------
+        # POSITION TO FOLLOW FORWARD NECK
+        # ----------------------------------------------------
+
+        p.y -= 0.095
+        p.z -= 0.025
+
+        # ----------------------------------------------------
+        # CHEEK VS MUZZLE WIDTH
+        # ----------------------------------------------------
+
+        face_t = clamp01(
+            (
+                head_pivot_y
+                - original.y
+            )
+            / 0.58
+        )
+
+        cheek_bulge = (
+            math.sin(
+                face_t
+                * math.pi
+            )
+        )
+
+        width_scale = (
+            1.00
+            + 0.070
+            * cheek_bulge
+            - 0.095
+            * (
+                face_t ** 2.0
+            )
+        )
+
+        p.x *= width_scale
+
+        # ----------------------------------------------------
+        # NOSE SLIGHTLY DOWN
+        # ----------------------------------------------------
+
+        p.z -= (
+            0.040
+            * (
+                face_t ** 1.5
+            )
+        )
+
+        return p
+
+    world_mesh_transform(
+        head,
+        head_transform
+    )
+
+    shade_smooth(
+        head
+    )
+
+    # ========================================================
+    # HEAD ATTACHMENTS
+    # ========================================================
+
+    head_attachment_prefixes = (
+
+        "RiverwatchV73Muzzle",
+        "RiverwatchV73Eye",
+        "RiverwatchV73Nostril",
+        "RiverwatchV73Ear",
+        "RiverwatchV73Forelock",
+        "RiverwatchV73BridleCheek",
+        "RiverwatchV73BitRing",
+        "RiverwatchV73BrowBand",
+        "RiverwatchV73NoseBand",
+    )
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            head_attachment_prefixes
+        ):
+
+            world_transform(
+                obj,
+                head_transform
+            )
+
+    # ========================================================
+    # MUZZLE
+    #
+    # Current muzzle is one of the biggest visual distractions.
+    # ========================================================
+
+    muzzle = bpy.data.objects.get(
+        "RiverwatchV73Muzzle"
+    )
+
+    if muzzle is not None:
+
+        scale_about(
+            muzzle,
+            0.86,
+            0.72,
+            0.82
+        )
+
+        translate(
+            muzzle,
+            (
+                0.0,
+                0.035,
+                -0.010
+            )
+        )
+
+        shade_smooth(
+            muzzle
+        )
+
+    # ========================================================
+    # EYES
+    #
+    # Slightly smaller.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV73EyeLeft",
+        "RiverwatchV73EyeRight"
+    ):
+
+        eye = bpy.data.objects.get(
+            name
+        )
+
+        if eye is not None:
+
+            scale_about(
+                eye,
+                0.88,
+                0.88,
+                0.88
+            )
+
+    # ========================================================
+    # EARS
+    #
+    # Keep expressive length but reduce giant-cone feeling.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV73EarLeft",
+        "RiverwatchV73EarRight"
+    ):
+
+        ear = bpy.data.objects.get(
+            name
+        )
+
+        if ear is not None:
+
+            scale_about(
+                ear,
+                0.90,
+                0.90,
+                0.91
+            )
+
+    # ========================================================
+    # MANE
+    #
+    # Follow the new forward neck.
+    # ========================================================
+
+    mane_prefixes = (
+
+        "RiverwatchV73Mane",
+    )
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            mane_prefixes
+        ):
+
+            world_transform(
+                obj,
+                neck_transform
+            )
+
+    forelock = bpy.data.objects.get(
+        "RiverwatchV73Forelock"
+    )
+
+    if forelock is not None:
+
+        world_transform(
+            forelock,
+            head_transform
+        )
+
+    # ========================================================
+    # REINS
+    #
+    # Head endpoint moves substantially.
+    # Blend deformation back toward saddle.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV73Rein"
+        ):
+
+            def rein_transform(point):
+
+                p = point.copy()
+
+                # Head / bit end.
+
+                if p.y < -0.75:
+
+                    return head_transform(
+                        p
+                    )
+
+                # Transition zone.
+
+                if p.y < -0.25:
+
+                    corrected = head_transform(
+                        p
+                    )
+
+                    blend = smoothstep(
+                        (
+                            -p.y
+                            - 0.25
+                        )
+                        / 0.50
+                    )
+
+                    return (
+                        p
+                        * (
+                            1.0
+                            - blend
+                        )
+                        +
+                        corrected
+                        * blend
+                    )
+
+                return p
+
+            world_curve_transform(
+                obj,
+                rein_transform
+            )
+
+    # ========================================================
+    # SHOULDER MASS
+    #
+    # Explicit scapula/deltoid wedges.
+    #
+    # These visually connect the torso to the upper foreleg.
+    # ========================================================
+
+    shoulder_profile = [
+
+        (
+            -0.39,
+            1.78
+        ),
+
+        (
+            -0.53,
+            1.62
+        ),
+
+        (
+            -0.49,
+            1.37
+        ),
+
+        (
+            -0.34,
+            1.05
+        ),
+
+        (
+            -0.11,
+            1.17
+        ),
+
+        (
+            -0.05,
+            1.42
+        ),
+
+        (
+            -0.16,
+            1.67
+        ),
+    ]
+
+    shoulder_left = profile_wedge(
+        "RiverwatchV74ShoulderNear",
+        shoulder_profile,
+        -0.405,
+        0.020,
+        0.070,
+        coat,
+        "shoulder"
+    )
+
+    shoulder_right = profile_wedge(
+        "RiverwatchV74ShoulderFar",
+        shoulder_profile,
+        0.405,
+        0.020,
+        0.070,
+        coat,
+        "shoulder"
+    )
+
+    # ========================================================
+    # PECTORAL CHEST PLANES
+    #
+    # Small low-poly chest forms from front.
+    # ========================================================
+
+    pectoral_profile = [
+
+        (
+            -0.60,
+            1.52
+        ),
+
+        (
+            -0.66,
+            1.36
+        ),
+
+        (
+            -0.53,
+            1.14
+        ),
+
+        (
+            -0.30,
+            1.08
+        ),
+
+        (
+            -0.24,
+            1.30
+        ),
+
+        (
+            -0.31,
+            1.52
+        ),
+    ]
+
+    profile_wedge(
+        "RiverwatchV74PectoralNear",
+        pectoral_profile,
+        -0.235,
+        0.018,
+        0.055,
+        coat,
+        "chest"
+    )
+
+    profile_wedge(
+        "RiverwatchV74PectoralFar",
+        pectoral_profile,
+        0.235,
+        0.018,
+        0.055,
+        coat,
+        "chest"
+    )
+
+    # ========================================================
+    # FRONT UPPER LEGS
+    #
+    # Root widens and moves outward into shoulder.
+    #
+    # Knee position stays nearly unchanged.
+    # ========================================================
+
+    front_upper_names = (
+
+        "RiverwatchV73FrontUpperNear",
+        "RiverwatchV73FrontUpperFar",
+    )
+
+    for name in front_upper_names:
+
+        leg = bpy.data.objects.get(
+            name
+        )
+
+        if leg is None:
+            continue
+
+        side = (
+            -1.0
+            if "Near" in name
+            else 1.0
+        )
+
+        center = world_bounds_center(
+            leg
+        )
+
+        def front_upper_transform(point):
+
+            p = point.copy()
+
+            root_t = smoothstep(
+                (
+                    p.z
+                    - 0.78
+                )
+                / 0.72
+            )
+
+            # Root grows into shoulder.
+
+            local_x = (
+                p.x
+                - center.x
+            )
+
+            local_y = (
+                p.y
+                - center.y
+            )
+
+            p.x = (
+                center.x
+                + local_x
+                * (
+                    1.09
+                    + 0.17
+                    * root_t
+                )
+            )
+
+            p.y = (
+                center.y
+                + local_y
+                * (
+                    1.07
+                    + 0.12
+                    * root_t
+                )
+            )
+
+            # Root moves outward toward shoulder plate.
+
+            p.x += (
+                side
+                * 0.045
+                * root_t
+            )
+
+            # Root moves slightly back under scapula.
+
+            p.y += (
+                0.025
+                * root_t
+            )
+
+            # Raise root deeper into torso.
+
+            p.z += (
+                0.045
+                * root_t
+            )
+
+            return p
+
+        world_mesh_transform(
+            leg,
+            front_upper_transform
+        )
+
+        shade_smooth(
+            leg
+        )
+
+    # ========================================================
+    # FRONT CANNONS
+    #
+    # Slightly less blocky while keeping strength.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV73FrontCannonNear",
+        "RiverwatchV73FrontCannonFar"
+    ):
+
+        cannon = bpy.data.objects.get(
+            name
+        )
+
+        if cannon is not None:
+
+            scale_about(
+                cannon,
+                0.94,
+                0.94,
+                1.00
+            )
+
+            shade_smooth(
+                cannon
+            )
+
+    # ========================================================
+    # FRONT PASTERNS
+    # ========================================================
+
+    for name in (
+        "RiverwatchV73FrontPasternNear",
+        "RiverwatchV73FrontPasternFar"
+    ):
+
+        pastern = bpy.data.objects.get(
+            name
+        )
+
+        if pastern is not None:
+
+            scale_about(
+                pastern,
+                0.95,
+                0.95,
+                1.00
+            )
+
+            shade_smooth(
+                pastern
+            )
+
+    # ========================================================
+    # FRONT HOOVES
+    #
+    # Current hooves are a little square and oversized.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV73FrontHoofNear",
+        "RiverwatchV73FrontHoofFar"
+    ):
+
+        hoof = bpy.data.objects.get(
+            name
+        )
+
+        if hoof is not None:
+
+            scale_about(
+                hoof,
+                0.93,
+                0.96,
+                0.94
+            )
+
+    # ========================================================
+    # HIND UPPER LEG TRANSITION
+    #
+    # Very small refinement only.
+    # V73 hind structure is one of its better areas.
+    # ========================================================
+
+    for name in (
+        "RiverwatchV73ThighNear",
+        "RiverwatchV73ThighFar"
+    ):
+
+        thigh = bpy.data.objects.get(
+            name
+        )
+
+        if thigh is None:
+            continue
+
+        center = world_bounds_center(
+            thigh
+        )
+
+        def thigh_transform(point):
+
+            p = point.copy()
+
+            root_t = smoothstep(
+                (
+                    p.z
+                    - 0.95
+                )
+                / 0.58
+            )
+
+            p.x = (
+                center.x
+                + (
+                    p.x
+                    - center.x
+                )
+                * (
+                    1.00
+                    + 0.055
+                    * root_t
+                )
+            )
+
+            p.y = (
+                center.y
+                + (
+                    p.y
+                    - center.y
+                )
+                * (
+                    1.00
+                    + 0.040
+                    * root_t
+                )
+            )
+
+            return p
+
+        world_mesh_transform(
+            thigh,
+            thigh_transform
+        )
+
+        shade_smooth(
+            thigh
+        )
+
+    # ========================================================
+    # TAIL
+    #
+    # Keep V73 tail structure.
+    # Slightly taper lower tip.
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV73Tail"
+    )
+
+    if tail is not None:
+
+        center = world_bounds_center(
+            tail
+        )
+
+        def tail_transform(point):
+
+            p = point.copy()
+
+            low_t = smoothstep(
+                (
+                    0.95
+                    - p.z
+                )
+                / 0.62
+            )
+
+            p.x = (
+                center.x
+                + (
+                    p.x
+                    - center.x
+                )
+                * (
+                    1.0
+                    - 0.16
+                    * low_t
+                )
+            )
+
+            return p
+
+        world_mesh_transform(
+            tail,
+            tail_transform
+        )
+
+        shade_smooth(
+            tail
+        )
+
+    # ========================================================
+    # SADDLE / BLANKET
+    #
+    # Leave mostly alone.
+    #
+    # Slight saddle compression to reduce blockiness.
+    # ========================================================
+
+    saddle_seat = bpy.data.objects.get(
+        "RiverwatchV73SaddleSeat"
+    )
+
+    if saddle_seat is not None:
+
+        scale_about(
+            saddle_seat,
+            1.00,
+            0.96,
+            0.93
+        )
+
+    # ========================================================
+    # RENAME EXISTING V73 -> V74
+    #
+    # New shoulder pieces already have V74 names.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV73"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV73",
+                "RiverwatchV74",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "head_neck_shoulder_rebuild_v74"
+
+    arm[
+        "broken_knight_horse_v74_base"
+    ] = "reference_silhouette_organic_v73"
+
+    arm[
+        "broken_knight_horse_v74_focus"
+    ] = "head_neck_shoulder_foreleg_integration"
+
+    arm[
+        "broken_knight_horse_v74_neck"
+    ] = "forward_arch_crested_tapered_throat"
+
+    arm[
+        "broken_knight_horse_v74_head"
+    ] = "shorter_lower_smaller_cheek_taper"
+
+    arm[
+        "broken_knight_horse_v74_muzzle"
+    ] = "smaller_narrower_less_capsule_like"
+
+    arm[
+        "broken_knight_horse_v74_shoulders"
+    ] = "explicit_scapula_deltoid_wedges"
+
+    arm[
+        "broken_knight_horse_v74_chest"
+    ] = "projected_breast_and_pectorals"
+
+    arm[
+        "broken_knight_horse_v74_forelegs"
+    ] = "root_integrated_into_shoulder"
+
+    arm[
+        "broken_knight_horse_v74_body"
+    ] = "v73_body_preserved_except_front_anatomy"
+
+    arm[
+        "broken_knight_horse_v74_goal"
+    ] = "reference_horse_front_half_major_improvement"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_modeling"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V74",
+        "HEAD_NECK_SHOULDER_PASS_COMPLETE"
     )
 
 def reset_pose(arm):
