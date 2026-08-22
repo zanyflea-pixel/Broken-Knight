@@ -1,3 +1,4 @@
+# V84_FEATURE_ALIGNMENT
 # V83_FEATURE_ALIGNMENT
 import bpy
 import bmesh
@@ -1583,12 +1584,12 @@ def build():
 
     assign_dark_lower_leg(
         front_near,
-        0.445
+        0.530
     )
 
     assign_dark_lower_leg(
         front_far,
-        0.445
+        0.530
     )
 
     hind_near = path_loft(
@@ -1625,12 +1626,12 @@ def build():
 
     assign_dark_lower_leg(
         hind_near,
-        0.420
+        0.500
     )
 
     assign_dark_lower_leg(
         hind_far,
-        0.420
+        0.500
     )
 
     for side_sign, suffix in (
@@ -1727,7 +1728,7 @@ def build():
 
         eye_x = (
             side_sign
-            * 0.255
+            * 0.250
         )
 
         sphere_detail(
@@ -1736,7 +1737,7 @@ def build():
 
             (
                 eye_x,
-                -1.205,
+                -1.235,
                 2.055
             ),
 
@@ -1759,10 +1760,10 @@ def build():
 
             (
                 side_sign
-                * 0.282,
+                * 0.276,
 
-                -1.225,
-                2.070
+                -1.255,
+                2.072
             ),
 
             (
@@ -1784,10 +1785,10 @@ def build():
 
             (
                 side_sign
-                * 0.120,
+                * 0.125,
 
-                -1.615,
-                1.845
+                -1.690,
+                1.795
             ),
 
             (
