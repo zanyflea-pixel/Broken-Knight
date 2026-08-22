@@ -4,7 +4,7 @@
   "blend_file": "C:\\Users\\Jimmy\\Desktop\\Broken Knight\\blender\\world\\animals\\riverwatch_horse.blend",
   "scene_name": "Scene",
   "scene_custom_properties": {
-    "broken_knight_horse_version": "V84",
+    "broken_knight_horse_version": "V85",
     "broken_knight_horse_checkpoint": "ANATOMY_ONLY",
     "broken_knight_horse_tack_status": "DEFERRED"
   },
@@ -42,7 +42,7 @@
       ],
       "custom_properties": {
         "broken_knight_horse_detail": "v80_fresh_anatomy_checkpoint",
-        "broken_knight_horse_version": "V84",
+        "broken_knight_horse_version": "V85",
         "broken_knight_horse_method": "fresh_authored_surface_cages",
         "broken_knight_horse_base": "none_fresh_rebuild",
         "broken_knight_horse_body": "measured_continuous_station_cage",
@@ -76,20 +76,20 @@
         1.0
       ],
       "dimensions": [
-        0.9345,
-        1.58,
-        0.99
+        0.945,
+        1.71,
+        0.945
       ],
       "world_bounds": {
         "min": [
-          -0.46725,
-          -0.62,
-          0.94
+          -0.4725,
+          -0.69,
+          0.955
         ],
         "max": [
-          0.46725,
-          0.96,
-          1.93
+          0.4725,
+          1.02,
+          1.9
         ]
       },
       "collections": [
@@ -109,9 +109,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80BodyMesh",
-        "vertices": 132,
-        "edges": 252,
-        "polygons": 122,
+        "vertices": 144,
+        "edges": 276,
+        "polygons": 134,
         "materials": 1
       }
     },
@@ -640,20 +640,20 @@
         1.0
       ],
       "dimensions": [
-        0.182655,
-        0.270334,
-        0.087
+        0.195742,
+        0.296975,
+        0.117
       ],
       "world_bounds": {
         "min": [
-          0.143673,
-          -0.677624,
+          0.142129,
+          -0.703507,
           0.018
         ],
         "max": [
-          0.326327,
-          -0.407289,
-          0.105
+          0.337871,
+          -0.406532,
+          0.135
         ]
       },
       "collections": [
@@ -699,20 +699,20 @@
         1.0
       ],
       "dimensions": [
-        0.182655,
-        0.270334,
-        0.087
+        0.195742,
+        0.296975,
+        0.117
       ],
       "world_bounds": {
         "min": [
-          -0.326327,
-          -0.677624,
+          -0.337871,
+          -0.703507,
           0.018
         ],
         "max": [
-          -0.143673,
-          -0.407289,
-          0.105
+          -0.142129,
+          -0.406532,
+          0.135
         ]
       },
       "collections": [
@@ -758,20 +758,20 @@
         1.0
       ],
       "dimensions": [
-        0.28,
-        0.328987,
-        1.335671
+        0.31,
+        0.369362,
+        1.346642
       ],
       "world_bounds": {
         "min": [
-          0.095,
-          -0.584664,
-          0.099267
+          0.085,
+          -0.614681,
+          0.094221
         ],
         "max": [
-          0.375,
-          -0.255678,
-          1.434938
+          0.395,
+          -0.245319,
+          1.440863
         ]
       },
       "collections": [
@@ -792,9 +792,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80FrontUpperFarMesh",
-        "vertices": 64,
-        "edges": 120,
-        "polygons": 58,
+        "vertices": 80,
+        "edges": 152,
+        "polygons": 74,
         "materials": 2
       }
     },
@@ -818,20 +818,20 @@
         1.0
       ],
       "dimensions": [
-        0.28,
-        0.328987,
-        1.335671
+        0.31,
+        0.369362,
+        1.346642
       ],
       "world_bounds": {
         "min": [
-          -0.375,
-          -0.584664,
-          0.099267
+          -0.395,
+          -0.614681,
+          0.094221
         ],
         "max": [
-          -0.095,
-          -0.255678,
-          1.434938
+          -0.085,
+          -0.245319,
+          1.440863
         ]
       },
       "collections": [
@@ -852,9 +852,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80FrontUpperNearMesh",
-        "vertices": 64,
-        "edges": 120,
-        "polygons": 58,
+        "vertices": 80,
+        "edges": 152,
+        "polygons": 74,
         "materials": 2
       }
     },
@@ -879,19 +879,19 @@
       ],
       "dimensions": [
         0.54,
-        0.765466,
-        0.608034
+        0.75554,
+        0.601407
       ],
       "world_bounds": {
         "min": [
           -0.27,
-          -1.805466,
-          1.658434
+          -1.796868,
+          1.664513
         ],
         "max": [
           0.27,
-          -1.04,
-          2.266468
+          -1.041328,
+          2.26592
         ]
       },
       "collections": [
@@ -938,20 +938,20 @@
         1.0
       ],
       "dimensions": [
-        0.189641,
-        0.280329,
-        0.09
+        0.200813,
+        0.307045,
+        0.122
       ],
       "world_bounds": {
         "min": [
-          0.17518,
-          0.386377,
+          0.179593,
+          0.360455,
           0.018
         ],
         "max": [
-          0.36482,
-          0.666706,
-          0.108
+          0.380407,
+          0.6675,
+          0.14
         ]
       },
       "collections": [
@@ -997,20 +997,20 @@
         1.0
       ],
       "dimensions": [
-        0.189641,
-        0.280329,
-        0.09
+        0.200813,
+        0.307045,
+        0.122
       ],
       "world_bounds": {
         "min": [
-          -0.36482,
-          0.386377,
+          -0.380407,
+          0.360455,
           0.018
         ],
         "max": [
-          -0.17518,
-          0.666706,
-          0.108
+          -0.179593,
+          0.6675,
+          0.14
         ]
       },
       "collections": [
@@ -1056,20 +1056,20 @@
         1.0
       ],
       "dimensions": [
-        0.161521,
-        0.536329,
-        0.516827
+        0.179542,
+        0.541029,
+        0.556154
       ],
       "world_bounds": {
         "min": [
-          -0.171115,
-          -0.951199,
-          1.66487
+          -0.191927,
+          -0.955876,
+          1.640107
         ],
         "max": [
-          -0.009594,
-          -0.41487,
-          2.181697
+          -0.012385,
+          -0.414847,
+          2.196261
         ]
       },
       "collections": [
@@ -1093,9 +1093,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80ManeMesh",
-        "vertices": 12,
-        "edges": 16,
-        "polygons": 5,
+        "vertices": 14,
+        "edges": 19,
+        "polygons": 6,
         "materials": 1
       }
     },
@@ -1119,20 +1119,20 @@
         1.0
       ],
       "dimensions": [
-        0.54,
-        0.907654,
-        0.840161
+        0.61,
+        0.890349,
+        0.937992
       ],
       "world_bounds": {
         "min": [
-          -0.27,
-          -1.102669,
-          1.398378
+          -0.305,
+          -1.08466,
+          1.317586
         ],
         "max": [
-          0.27,
-          -0.195015,
-          2.238539
+          0.305,
+          -0.194311,
+          2.255578
         ]
       },
       "collections": [
@@ -1152,9 +1152,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80NeckMesh",
-        "vertices": 84,
-        "edges": 156,
-        "polygons": 74,
+        "vertices": 96,
+        "edges": 180,
+        "polygons": 86,
         "materials": 1
       }
     },
@@ -1286,20 +1286,20 @@
         1.0
       ],
       "dimensions": [
-        0.24,
-        0.423872,
-        1.481416
+        0.236,
+        0.465547,
+        1.518333
       ],
       "world_bounds": {
         "min": [
-          -0.12,
-          0.856,
-          0.066584
+          -0.118,
+          0.869375,
+          0.055744
         ],
         "max": [
-          0.12,
-          1.279872,
-          1.548
+          0.118,
+          1.334922,
+          1.574077
         ]
       },
       "collections": [
@@ -1319,9 +1319,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80TailMesh",
-        "vertices": 72,
-        "edges": 136,
-        "polygons": 66,
+        "vertices": 80,
+        "edges": 152,
+        "polygons": 74,
         "materials": 1
       }
     },
@@ -1345,20 +1345,20 @@
         1.0
       ],
       "dimensions": [
-        0.41,
-        0.652124,
-        1.534983
+        0.51,
+        0.753982,
+        1.59825
       ],
       "world_bounds": {
         "min": [
-          0.065,
-          0.165402,
-          0.092759
+          0.025,
+          0.16317,
+          0.09133
         ],
         "max": [
-          0.475,
-          0.817526,
-          1.627742
+          0.535,
+          0.917153,
+          1.68958
         ]
       },
       "collections": [
@@ -1379,9 +1379,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80ThighFarMesh",
-        "vertices": 80,
-        "edges": 152,
-        "polygons": 74,
+        "vertices": 104,
+        "edges": 200,
+        "polygons": 98,
         "materials": 2
       }
     },
@@ -1405,20 +1405,20 @@
         1.0
       ],
       "dimensions": [
-        0.41,
-        0.652124,
-        1.534983
+        0.51,
+        0.753982,
+        1.59825
       ],
       "world_bounds": {
         "min": [
-          -0.475,
-          0.165402,
-          0.092759
+          -0.535,
+          0.16317,
+          0.09133
         ],
         "max": [
-          -0.065,
-          0.817526,
-          1.627742
+          -0.025,
+          0.917153,
+          1.68958
         ]
       },
       "collections": [
@@ -1439,9 +1439,9 @@
       ],
       "mesh": {
         "data_name": "RiverwatchV80ThighNearMesh",
-        "vertices": 80,
-        "edges": 152,
-        "polygons": 74,
+        "vertices": 104,
+        "edges": 200,
+        "polygons": 98,
         "materials": 2
       }
     }
