@@ -51158,7 +51158,7 @@ def build_horse_model_v45_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v46_base(arm):
 
     import bpy
     import math
@@ -53074,6 +53074,2330 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V46",
         "HIND_LEG_REBUILD_SILHOUETTE_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V47
+    #
+    # FULL FOUR-LEG STANCE REBUILD
+    #
+    # V46 rating:
+    #
+    # 48 / 100
+    #
+    # This pass deletes ALL existing limb geometry.
+    #
+    # ========================================================
+
+    build_horse_model_v46_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V47",
+        "V46_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def get_object(
+        name
+    ):
+
+        return bpy.data.objects.get(
+            name
+        )
+
+    def delete_prefix(
+        prefix
+    ):
+
+        deleted = 0
+
+        for obj in list(
+            bpy.data.objects
+        ):
+
+            if obj.name.startswith(
+                prefix
+            ):
+
+                bpy.data.objects.remove(
+                    obj,
+                    do_unlink=True
+                )
+
+                deleted += 1
+
+        print(
+            "V47_DELETE",
+            prefix,
+            deleted
+        )
+
+    def mesh_warp(
+        name,
+        function
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+
+            print(
+                "V47_MISSING_OBJECT",
+                name
+            )
+
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co = Vector(
+                function(
+                    vertex.co.copy()
+                )
+            )
+
+        obj.data.update()
+
+    def transform_location(
+        name,
+        function
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+            return
+
+        obj.location = Vector(
+            function(
+                obj.location.copy()
+            )
+        )
+
+    def local_scale(
+        name,
+        sx,
+        sy,
+        sz
+    ):
+
+        obj = get_object(
+            name
+        )
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co.x *= sx
+            vertex.co.y *= sy
+            vertex.co.z *= sz
+
+        obj.data.update()
+
+    def smooth(
+        obj
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind_new(
+        obj,
+        group_name
+    ):
+
+        obj.parent = arm
+
+        group = obj.vertex_groups.new(
+            name=group_name
+        )
+
+        group.add(
+            list(
+                range(
+                    len(
+                        obj.data.vertices
+                    )
+                )
+            ),
+            1.0,
+            "REPLACE"
+        )
+
+        modifier = obj.modifiers.new(
+            "HorseRig",
+            "ARMATURE"
+        )
+
+        modifier.object = arm
+
+    def create_mesh(
+        name,
+        vertices,
+        faces,
+        material,
+        group_name
+    ):
+
+        mesh = bpy.data.meshes.new(
+            name + "Mesh"
+        )
+
+        mesh.from_pydata(
+            vertices,
+            [],
+            faces
+        )
+
+        mesh.update()
+
+        obj = bpy.data.objects.new(
+            name,
+            mesh
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    def subdivide(
+        obj,
+        levels=1
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V47 Subdivision",
+            "SUBSURF"
+        )
+
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = levels
+        modifier.render_levels = levels
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def bevel(
+        obj,
+        width,
+        segments=3
+    ):
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        modifier = obj.modifiers.new(
+            "V47 Bevel",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+    def curve_mesh(
+        name,
+        points,
+        material,
+        thickness,
+        group_name,
+        resolution=5
+    ):
+
+        data = bpy.data.curves.new(
+            name=name + "Curve",
+            type="CURVE"
+        )
+
+        data.dimensions = "3D"
+        data.resolution_u = resolution
+        data.bevel_depth = thickness
+        data.bevel_resolution = 4
+
+        spline = data.splines.new(
+            "BEZIER"
+        )
+
+        spline.bezier_points.add(
+            len(points) - 1
+        )
+
+        for index, point in enumerate(
+            points
+        ):
+
+            bp = spline.bezier_points[
+                index
+            ]
+
+            bp.co = point
+            bp.handle_left_type = "AUTO"
+            bp.handle_right_type = "AUTO"
+
+        obj = bpy.data.objects.new(
+            name,
+            data
+        )
+
+        bpy.context.collection.objects.link(
+            obj
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+        bpy.ops.object.convert(
+            target="MESH"
+        )
+
+        obj = bpy.context.object
+        obj.name = name
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    def ellipsoid(
+        name,
+        location,
+        scale,
+        material,
+        group_name
+    ):
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=24,
+            ring_count=16,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        smooth(
+            obj
+        )
+
+        bind_new(
+            obj,
+            group_name
+        )
+
+        return obj
+
+    def side_prism(
+        name,
+        outline,
+        x_min,
+        x_max,
+        material,
+        group_name,
+        bevel_width=0.0
+    ):
+
+        count = len(
+            outline
+        )
+
+        vertices = []
+
+        for y, z in outline:
+
+            vertices.append(
+                (
+                    x_min,
+                    y,
+                    z
+                )
+            )
+
+        for y, z in outline:
+
+            vertices.append(
+                (
+                    x_max,
+                    y,
+                    z
+                )
+            )
+
+        faces = [
+
+            tuple(
+                reversed(
+                    range(count)
+                )
+            ),
+
+            tuple(
+                range(
+                    count,
+                    count * 2
+                )
+            ),
+        ]
+
+        for index in range(
+            count
+        ):
+
+            nxt = (
+                index + 1
+            ) % count
+
+            faces.append(
+                (
+                    index,
+                    nxt,
+                    count + nxt,
+                    count + index
+                )
+            )
+
+        obj = create_mesh(
+            name,
+            vertices,
+            faces,
+            material,
+            group_name
+        )
+
+        if bevel_width > 0.0:
+
+            bevel(
+                obj,
+                bevel_width,
+                3
+            )
+
+        return obj
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V46 Warm Bay"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V46 Dark Points"
+    )
+
+    hoof_mat = bpy.data.materials.get(
+        "Riverwatch V46 Hooves"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "V47 could not find V46 coat material."
+        )
+
+    if dark is None:
+        raise RuntimeError(
+            "V47 could not find V46 dark material."
+        )
+
+    if hoof_mat is None:
+        raise RuntimeError(
+            "V47 could not find V46 hoof material."
+        )
+
+    # ========================================================
+    # 1. BODY SILHOUETTE
+    #
+    # Current V46 side view still has:
+    #
+    # round rump
+    # low abdomen
+    # slightly heavy rear barrel
+    #
+    # ========================================================
+
+    def torso_warp(
+        co
+    ):
+
+        original_y = co.y
+        original_z = co.z
+
+        # Keep current overall length.
+
+        # Narrow mid barrel.
+
+        if (
+            original_y > 0.10
+            and original_y < 0.95
+        ):
+
+            co.x *= 0.965
+
+        # Narrow rear quarter.
+
+        elif original_y >= 0.95:
+
+            co.x *= 0.940
+
+        # Deep chest remains.
+
+        # Raise belly sharply behind front ribs.
+
+        if (
+            original_y > 0.22
+            and original_z < 1.08
+        ):
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        1.08
+                        - original_z
+                    )
+                    / 0.43
+                )
+            )
+
+            if original_y < 0.75:
+
+                co.z += (
+                    0.075
+                    * influence
+                )
+
+            elif original_y < 1.20:
+
+                co.z += (
+                    0.125
+                    * influence
+                )
+
+            else:
+
+                co.z += (
+                    0.080
+                    * influence
+                )
+
+        # Stretch only extreme rump backward.
+
+        if original_y > 1.30:
+
+            co.y = (
+                1.30
+                + (
+                    original_y
+                    - 1.30
+                )
+                * 1.06
+            )
+
+        # Flatten upper croup.
+
+        if (
+            original_y > 1.18
+            and original_z > 1.46
+        ):
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        original_y
+                        - 1.18
+                    )
+                    / 0.50
+                )
+            )
+
+            co.z -= (
+                0.050
+                * influence
+            )
+
+        # Raise lower rear outline.
+
+        if (
+            original_y > 1.18
+            and original_z < 1.03
+        ):
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        1.03
+                        - original_z
+                    )
+                    / 0.32
+                )
+            )
+
+            co.z += (
+                0.055
+                * influence
+            )
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV46Torso",
+        torso_warp
+    )
+
+    # ========================================================
+    # 2. NECK
+    #
+    # Build stronger lower-neck connection.
+    # ========================================================
+
+    def neck_warp(
+        co
+    ):
+
+        original_y = co.y
+        original_z = co.z
+
+        if original_y > -0.48:
+
+            co.x *= 1.055
+
+        # Raise throat line.
+
+        if original_z < 1.64:
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        1.64
+                        - original_z
+                    )
+                    / 0.30
+                )
+            )
+
+            co.z += (
+                0.045
+                * influence
+            )
+
+            co.y += (
+                0.040
+                * influence
+            )
+
+        # Slight crest arch.
+
+        if original_z > 1.84:
+
+            influence = min(
+                1.0,
+                max(
+                    0.0,
+                    (
+                        original_z
+                        - 1.84
+                    )
+                    / 0.28
+                )
+            )
+
+            co.y -= (
+                0.025
+                * influence
+            )
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV46Neck",
+        neck_warp
+    )
+
+    # ========================================================
+    # 3. HEAD ANGLE
+    #
+    # Slight downward horse-like head carriage.
+    # ========================================================
+
+    head_pivot_y = -0.715
+    head_pivot_z = 1.935
+    head_angle = math.radians(
+        4.5
+    )
+
+    head_cos = math.cos(
+        head_angle
+    )
+
+    head_sin = math.sin(
+        head_angle
+    )
+
+    def rotate_head_point(
+        co
+    ):
+
+        dy = (
+            co.y
+            - head_pivot_y
+        )
+
+        dz = (
+            co.z
+            - head_pivot_z
+        )
+
+        new_y = (
+            head_pivot_y
+            + dy * head_cos
+            - dz * head_sin
+        )
+
+        new_z = (
+            head_pivot_z
+            + dy * head_sin
+            + dz * head_cos
+        )
+
+        co.y = new_y
+        co.z = new_z
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV46Head",
+        rotate_head_point
+    )
+
+    # Head slightly broader through cheek.
+
+    def broaden_head(
+        co
+    ):
+
+        if co.y > -1.05:
+
+            co.x *= 1.040
+
+        return co
+
+    mesh_warp(
+        "RiverwatchV46Head",
+        broaden_head
+    )
+
+    # ========================================================
+    # HEAD DETAILS FOLLOW ROTATION
+    # ========================================================
+
+    def rotate_location(
+        location
+    ):
+
+        dy = (
+            location.y
+            - head_pivot_y
+        )
+
+        dz = (
+            location.z
+            - head_pivot_z
+        )
+
+        location.y = (
+            head_pivot_y
+            + dy * head_cos
+            - dz * head_sin
+        )
+
+        location.z = (
+            head_pivot_z
+            + dy * head_sin
+            + dz * head_cos
+        )
+
+        return location
+
+    for name in [
+        "RiverwatchV46Muzzle",
+        "RiverwatchV46LeftEye",
+        "RiverwatchV46RightEye",
+        "RiverwatchV46LeftNostril",
+        "RiverwatchV46RightNostril",
+        "RiverwatchV46LeftEar",
+        "RiverwatchV46RightEar"
+    ]:
+
+        transform_location(
+            name,
+            rotate_location
+        )
+
+    # Smaller muzzle.
+
+    local_scale(
+        "RiverwatchV46Muzzle",
+        0.92,
+        0.92,
+        0.92
+    )
+
+    # ========================================================
+    # 4. DELETE ALL EXISTING LIMBS
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV46FrontLeftLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV46FrontRightLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV46HindLeftLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV46HindRightLeg"
+    )
+
+    delete_prefix(
+        "RiverwatchV46FrontLeftHoof"
+    )
+
+    delete_prefix(
+        "RiverwatchV46FrontRightHoof"
+    )
+
+    delete_prefix(
+        "RiverwatchV46HindLeftHoof"
+    )
+
+    delete_prefix(
+        "RiverwatchV46HindRightHoof"
+    )
+
+    # ========================================================
+    # 5. GENERAL LEG BUILDER
+    #
+    # Each section:
+    #
+    # y
+    # z
+    # x center
+    # x radius
+    # depth radius
+    #
+    # This lets upper legs sit farther outside the torso
+    # while lower limbs return naturally underneath.
+    #
+    # ========================================================
+
+    limb_profile = [
+
+        (
+            1.000,
+            0.000
+        ),
+
+        (
+            0.707,
+            0.707
+        ),
+
+        (
+            0.000,
+            1.000
+        ),
+
+        (
+            -0.707,
+            0.707
+        ),
+
+        (
+            -1.000,
+            0.000
+        ),
+
+        (
+            -0.707,
+            -0.707
+        ),
+
+        (
+            0.000,
+            -1.000
+        ),
+
+        (
+            0.707,
+            -0.707
+        ),
+    ]
+
+    def build_leg(
+        name,
+        side,
+        sections,
+        group_name
+    ):
+
+        centers = [
+
+            Vector(
+                (
+                    side * section[2],
+                    section[0],
+                    section[1]
+                )
+            )
+
+            for section in sections
+        ]
+
+        vertices = []
+        faces = []
+
+        ring_count = len(
+            limb_profile
+        )
+
+        def frame(
+            index
+        ):
+
+            if index == 0:
+
+                tangent = (
+                    centers[1]
+                    - centers[0]
+                )
+
+            elif index == len(
+                centers
+            ) - 1:
+
+                tangent = (
+                    centers[-1]
+                    - centers[-2]
+                )
+
+            else:
+
+                tangent = (
+                    centers[
+                        index + 1
+                    ]
+                    - centers[
+                        index - 1
+                    ]
+                )
+
+            if tangent.length < 0.000001:
+
+                tangent = Vector(
+                    (
+                        0.0,
+                        0.0,
+                        -1.0
+                    )
+                )
+
+            tangent.normalize()
+
+            lateral = Vector(
+                (
+                    1.0,
+                    0.0,
+                    0.0
+                )
+            )
+
+            depth_axis = lateral.cross(
+                tangent
+            )
+
+            if depth_axis.length < 0.000001:
+
+                depth_axis = Vector(
+                    (
+                        0.0,
+                        1.0,
+                        0.0
+                    )
+                )
+
+            depth_axis.normalize()
+
+            return (
+                lateral,
+                depth_axis
+            )
+
+        for index, section in enumerate(
+            sections
+        ):
+
+            center = centers[
+                index
+            ]
+
+            width = section[3]
+            depth_radius = section[4]
+
+            lateral, depth_axis = frame(
+                index
+            )
+
+            for px, py in limb_profile:
+
+                point = (
+                    center
+                    + lateral
+                    * (
+                        px
+                        * width
+                    )
+                    + depth_axis
+                    * (
+                        py
+                        * depth_radius
+                    )
+                )
+
+                vertices.append(
+                    tuple(point)
+                )
+
+        for section_index in range(
+            len(sections) - 1
+        ):
+
+            first = (
+                section_index
+                * ring_count
+            )
+
+            second = (
+                section_index + 1
+            ) * ring_count
+
+            for ring_index in range(
+                ring_count
+            ):
+
+                nxt = (
+                    ring_index + 1
+                ) % ring_count
+
+                faces.append(
+                    (
+                        first + ring_index,
+                        second + ring_index,
+                        second + nxt,
+                        first + nxt
+                    )
+                )
+
+        obj = create_mesh(
+            name,
+            vertices,
+            faces,
+            coat,
+            group_name
+        )
+
+        obj.data.materials.append(
+            dark
+        )
+
+        # Dark lower legs.
+
+        for polygon in obj.data.polygons:
+
+            average_z = (
+                sum(
+                    obj.data.vertices[
+                        vertex_index
+                    ].co.z
+                    for vertex_index in polygon.vertices
+                )
+                / float(
+                    len(
+                        polygon.vertices
+                    )
+                )
+            )
+
+            if average_z < 0.58:
+
+                polygon.material_index = 1
+
+        subdivide(
+            obj,
+            1
+        )
+
+        smooth(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # 6. NEW FORELEG
+    #
+    # shoulder / upper arm
+    # elbow
+    # forearm
+    # knee
+    # cannon
+    # fetlock
+    # pastern
+    #
+    # ========================================================
+
+    front_left = [
+
+        # Shoulder root.
+        (
+            -0.235,
+            1.330,
+            0.350,
+            0.220,
+            0.190
+        ),
+
+        # Upper arm.
+        (
+            -0.175,
+            1.155,
+            0.365,
+            0.205,
+            0.175
+        ),
+
+        # Elbow.
+        (
+            -0.105,
+            1.010,
+            0.365,
+            0.185,
+            0.155
+        ),
+
+        # Forearm.
+        (
+            -0.075,
+            0.845,
+            0.350,
+            0.165,
+            0.135
+        ),
+
+        (
+            -0.085,
+            0.690,
+            0.335,
+            0.145,
+            0.120
+        ),
+
+        # Knee slightly forward.
+        (
+            -0.120,
+            0.565,
+            0.325,
+            0.160,
+            0.140
+        ),
+
+        # Below knee.
+        (
+            -0.105,
+            0.465,
+            0.315,
+            0.110,
+            0.095
+        ),
+
+        # Cannon vertical.
+        (
+            -0.100,
+            0.355,
+            0.305,
+            0.092,
+            0.078
+        ),
+
+        (
+            -0.095,
+            0.250,
+            0.300,
+            0.090,
+            0.076
+        ),
+
+        # Fetlock.
+        (
+            -0.105,
+            0.160,
+            0.300,
+            0.108,
+            0.092
+        ),
+
+        # Pastern angles forward.
+        (
+            -0.165,
+            0.075,
+            0.295,
+            0.080,
+            0.068
+        ),
+    ]
+
+    front_right = [
+
+        (
+            -0.155,
+            1.330,
+            0.350,
+            0.220,
+            0.190
+        ),
+
+        (
+            -0.095,
+            1.155,
+            0.365,
+            0.205,
+            0.175
+        ),
+
+        (
+            -0.025,
+            1.010,
+            0.365,
+            0.185,
+            0.155
+        ),
+
+        (
+            0.005,
+            0.845,
+            0.350,
+            0.165,
+            0.135
+        ),
+
+        (
+            -0.005,
+            0.690,
+            0.335,
+            0.145,
+            0.120
+        ),
+
+        (
+            -0.040,
+            0.565,
+            0.325,
+            0.160,
+            0.140
+        ),
+
+        (
+            -0.025,
+            0.465,
+            0.315,
+            0.110,
+            0.095
+        ),
+
+        (
+            -0.020,
+            0.355,
+            0.305,
+            0.092,
+            0.078
+        ),
+
+        (
+            -0.015,
+            0.250,
+            0.300,
+            0.090,
+            0.076
+        ),
+
+        (
+            -0.025,
+            0.160,
+            0.300,
+            0.108,
+            0.092
+        ),
+
+        (
+            -0.085,
+            0.075,
+            0.295,
+            0.080,
+            0.068
+        ),
+    ]
+
+    build_leg(
+        "RiverwatchV47FrontLeftLeg",
+        -1.0,
+        front_left,
+        "front.L"
+    )
+
+    build_leg(
+        "RiverwatchV47FrontRightLeg",
+        1.0,
+        front_right,
+        "front.R"
+    )
+
+    # ========================================================
+    # 7. NEW HIND LEGS
+    #
+    # Side silhouette deliberately exaggerated enough to
+    # remain readable after perspective projection.
+    #
+    # HIP            1.42
+    # THIGH
+    # STIFLE         1.07  <-- forward
+    # GASKIN
+    # HOCK           1.40  <-- back
+    # CANNON         1.38
+    # FETLOCK        1.36
+    # PASTERN        1.28  <-- forward
+    #
+    # ========================================================
+
+    hind_left = [
+
+        # Hip.
+        (
+            1.420,
+            1.345,
+            0.385,
+            0.275,
+            0.235
+        ),
+
+        # Upper thigh.
+        (
+            1.360,
+            1.190,
+            0.410,
+            0.250,
+            0.215
+        ),
+
+        (
+            1.265,
+            1.020,
+            0.420,
+            0.220,
+            0.190
+        ),
+
+        # Stifle far forward.
+        (
+            1.075,
+            0.855,
+            0.400,
+            0.185,
+            0.160
+        ),
+
+        (
+            1.040,
+            0.770,
+            0.385,
+            0.165,
+            0.145
+        ),
+
+        # Gaskin begins rear sweep.
+        (
+            1.125,
+            0.680,
+            0.370,
+            0.150,
+            0.130
+        ),
+
+        (
+            1.250,
+            0.585,
+            0.355,
+            0.135,
+            0.118
+        ),
+
+        # Hock clearly behind stifle.
+        (
+            1.395,
+            0.495,
+            0.340,
+            0.158,
+            0.145
+        ),
+
+        # Below hock.
+        (
+            1.395,
+            0.405,
+            0.325,
+            0.108,
+            0.094
+        ),
+
+        # Cannon nearly vertical.
+        (
+            1.385,
+            0.315,
+            0.315,
+            0.091,
+            0.078
+        ),
+
+        (
+            1.375,
+            0.225,
+            0.310,
+            0.088,
+            0.076
+        ),
+
+        # Fetlock.
+        (
+            1.360,
+            0.150,
+            0.305,
+            0.106,
+            0.090
+        ),
+
+        # Pastern goes forward.
+        (
+            1.285,
+            0.075,
+            0.300,
+            0.080,
+            0.068
+        ),
+    ]
+
+    hind_right = [
+
+        # Natural offset: slightly farther back.
+        (
+            1.475,
+            1.345,
+            0.385,
+            0.275,
+            0.235
+        ),
+
+        (
+            1.415,
+            1.190,
+            0.410,
+            0.250,
+            0.215
+        ),
+
+        (
+            1.320,
+            1.020,
+            0.420,
+            0.220,
+            0.190
+        ),
+
+        (
+            1.130,
+            0.855,
+            0.400,
+            0.185,
+            0.160
+        ),
+
+        (
+            1.095,
+            0.770,
+            0.385,
+            0.165,
+            0.145
+        ),
+
+        (
+            1.180,
+            0.680,
+            0.370,
+            0.150,
+            0.130
+        ),
+
+        (
+            1.305,
+            0.585,
+            0.355,
+            0.135,
+            0.118
+        ),
+
+        (
+            1.450,
+            0.495,
+            0.340,
+            0.158,
+            0.145
+        ),
+
+        (
+            1.450,
+            0.405,
+            0.325,
+            0.108,
+            0.094
+        ),
+
+        (
+            1.440,
+            0.315,
+            0.315,
+            0.091,
+            0.078
+        ),
+
+        (
+            1.430,
+            0.225,
+            0.310,
+            0.088,
+            0.076
+        ),
+
+        (
+            1.415,
+            0.150,
+            0.305,
+            0.106,
+            0.090
+        ),
+
+        (
+            1.340,
+            0.075,
+            0.300,
+            0.080,
+            0.068
+        ),
+    ]
+
+    build_leg(
+        "RiverwatchV47HindLeftLeg",
+        -1.0,
+        hind_left,
+        "hind.L"
+    )
+
+    build_leg(
+        "RiverwatchV47HindRightLeg",
+        1.0,
+        hind_right,
+        "hind.R"
+    )
+
+    # ========================================================
+    # 8. NEW HOOF BUILDER
+    # ========================================================
+
+    def build_hoof(
+        name,
+        center_x,
+        heel_y,
+        toe_y,
+        group_name
+    ):
+
+        heel_width = 0.102
+        toe_width = 0.150
+
+        vertices = [
+
+            (
+                center_x - heel_width,
+                heel_y,
+                0.125
+            ),
+
+            (
+                center_x + heel_width,
+                heel_y,
+                0.125
+            ),
+
+            (
+                center_x - toe_width,
+                toe_y,
+                0.072
+            ),
+
+            (
+                center_x + toe_width,
+                toe_y,
+                0.072
+            ),
+
+            (
+                center_x - heel_width,
+                heel_y,
+                0.030
+            ),
+
+            (
+                center_x + heel_width,
+                heel_y,
+                0.030
+            ),
+
+            (
+                center_x - toe_width,
+                toe_y,
+                0.014
+            ),
+
+            (
+                center_x + toe_width,
+                toe_y,
+                0.014
+            ),
+        ]
+
+        faces = [
+
+            (
+                0,
+                1,
+                3,
+                2
+            ),
+
+            (
+                6,
+                7,
+                5,
+                4
+            ),
+
+            (
+                0,
+                2,
+                6,
+                4
+            ),
+
+            (
+                1,
+                5,
+                7,
+                3
+            ),
+
+            (
+                0,
+                4,
+                5,
+                1
+            ),
+
+            (
+                2,
+                3,
+                7,
+                6
+            ),
+        ]
+
+        obj = create_mesh(
+            name,
+            vertices,
+            faces,
+            hoof_mat,
+            group_name
+        )
+
+        bevel(
+            obj,
+            0.018,
+            3
+        )
+
+        smooth(
+            obj
+        )
+
+        return obj
+
+    # Front hooves.
+
+    build_hoof(
+        "RiverwatchV47FrontLeftHoof",
+        -0.295,
+        -0.145,
+        -0.315,
+        "front.L.hoof"
+    )
+
+    build_hoof(
+        "RiverwatchV47FrontRightHoof",
+        0.295,
+        -0.065,
+        -0.235,
+        "front.R.hoof"
+    )
+
+    # Hind hooves.
+    #
+    # Heel back, toe forward.
+
+    build_hoof(
+        "RiverwatchV47HindLeftHoof",
+        -0.300,
+        1.330,
+        1.145,
+        "hind.L.hoof"
+    )
+
+    build_hoof(
+        "RiverwatchV47HindRightHoof",
+        0.300,
+        1.385,
+        1.200,
+        "hind.R.hoof"
+    )
+
+    # ========================================================
+    # 9. DELETE V46 MANE
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV46Mane"
+    )
+
+    delete_prefix(
+        "RiverwatchV46Forelock"
+    )
+
+    # ========================================================
+    # 10. V47 MANE
+    #
+    # Less plate-like.
+    #
+    # Crest has volume.
+    # Five overlapping broad curves descend naturally.
+    #
+    # ========================================================
+
+    curve_mesh(
+        "RiverwatchV47ManeCrest",
+        [
+            (
+                -0.300,
+                -0.735,
+                2.070
+            ),
+            (
+                -0.315,
+                -0.665,
+                2.070
+            ),
+            (
+                -0.325,
+                -0.590,
+                2.040
+            ),
+            (
+                -0.335,
+                -0.510,
+                1.990
+            ),
+            (
+                -0.340,
+                -0.430,
+                1.925
+            ),
+            (
+                -0.340,
+                -0.355,
+                1.850
+            ),
+            (
+                -0.335,
+                -0.285,
+                1.780
+            ),
+        ],
+        dark,
+        0.040,
+        "head",
+        5
+    )
+
+    mane_curves = [
+
+        [
+            (
+                -0.320,
+                -0.680,
+                2.045
+            ),
+            (
+                -0.350,
+                -0.640,
+                1.920
+            ),
+            (
+                -0.365,
+                -0.610,
+                1.755
+            ),
+        ],
+
+        [
+            (
+                -0.335,
+                -0.605,
+                2.020
+            ),
+            (
+                -0.370,
+                -0.560,
+                1.860
+            ),
+            (
+                -0.385,
+                -0.525,
+                1.665
+            ),
+        ],
+
+        [
+            (
+                -0.345,
+                -0.525,
+                1.975
+            ),
+            (
+                -0.380,
+                -0.480,
+                1.810
+            ),
+            (
+                -0.395,
+                -0.445,
+                1.610
+            ),
+        ],
+
+        [
+            (
+                -0.345,
+                -0.445,
+                1.915
+            ),
+            (
+                -0.375,
+                -0.400,
+                1.755
+            ),
+            (
+                -0.385,
+                -0.365,
+                1.595
+            ),
+        ],
+
+        [
+            (
+                -0.340,
+                -0.365,
+                1.845
+            ),
+            (
+                -0.365,
+                -0.325,
+                1.715
+            ),
+            (
+                -0.365,
+                -0.295,
+                1.610
+            ),
+        ],
+    ]
+
+    mane_widths = [
+        0.040,
+        0.043,
+        0.045,
+        0.042,
+        0.036
+    ]
+
+    for index, points in enumerate(
+        mane_curves
+    ):
+
+        curve_mesh(
+            "RiverwatchV47ManeFlow%02d"
+            % (
+                index + 1
+            ),
+            points,
+            dark,
+            mane_widths[index],
+            "head",
+            5
+        )
+
+    # Small opposite-side crest for thickness in front view.
+
+    curve_mesh(
+        "RiverwatchV47ManeOppositeCrest",
+        [
+            (
+                0.250,
+                -0.710,
+                2.060
+            ),
+            (
+                0.255,
+                -0.600,
+                2.025
+            ),
+            (
+                0.260,
+                -0.490,
+                1.960
+            ),
+            (
+                0.260,
+                -0.380,
+                1.875
+            ),
+            (
+                0.255,
+                -0.285,
+                1.790
+            ),
+        ],
+        dark,
+        0.025,
+        "head",
+        5
+    )
+
+    # Forelock.
+
+    curve_mesh(
+        "RiverwatchV47ForelockLeft",
+        [
+            (
+                -0.045,
+                -0.745,
+                2.075
+            ),
+            (
+                -0.060,
+                -0.785,
+                1.975
+            ),
+            (
+                -0.060,
+                -0.815,
+                1.875
+            ),
+        ],
+        dark,
+        0.023,
+        "head",
+        4
+    )
+
+    curve_mesh(
+        "RiverwatchV47ForelockRight",
+        [
+            (
+                0.045,
+                -0.745,
+                2.075
+            ),
+            (
+                0.060,
+                -0.785,
+                1.980
+            ),
+            (
+                0.060,
+                -0.815,
+                1.895
+            ),
+        ],
+        dark,
+        0.023,
+        "head",
+        4
+    )
+
+    # ========================================================
+    # 11. DELETE V46 TAIL
+    # ========================================================
+
+    delete_prefix(
+        "RiverwatchV46Tail"
+    )
+
+    # ========================================================
+    # 12. V47 TAIL
+    #
+    # Narrow dock.
+    # Full center.
+    # Separated outer locks.
+    # ========================================================
+
+    ellipsoid(
+        "RiverwatchV47TailDock",
+        (
+            0.0,
+            1.725,
+            1.350
+        ),
+        (
+            0.095,
+            0.085,
+            0.100
+        ),
+        dark,
+        "body"
+    )
+
+    # Core flow.
+
+    curve_mesh(
+        "RiverwatchV47TailCore",
+        [
+            (
+                0.0,
+                1.720,
+                1.350
+            ),
+            (
+                0.0,
+                1.795,
+                1.170
+            ),
+            (
+                0.0,
+                1.835,
+                0.930
+            ),
+            (
+                0.0,
+                1.825,
+                0.690
+            ),
+            (
+                0.0,
+                1.780,
+                0.465
+            ),
+            (
+                0.0,
+                1.710,
+                0.245
+            ),
+        ],
+        dark,
+        0.060,
+        "body",
+        5
+    )
+
+    tail_locks = [
+
+        (
+            -0.115,
+            -0.025,
+            0.034
+        ),
+
+        (
+            -0.065,
+            0.000,
+            0.038
+        ),
+
+        (
+            0.065,
+            0.000,
+            0.038
+        ),
+
+        (
+            0.115,
+            -0.025,
+            0.034
+        ),
+    ]
+
+    for index, data in enumerate(
+        tail_locks
+    ):
+
+        x = data[0]
+        y_shift = data[1]
+        radius = data[2]
+
+        curve_mesh(
+            "RiverwatchV47TailLock%02d"
+            % (
+                index + 1
+            ),
+            [
+                (
+                    x * 0.35,
+                    1.720,
+                    1.350
+                ),
+                (
+                    x * 0.65,
+                    1.805 + y_shift,
+                    1.165
+                ),
+                (
+                    x,
+                    1.850 + y_shift,
+                    0.920
+                ),
+                (
+                    x * 1.10,
+                    1.835 + y_shift,
+                    0.670
+                ),
+                (
+                    x,
+                    1.785 + y_shift,
+                    0.440
+                ),
+                (
+                    x * 0.70,
+                    1.705 + y_shift,
+                    0.220
+                ),
+            ],
+            dark,
+            radius,
+            "body",
+            5
+        )
+
+    # ========================================================
+    # 13. RENAME REMAINING V46 OBJECTS
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV46"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV46",
+                "RiverwatchV47",
+                1
+            )
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V46"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V46",
+                "Riverwatch V47",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "full_four_leg_stance_v47"
+
+    arm[
+        "broken_knight_horse_v47_previous_rating"
+    ] = 48
+
+    arm[
+        "broken_knight_horse_v47_all_legs_rebuilt"
+    ] = True
+
+    arm[
+        "broken_knight_horse_v47_forelegs"
+    ] = "shoulder_elbow_forearm_knee_cannon_fetlock_pastern"
+
+    arm[
+        "broken_knight_horse_v47_hindlegs"
+    ] = "hip_forward_stifle_rearward_gaskin_hock_vertical_cannon"
+
+    arm[
+        "broken_knight_horse_v47_body"
+    ] = "raised_abdomen_narrower_rear_flattened_croup"
+
+    arm[
+        "broken_knight_horse_v47_head"
+    ] = "downward_carriage_4_5_degrees"
+
+    arm[
+        "broken_knight_horse_v47_mane"
+    ] = "curved_layered_no_large_slab"
+
+    arm[
+        "broken_knight_horse_v47_tail"
+    ] = "tapered_core_four_outer_locks"
+
+    arm[
+        "broken_knight_horse_v47_goal"
+    ] = "obvious_standing_horse_anatomy"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_reference_match"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V47",
+        "FULL_FOUR_LEG_STANCE_COMPLETE"
     )
 
 def reset_pose(arm):
