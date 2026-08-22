@@ -83172,7 +83172,7 @@ def build_horse_model_v58_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v59_base(arm):
 
     import bpy
     import math
@@ -84324,6 +84324,1258 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V59",
         "HORSE_MASS_STANCE_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V60
+    #
+    # AGGRESSIVE HORSE PROPORTION PASS
+    #
+    # V59 = 56 / 100
+    #
+    # This pass intentionally makes BIG visible changes.
+    #
+    # ========================================================
+
+    build_horse_model_v59_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V60",
+        "V59_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def clamp01(value):
+
+        return max(
+            0.0,
+            min(
+                1.0,
+                value
+            )
+        )
+
+    def smoothstep(value):
+
+        value = clamp01(
+            value
+        )
+
+        return (
+            value
+            * value
+            * (
+                3.0
+                - 2.0
+                * value
+            )
+        )
+
+    def bell(
+        value,
+        center,
+        radius
+    ):
+
+        if radius <= 0.0:
+            return 0.0
+
+        distance = abs(
+            value - center
+        )
+
+        if distance >= radius:
+            return 0.0
+
+        return smoothstep(
+            1.0
+            - distance
+            / radius
+        )
+
+    def rename_prefix(
+        old_prefix,
+        new_prefix
+    ):
+
+        for obj in list(
+            bpy.data.objects
+        ):
+
+            if obj.name.startswith(
+                old_prefix
+            ):
+
+                obj.name = obj.name.replace(
+                    old_prefix,
+                    new_prefix,
+                    1
+                )
+
+    def mesh_center_x(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+            or
+            not obj.data.vertices
+        ):
+
+            return 0.0
+
+        xs = [
+            vertex.co.x
+            for vertex in obj.data.vertices
+        ]
+
+        return (
+            min(xs)
+            + max(xs)
+        ) * 0.5
+
+    # ========================================================
+    # CORE
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV59ProfileCore"
+    )
+
+    if core is None:
+
+        raise RuntimeError(
+            "V60 could not find RiverwatchV59ProfileCore."
+        )
+
+    if core.type != "MESH":
+
+        raise RuntimeError(
+            "V60 profile core is not a mesh."
+        )
+
+    # ========================================================
+    # CORE SCULPT
+    #
+    # Large, reference-driven changes.
+    #
+    # ========================================================
+
+    for vertex in core.data.vertices:
+
+        co = vertex.co
+
+        x = co.x
+        y = co.y
+        z = co.z
+
+        # ====================================================
+        # CROUP
+        #
+        # Fuller upper hindquarter.
+        # Rounder side profile.
+        # ====================================================
+
+        croup = bell(
+            y,
+            1.43,
+            0.42
+        )
+
+        if croup > 0.0:
+
+            x *= (
+                1.0
+                + 0.090
+                * croup
+            )
+
+            if z > 1.35:
+
+                top_strength = clamp01(
+                    (
+                        z - 1.35
+                    )
+                    / 0.35
+                )
+
+                z += (
+                    0.060
+                    * croup
+                    * top_strength
+                )
+
+            if z < 1.28:
+
+                x *= (
+                    1.0
+                    + 0.040
+                    * croup
+                )
+
+        # ====================================================
+        # LOIN
+        #
+        # Keep it narrower than ribs / quarters.
+        # ====================================================
+
+        loin = bell(
+            y,
+            1.03,
+            0.27
+        )
+
+        if loin > 0.0:
+
+            x *= (
+                1.0
+                - 0.025
+                * loin
+            )
+
+            if z > 1.48:
+
+                z -= (
+                    0.012
+                    * loin
+                )
+
+        # ====================================================
+        # RIB CAGE
+        #
+        # Much more horse mass.
+        # ====================================================
+
+        barrel = bell(
+            y,
+            0.40,
+            0.64
+        )
+
+        if barrel > 0.0:
+
+            x *= (
+                1.0
+                + 0.095
+                * barrel
+            )
+
+            if z < 1.16:
+
+                lower = clamp01(
+                    (
+                        1.16 - z
+                    )
+                    / 0.38
+                )
+
+                z -= (
+                    0.035
+                    * barrel
+                    * lower
+                )
+
+        # ====================================================
+        # FLANK TUCK
+        #
+        # Prevent cow belly.
+        # ====================================================
+
+        flank = bell(
+            y,
+            0.89,
+            0.30
+        )
+
+        if (
+            flank > 0.0
+            and
+            z < 1.14
+        ):
+
+            lower = clamp01(
+                (
+                    1.14 - z
+                )
+                / 0.32
+            )
+
+            z += (
+                0.075
+                * flank
+                * lower
+            )
+
+        # ====================================================
+        # SHOULDER
+        #
+        # Major increase.
+        # ====================================================
+
+        shoulder = bell(
+            y,
+            -0.08,
+            0.33
+        )
+
+        if shoulder > 0.0:
+
+            x *= (
+                1.0
+                + 0.145
+                * shoulder
+            )
+
+            if z < 1.25:
+
+                lower = clamp01(
+                    (
+                        1.25 - z
+                    )
+                    / 0.44
+                )
+
+                z -= (
+                    0.070
+                    * shoulder
+                    * lower
+                )
+
+        # ====================================================
+        # WITHERS
+        #
+        # Stronger, taller, narrower.
+        # ====================================================
+
+        withers = bell(
+            y,
+            -0.22,
+            0.19
+        )
+
+        if (
+            withers > 0.0
+            and
+            z > 1.45
+        ):
+
+            upper = clamp01(
+                (
+                    z - 1.45
+                )
+                / 0.40
+            )
+
+            z += (
+                0.095
+                * withers
+                * upper
+            )
+
+            x *= (
+                1.0
+                - 0.045
+                * withers
+                * upper
+            )
+
+        # ====================================================
+        # NECK
+        #
+        # This is the largest single silhouette change.
+        #
+        # Make the neck BASE much larger.
+        #
+        # Keep the poll relatively refined.
+        # ====================================================
+
+        neck_root = bell(
+            y,
+            -0.34,
+            0.27
+        )
+
+        neck_mid = bell(
+            y,
+            -0.49,
+            0.27
+        )
+
+        neck_upper = bell(
+            y,
+            -0.62,
+            0.18
+        )
+
+        if (
+            y <= -0.23
+            and
+            y >= -0.72
+        ):
+
+            # Width.
+
+            x *= (
+                1.0
+                + 0.180
+                * neck_root
+                + 0.105
+                * neck_mid
+                + 0.035
+                * neck_upper
+            )
+
+            # Approximate central axis through neck.
+
+            t = clamp01(
+                (
+                    -y - 0.23
+                )
+                / 0.49
+            )
+
+            center_z = (
+                1.50
+                + 0.42
+                * t
+            )
+
+            offset = (
+                z
+                - center_z
+            )
+
+            # Strongly deepen neck root.
+
+            if offset < 0.0:
+
+                expansion = (
+                    1.0
+                    + 0.28
+                    * neck_root
+                    + 0.17
+                    * neck_mid
+                    + 0.05
+                    * neck_upper
+                )
+
+            else:
+
+                expansion = (
+                    1.0
+                    + 0.15
+                    * neck_root
+                    + 0.10
+                    * neck_mid
+                    + 0.04
+                    * neck_upper
+                )
+
+            z = (
+                center_z
+                + offset
+                * expansion
+            )
+
+            # Extra lower-neck fill.
+
+            if z < center_z:
+
+                z -= (
+                    0.055
+                    * neck_root
+                    + 0.030
+                    * neck_mid
+                )
+
+            # Crest strength.
+
+            if z > center_z:
+
+                z += (
+                    0.030
+                    * neck_mid
+                )
+
+        # ====================================================
+        # POLL
+        # ====================================================
+
+        poll = bell(
+            y,
+            -0.70,
+            0.12
+        )
+
+        if (
+            poll > 0.0
+            and
+            z > 1.84
+        ):
+
+            z += (
+                0.045
+                * poll
+            )
+
+        # ====================================================
+        # HEAD
+        #
+        # Larger / deeper than V59.
+        #
+        # ====================================================
+
+        if y < -0.73:
+
+            head_strength = clamp01(
+                (
+                    -y - 0.73
+                )
+                / 0.57
+            )
+
+            # Width.
+
+            x *= (
+                1.095
+                - 0.020
+                * head_strength
+            )
+
+            # Vertical depth around head center line.
+
+            center_z = (
+                1.94
+                + 0.55
+                * (
+                    y + 0.73
+                )
+            )
+
+            offset = (
+                z
+                - center_z
+            )
+
+            z = (
+                center_z
+                + offset
+                * 1.105
+            )
+
+        # ====================================================
+        # FOREHEAD
+        # ====================================================
+
+        forehead = bell(
+            y,
+            -0.80,
+            0.14
+        )
+
+        if (
+            forehead > 0.0
+            and
+            z > 1.86
+        ):
+
+            z += (
+                0.030
+                * forehead
+            )
+
+        # ====================================================
+        # CHEEK / JAW
+        #
+        # No separate balls.
+        # ====================================================
+
+        cheek = bell(
+            y,
+            -0.95,
+            0.19
+        )
+
+        if cheek > 0.0:
+
+            x *= (
+                1.0
+                + 0.095
+                * cheek
+            )
+
+            if z < 1.75:
+
+                lower = clamp01(
+                    (
+                        1.75 - z
+                    )
+                    / 0.27
+                )
+
+                z -= (
+                    0.070
+                    * cheek
+                    * lower
+                )
+
+        # ====================================================
+        # NASAL BRIDGE
+        #
+        # Slightly more defined.
+        # ====================================================
+
+        nose = bell(
+            y,
+            -1.18,
+            0.20
+        )
+
+        if nose > 0.0:
+
+            # Prevent the face becoming too thick.
+
+            x *= (
+                1.0
+                - 0.025
+                * nose
+            )
+
+            if z > 1.62:
+
+                z += (
+                    0.012
+                    * nose
+                )
+
+        co.x = x
+        co.z = z
+
+    core.data.update()
+
+    # ========================================================
+    # CORE SOFTENING
+    #
+    # Keep the profile planes, but remove some blockiness.
+    # ========================================================
+
+    bpy.ops.object.select_all(
+        action="DESELECT"
+    )
+
+    core.select_set(
+        True
+    )
+
+    bpy.context.view_layer.objects.active = core
+
+    modifier = core.modifiers.new(
+        "V60 Controlled Softening",
+        "BEVEL"
+    )
+
+    modifier.width = 0.014
+    modifier.segments = 3
+    modifier.limit_method = "ANGLE"
+    modifier.angle_limit = math.radians(
+        28.0
+    )
+
+    bpy.ops.object.modifier_apply(
+        modifier=modifier.name
+    )
+
+    # ========================================================
+    # FRONT LEGS
+    #
+    # Make them look like horse legs rather than narrow sticks.
+    # ========================================================
+
+    def improve_front_leg(name):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+
+            raise RuntimeError(
+                "V60 missing "
+                + name
+            )
+
+        center_x = mesh_center_x(
+            obj
+        )
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            if co.z > 1.00:
+
+                scale_x = 1.18
+                scale_y = 1.10
+
+            elif co.z > 0.72:
+
+                scale_x = 1.14
+                scale_y = 1.08
+
+            elif co.z > 0.50:
+
+                scale_x = 1.10
+                scale_y = 1.07
+
+            elif co.z > 0.22:
+
+                scale_x = 1.07
+                scale_y = 1.04
+
+            else:
+
+                scale_x = 1.04
+                scale_y = 1.02
+
+            co.x = (
+                center_x
+                + (
+                    co.x - center_x
+                )
+                * scale_x
+            )
+
+            # Slightly strengthen front/back depth.
+            #
+            # Preserve overall standing location.
+
+            if abs(co.y) < 0.30:
+
+                co.y *= scale_y
+
+        obj.data.update()
+
+    improve_front_leg(
+        "RiverwatchV59FrontLeftLeg"
+    )
+
+    improve_front_leg(
+        "RiverwatchV59FrontRightLeg"
+    )
+
+    # ========================================================
+    # HIND LEGS
+    #
+    # AGGRESSIVE STANCE CORRECTION.
+    #
+    # ========================================================
+
+    def improve_hind_leg(name):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+
+            raise RuntimeError(
+                "V60 missing "
+                + name
+            )
+
+        center_x = mesh_center_x(
+            obj
+        )
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            # -----------------------------------------------
+            # HIP / THIGH
+            # -----------------------------------------------
+
+            if co.z > 1.02:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x - center_x
+                    )
+                    * 1.16
+                )
+
+                # Shift upper thigh slightly rearward.
+                co.y += 0.025
+
+            # -----------------------------------------------
+            # STIFLE
+            #
+            # Bring it BACK.
+            # -----------------------------------------------
+
+            elif co.z > 0.79:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x - center_x
+                    )
+                    * 1.13
+                )
+
+                co.y += 0.085
+
+            # -----------------------------------------------
+            # GASKIN
+            # -----------------------------------------------
+
+            elif co.z > 0.58:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x - center_x
+                    )
+                    * 1.10
+                )
+
+                co.y += 0.060
+
+            # -----------------------------------------------
+            # HOCK
+            #
+            # Rearward.
+            # -----------------------------------------------
+
+            elif co.z > 0.47:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x - center_x
+                    )
+                    * 1.10
+                )
+
+                co.y += 0.055
+
+            # -----------------------------------------------
+            # CANNON
+            #
+            # Pull into a near vertical column.
+            # -----------------------------------------------
+
+            elif co.z > 0.18:
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x - center_x
+                    )
+                    * 1.07
+                )
+
+                target_y = 1.50
+
+                co.y = (
+                    co.y
+                    * 0.48
+                    + target_y
+                    * 0.52
+                )
+
+            # -----------------------------------------------
+            # FETLOCK / PASTERN
+            # -----------------------------------------------
+
+            else:
+
+                target_y = 1.43
+
+                co.y = (
+                    co.y
+                    * 0.72
+                    + target_y
+                    * 0.28
+                )
+
+        obj.data.update()
+
+    improve_hind_leg(
+        "RiverwatchV59HindLeftLeg"
+    )
+
+    improve_hind_leg(
+        "RiverwatchV59HindRightLeg"
+    )
+
+    # ========================================================
+    # HIND HOOFS
+    #
+    # Move under newly vertical cannons.
+    # ========================================================
+
+    def move_mesh_y(
+        name,
+        amount
+    ):
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is None:
+            return
+
+        if obj.type != "MESH":
+            return
+
+        for vertex in obj.data.vertices:
+
+            vertex.co.y += amount
+
+        obj.data.update()
+
+    move_mesh_y(
+        "RiverwatchV59HindLeftHoof",
+        0.035
+    )
+
+    move_mesh_y(
+        "RiverwatchV59HindRightHoof",
+        0.035
+    )
+
+    # ========================================================
+    # HEAD DETAILS
+    #
+    # Increase visual head size while preserving placement.
+    # ========================================================
+
+    muzzle = bpy.data.objects.get(
+        "RiverwatchV59Muzzle"
+    )
+
+    if muzzle is not None:
+
+        for vertex in muzzle.data.vertices:
+
+            vertex.co.x *= 1.08
+            vertex.co.z *= 1.07
+            vertex.co.y *= 1.03
+
+        muzzle.data.update()
+
+    # ========================================================
+    # EYES
+    # ========================================================
+
+    left_eye = bpy.data.objects.get(
+        "RiverwatchV59LeftEye"
+    )
+
+    right_eye = bpy.data.objects.get(
+        "RiverwatchV59RightEye"
+    )
+
+    if left_eye is not None:
+
+        left_eye.location.x -= 0.015
+        left_eye.location.z += 0.010
+
+    if right_eye is not None:
+
+        right_eye.location.x += 0.015
+        right_eye.location.z += 0.010
+
+    # ========================================================
+    # EARS
+    # ========================================================
+
+    for ear_name in (
+        "RiverwatchV59LeftEar",
+        "RiverwatchV59RightEar"
+    ):
+
+        ear = bpy.data.objects.get(
+            ear_name
+        )
+
+        if ear is None:
+            continue
+
+        if ear.type != "MESH":
+            continue
+
+        for vertex in ear.data.vertices:
+
+            vertex.co.x *= 1.06
+            vertex.co.z *= 1.10
+
+        ear.data.update()
+
+    # ========================================================
+    # MANE
+    #
+    # Much more visible.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if not obj.name.startswith(
+            "RiverwatchV59ManeLock"
+        ):
+
+            continue
+
+        if obj.type != "MESH":
+            continue
+
+        if not obj.data.vertices:
+            continue
+
+        xs = [
+            vertex.co.x
+            for vertex in obj.data.vertices
+        ]
+
+        zs = [
+            vertex.co.z
+            for vertex in obj.data.vertices
+        ]
+
+        center_x = (
+            min(xs)
+            + max(xs)
+        ) * 0.5
+
+        center_z = (
+            min(zs)
+            + max(zs)
+        ) * 0.5
+
+        for vertex in obj.data.vertices:
+
+            co = vertex.co
+
+            co.x = (
+                center_x
+                + (
+                    co.x - center_x
+                )
+                * 1.35
+            )
+
+            # Make bottom half hang farther.
+
+            if co.z < center_z:
+
+                co.z = (
+                    center_z
+                    + (
+                        co.z - center_z
+                    )
+                    * 1.55
+                )
+
+        obj.data.update()
+
+    # ========================================================
+    # FORELOCK
+    # ========================================================
+
+    forelock = bpy.data.objects.get(
+        "RiverwatchV59Forelock"
+    )
+
+    if (
+        forelock is not None
+        and
+        forelock.type == "MESH"
+    ):
+
+        if forelock.data.vertices:
+
+            zs = [
+                vertex.co.z
+                for vertex in forelock.data.vertices
+            ]
+
+            top_z = max(
+                zs
+            )
+
+            for vertex in forelock.data.vertices:
+
+                drop = (
+                    top_z
+                    - vertex.co.z
+                )
+
+                vertex.co.z -= (
+                    drop * 0.25
+                )
+
+            forelock.data.update()
+
+    # ========================================================
+    # TAIL
+    #
+    # Slightly fuller near root, taper unchanged.
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV59Tail"
+    )
+
+    if (
+        tail is not None
+        and
+        tail.type == "MESH"
+    ):
+
+        if tail.data.vertices:
+
+            xs = [
+                vertex.co.x
+                for vertex in tail.data.vertices
+            ]
+
+            center_x = (
+                min(xs)
+                + max(xs)
+            ) * 0.5
+
+            for vertex in tail.data.vertices:
+
+                co = vertex.co
+
+                strength = clamp01(
+                    (
+                        co.z - 0.45
+                    )
+                    / 0.90
+                )
+
+                co.x = (
+                    center_x
+                    + (
+                        co.x - center_x
+                    )
+                    * (
+                        1.0
+                        + 0.10
+                        * strength
+                    )
+                )
+
+            tail.data.update()
+
+    # ========================================================
+    # RENAME V59 -> V60
+    # ========================================================
+
+    rename_prefix(
+        "RiverwatchV59",
+        "RiverwatchV60"
+    )
+
+    for material in list(
+        bpy.data.materials
+    ):
+
+        if material.name.startswith(
+            "Riverwatch V59"
+        ):
+
+            material.name = material.name.replace(
+                "Riverwatch V59",
+                "Riverwatch V60",
+                1
+            )
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "aggressive_horse_proportion_v60"
+
+    arm[
+        "broken_knight_horse_v60_previous_rating"
+    ] = 56
+
+    arm[
+        "broken_knight_horse_v60_score_change"
+    ] = "none_for_v59"
+
+    arm[
+        "broken_knight_horse_v60_core_method"
+    ] = "v58_profile_cage_aggressively_resculpted"
+
+    arm[
+        "broken_knight_horse_v60_neck"
+    ] = "large_muscular_base_controlled_upper_neck"
+
+    arm[
+        "broken_knight_horse_v60_head"
+    ] = "larger_deeper_integrated_cheek_jaw"
+
+    arm[
+        "broken_knight_horse_v60_chest"
+    ] = "substantially_deeper_and_wider"
+
+    arm[
+        "broken_knight_horse_v60_withers"
+    ] = "prominent_narrow_peak"
+
+    arm[
+        "broken_knight_horse_v60_barrel"
+    ] = "fuller_ribs_with_tucked_flank"
+
+    arm[
+        "broken_knight_horse_v60_croup"
+    ] = "fuller_rounder_without_cow_sphere"
+
+    arm[
+        "broken_knight_horse_v60_front_legs"
+    ] = "substantially_stronger"
+
+    arm[
+        "broken_knight_horse_v60_hind_legs"
+    ] = "stifle_back_hock_back_vertical_cannon"
+
+    arm[
+        "broken_knight_horse_v60_mane"
+    ] = "substantially_fuller"
+
+    arm[
+        "broken_knight_horse_v60_goal"
+    ] = "obvious_jump_toward_sturdy_reference_horse"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_visual_reference_match"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V60",
+        "AGGRESSIVE_PROPORTION_PASS_COMPLETE"
     )
 
 def reset_pose(arm):
