@@ -1,9 +1,8 @@
-# V84_FEATURE_ALIGNMENT
-# V83_FEATURE_ALIGNMENT
+﻿# V92_STRUCTURAL_GEOMETRY
+
 import bpy
 import bmesh
 import importlib.util
-import math
 
 from pathlib import Path
 from mathutils import Vector
@@ -11,10 +10,8 @@ from mathutils import Vector
 
 ROOT = Path(__file__).resolve().parents[3]
 
-TUNING_FILE = (
-    Path(__file__).resolve().with_name(
-        "riverwatch_horse_tuning.py"
-    )
+TUNING_FILE = Path(__file__).resolve().with_name(
+    "riverwatch_horse_tuning.py"
 )
 
 BLEND_FILE = (
@@ -35,110 +32,31 @@ GLB_FILE = (
 
 
 RING_12 = [
-
-    (
-        0.0,
-        1.0
-    ),
-
-    (
-        0.55,
-        0.90
-    ),
-
-    (
-        0.88,
-        0.55
-    ),
-
-    (
-        1.0,
-        0.15
-    ),
-
-    (
-        0.92,
-        -0.35
-    ),
-
-    (
-        0.55,
-        -0.82
-    ),
-
-    (
-        0.0,
-        -1.0
-    ),
-
-    (
-        -0.55,
-        -0.82
-    ),
-
-    (
-        -0.92,
-        -0.35
-    ),
-
-    (
-        -1.0,
-        0.15
-    ),
-
-    (
-        -0.88,
-        0.55
-    ),
-
-    (
-        -0.55,
-        0.90
-    ),
+    (0.00, 1.00),
+    (0.55, 0.90),
+    (0.88, 0.55),
+    (1.00, 0.15),
+    (0.92, -0.35),
+    (0.55, -0.82),
+    (0.00, -1.00),
+    (-0.55, -0.82),
+    (-0.92, -0.35),
+    (-1.00, 0.15),
+    (-0.88, 0.55),
+    (-0.55, 0.90),
 ]
 
-
-RING_8 = [
-
-    (
-        0.0,
-        1.0
-    ),
-
-    (
-        0.72,
-        0.70
-    ),
-
-    (
-        1.0,
-        0.0
-    ),
-
-    (
-        0.72,
-        -0.70
-    ),
-
-    (
-        0.0,
-        -1.0
-    ),
-
-    (
-        -0.72,
-        -0.70
-    ),
-
-    (
-        -1.0,
-        0.0
-    ),
-
-    (
-        -0.72,
-        0.70
-    ),
+RING_10 = [
+    (0.00, 1.00),
+    (0.59, 0.81),
+    (0.95, 0.31),
+    (0.95, -0.31),
+    (0.59, -0.81),
+    (0.00, -1.00),
+    (-0.59, -0.81),
+    (-0.95, -0.31),
+    (-0.95, 0.31),
+    (-0.59, 0.81),
 ]
 
 
@@ -146,7 +64,7 @@ def load_tuning():
 
     spec = importlib.util.spec_from_file_location(
         "riverwatch_horse_tuning_live",
-        TUNING_FILE
+        TUNING_FILE,
     )
 
     module = importlib.util.module_from_spec(
@@ -202,7 +120,7 @@ def make_material(
     name,
     color,
     roughness=0.72,
-    metallic=0.0
+    metallic=0.0,
 ):
 
     material = bpy.data.materials.new(
@@ -210,7 +128,6 @@ def make_material(
     )
 
     material.diffuse_color = color
-
     material.use_nodes = True
 
     bsdf = material.node_tree.nodes.get(
@@ -250,7 +167,7 @@ def recalc_normals(
             bm,
             faces=list(
                 bm.faces
-            )
+            ),
         )
 
     bm.to_mesh(
@@ -276,15 +193,17 @@ def smooth_object(
 
 def add_subdivision(
     obj,
-    levels=1
+    levels=1,
 ):
 
     modifier = obj.modifiers.new(
         "RiverwatchControlledSubdivision",
-        "SUBSURF"
+        "SUBSURF",
     )
 
-    modifier.subdivision_type = "CATMULL_CLARK"
+    modifier.subdivision_type = (
+        "CATMULL_CLARK"
+    )
 
     modifier.levels = levels
     modifier.render_levels = levels
@@ -293,12 +212,12 @@ def add_subdivision(
 def add_bevel(
     obj,
     width,
-    segments=2
+    segments=2,
 ):
 
     modifier = obj.modifiers.new(
         "RiverwatchEdgeSoftening",
-        "BEVEL"
+        "BEVEL",
     )
 
     modifier.width = width
@@ -312,7 +231,7 @@ def mesh_object(
     materials,
     root,
     region,
-    smooth=True
+    smooth=True,
 ):
 
     mesh = bpy.data.meshes.new(
@@ -322,7 +241,7 @@ def mesh_object(
     mesh.from_pydata(
         vertices,
         [],
-        faces
+        faces,
     )
 
     mesh.update()
@@ -333,7 +252,7 @@ def mesh_object(
 
     obj = bpy.data.objects.new(
         name,
-        mesh
+        mesh,
     )
 
     bpy.context.collection.objects.link(
@@ -364,14 +283,14 @@ def mesh_object(
 def append_caps(
     faces,
     ring_count,
-    ring_size
+    ring_size,
 ):
 
     first = tuple(
         reversed(
             range(
                 0,
-                ring_size
+                ring_size,
             )
         )
     )
@@ -396,71 +315,14 @@ def append_caps(
     )
 
 
-def body_mesh(
-    name,
-    stations,
-    coat,
-    root
+def connect_rings(
+    faces,
+    ring_count,
+    ring_size,
 ):
 
-    vertices = []
-    faces = []
-
-    ring_size = len(
-        RING_12
-    )
-
-    for station in stations:
-
-        (
-            y,
-            center_z,
-            half_width,
-            top_depth,
-            lower_depth,
-            upper_width,
-            lower_width,
-        ) = station
-
-        for (
-            x_normal,
-            z_normal
-        ) in RING_12:
-
-            width_factor = (
-                upper_width
-                if z_normal >= 0.0
-                else lower_width
-            )
-
-            x = (
-                x_normal
-                * half_width
-                * width_factor
-            )
-
-            depth = (
-                top_depth
-                if z_normal >= 0.0
-                else lower_depth
-            )
-
-            z = (
-                center_z
-                + z_normal
-                * depth
-            )
-
-            vertices.append(
-                (
-                    x,
-                    y,
-                    z
-                )
-            )
-
     for station_index in range(
-        len(stations) - 1
+        ring_count - 1
     ):
 
         current = (
@@ -499,28 +361,99 @@ def body_mesh(
                 )
             )
 
+
+def fixed_y_loft(
+    name,
+    stations,
+    materials,
+    root,
+    region,
+    ring=RING_12,
+    subdivide=True,
+):
+
+    vertices = []
+    faces = []
+
+    ring_size = len(
+        ring
+    )
+
+    for station in stations:
+
+        (
+            y,
+            center_z,
+            half_width,
+            top_depth,
+            lower_depth,
+            upper_width,
+            lower_width,
+        ) = station
+
+        for (
+            x_normal,
+            z_normal,
+        ) in ring:
+
+            width_factor = (
+                upper_width
+                if z_normal >= 0.0
+                else lower_width
+            )
+
+            depth = (
+                top_depth
+                if z_normal >= 0.0
+                else lower_depth
+            )
+
+            vertices.append(
+                (
+                    x_normal
+                    * half_width
+                    * width_factor,
+
+                    y,
+
+                    center_z
+                    + z_normal
+                    * depth,
+                )
+            )
+
+    connect_rings(
+        faces,
+        len(
+            stations
+        ),
+        ring_size,
+    )
+
     append_caps(
         faces,
-        len(stations),
-        ring_size
+        len(
+            stations
+        ),
+        ring_size,
     )
 
     obj = mesh_object(
         name,
         vertices,
         faces,
-        [
-            coat
-        ],
+        materials,
         root,
-        "anatomy",
-        True
+        region,
+        True,
     )
 
-    add_subdivision(
-        obj,
-        1
-    )
+    if subdivide:
+
+        add_subdivision(
+            obj,
+            1,
+        )
 
     return obj
 
@@ -532,7 +465,7 @@ def path_loft(
     root,
     region,
     ring=RING_12,
-    subdivide=True
+    subdivide=True,
 ):
 
     vertices = []
@@ -596,7 +529,7 @@ def path_loft(
                 (
                     0.0,
                     -1.0,
-                    0.0
+                    0.0,
                 )
             )
 
@@ -606,7 +539,7 @@ def path_loft(
             (
                 1.0,
                 0.0,
-                0.0
+                0.0,
             )
         )
 
@@ -620,7 +553,7 @@ def path_loft(
                 (
                     0.0,
                     0.0,
-                    1.0
+                    1.0,
                 )
             )
 
@@ -645,7 +578,7 @@ def path_loft(
 
         for (
             x_normal,
-            z_normal
+            z_normal,
         ) in ring:
 
             width_factor = (
@@ -662,12 +595,14 @@ def path_loft(
 
             point = (
                 center
+
                 + side
                 * (
                     x_normal
                     * half_width
                     * width_factor
                 )
+
                 + up
                 * (
                     z_normal
@@ -681,50 +616,20 @@ def path_loft(
                 )
             )
 
-    for station_index in range(
-        len(stations) - 1
-    ):
-
-        current = (
-            station_index
-            * ring_size
-        )
-
-        following = (
-            (
-                station_index + 1
-            )
-            * ring_size
-        )
-
-        for ring_index in range(
-            ring_size
-        ):
-
-            next_index = (
-                ring_index + 1
-            ) % ring_size
-
-            faces.append(
-                (
-                    current
-                    + ring_index,
-
-                    current
-                    + next_index,
-
-                    following
-                    + next_index,
-
-                    following
-                    + ring_index,
-                )
-            )
+    connect_rings(
+        faces,
+        len(
+            stations
+        ),
+        ring_size,
+    )
 
     append_caps(
         faces,
-        len(stations),
-        ring_size
+        len(
+            stations
+        ),
+        ring_size,
     )
 
     obj = mesh_object(
@@ -734,14 +639,14 @@ def path_loft(
         materials,
         root,
         region,
-        True
+        True,
     )
 
     if subdivide:
 
         add_subdivision(
             obj,
-            1
+            1,
         )
 
     return obj
@@ -749,7 +654,7 @@ def path_loft(
 
 def limb_stations(
     x,
-    data
+    data,
 ):
 
     result = []
@@ -758,7 +663,7 @@ def limb_stations(
         y,
         z,
         half_width,
-        depth
+        depth,
     ) in data:
 
         result.append(
@@ -779,7 +684,7 @@ def limb_stations(
 
 def assign_dark_lower_leg(
     obj,
-    dark_threshold
+    dark_threshold,
 ):
 
     if len(
@@ -804,20 +709,19 @@ def assign_dark_lower_leg(
             1,
             len(
                 polygon.vertices
-            )
+            ),
         )
 
-        if average_z < dark_threshold:
-
-            polygon.material_index = 1
-
-        else:
-
-            polygon.material_index = 0
+        polygon.material_index = (
+            1
+            if average_z < dark_threshold
+            else 0
+        )
 
 
 def assign_head_muzzle(
-    obj
+    obj,
+    muzzle_start=-1.625,
 ):
 
     if len(
@@ -829,38 +733,27 @@ def assign_head_muzzle(
     for polygon in obj.data.polygons:
 
         average_y = 0.0
-        average_z = 0.0
 
         for vertex_index in polygon.vertices:
 
-            vertex = obj.data.vertices[
-                vertex_index
-            ].co
+            average_y += (
+                obj.data.vertices[
+                    vertex_index
+                ].co.y
+            )
 
-            average_y += vertex.y
-            average_z += vertex.z
-
-        divisor = max(
+        average_y /= max(
             1,
             len(
                 polygon.vertices
-            )
+            ),
         )
 
-        average_y /= divisor
-        average_z /= divisor
-
-        if (
-            average_y < -1.585
-            and
-            average_z < 1.950
-        ):
-
-            polygon.material_index = 1
-
-        else:
-
-            polygon.material_index = 0
+        polygon.material_index = (
+            1
+            if average_y < muzzle_start
+            else 0
+        )
 
 
 def create_hoof(
@@ -871,143 +764,110 @@ def create_hoof(
     length,
     height,
     hoof_material,
-    root
+    root,
 ):
-
-    half_width = (
-        width
-        * 0.5
-    )
 
     bottom_z = 0.018
     top_z = height
 
-    toe_y = (
-        center_y
-        - length
-        * 0.60
-    )
-
-    heel_y = (
-        center_y
-        + length
-        * 0.40
-    )
-
-    top_toe_y = (
-        center_y
-        - length
-        * 0.47
-    )
-
-    top_heel_y = (
-        center_y
-        + length
-        * 0.30
-    )
-
-    top_width = (
-        half_width
-        * 0.82
-    )
-
-    vertices = [
-
-        (
-            x - half_width,
-            heel_y,
-            bottom_z
-        ),
-
-        (
-            x + half_width,
-            heel_y,
-            bottom_z
-        ),
-
-        (
-            x + half_width,
-            toe_y,
-            bottom_z
-        ),
-
-        (
-            x - half_width,
-            toe_y,
-            bottom_z
-        ),
-
-        (
-            x - top_width,
-            top_heel_y,
-            top_z
-        ),
-
-        (
-            x + top_width,
-            top_heel_y,
-            top_z
-        ),
-
-        (
-            x + top_width,
-            top_toe_y,
-            top_z
-        ),
-
-        (
-            x - top_width,
-            top_toe_y,
-            top_z
-        ),
+    bottom_local = [
+        (-0.34, 0.50),
+        (0.34, 0.50),
+        (0.50, 0.22),
+        (0.50, -0.28),
+        (0.36, -0.50),
+        (-0.36, -0.50),
+        (-0.50, -0.28),
+        (-0.50, 0.22),
     ]
+
+    top_local = [
+        (-0.30, 0.37),
+        (0.30, 0.37),
+        (0.41, 0.15),
+        (0.41, -0.22),
+        (0.30, -0.39),
+        (-0.30, -0.39),
+        (-0.41, -0.22),
+        (-0.41, 0.15),
+    ]
+
+    vertices = []
+
+    for (
+        local_x,
+        local_y,
+    ) in bottom_local:
+
+        vertices.append(
+            (
+                x
+                + local_x
+                * width,
+
+                center_y
+                + local_y
+                * length,
+
+                bottom_z,
+            )
+        )
+
+    for (
+        local_x,
+        local_y,
+    ) in top_local:
+
+        vertices.append(
+            (
+                x
+                + local_x
+                * width,
+
+                center_y
+                + local_y
+                * length,
+
+                top_z,
+            )
+        )
 
     faces = [
-
-        (
-            0,
-            1,
-            2,
-            3
+        tuple(
+            reversed(
+                range(
+                    0,
+                    8,
+                )
+            )
         ),
 
-        (
-            4,
-            7,
-            6,
-            5
-        ),
-
-        (
-            0,
-            4,
-            5,
-            1
-        ),
-
-        (
-            1,
-            5,
-            6,
-            2
-        ),
-
-        (
-            2,
-            6,
-            7,
-            3
-        ),
-
-        (
-            3,
-            7,
-            4,
-            0
+        tuple(
+            range(
+                8,
+                16,
+            )
         ),
     ]
 
-    obj = mesh_object(
+    for index in range(
+        8
+    ):
+
+        next_index = (
+            index + 1
+        ) % 8
+
+        faces.append(
+            (
+                index,
+                next_index,
+                8 + next_index,
+                8 + index,
+            )
+        )
+
+    hoof_obj = mesh_object(
         name,
         vertices,
         faces,
@@ -1016,124 +876,96 @@ def create_hoof(
         ],
         root,
         "hoof",
-        False
+        False,
     )
 
     add_bevel(
-        obj,
-        0.014,
-        2
+        hoof_obj,
+        0.012,
+        2,
     )
 
-    return obj
+    return hoof_obj
 
 
-# V86_EAR_PROFILE
+# V92_EAR_PROFILE
 def create_ear(
     name,
     side_sign,
     coat,
     dark,
-    root
+    root,
 ):
 
     base_inner = (
         side_sign
-        * 0.075
+        * 0.055
     )
 
     base_outer = (
         side_sign
-        * 0.195
+        * 0.165
     )
 
     tip_x = (
         side_sign
-        * 0.135
+        * 0.105
     )
 
-    base_front_y = -1.060
-    base_rear_y = -0.955
+    base_front_y = -1.075
+    base_rear_y = -0.985
 
-    tip_front_y = -1.035
-    tip_rear_y = -1.005
+    tip_front_y = -1.045
+    tip_rear_y = -1.015
 
-    base_z = 2.105
-    tip_z = 2.365
+    base_z = 2.145
+    tip_z = 2.455
 
     vertices = [
 
         (
             base_inner,
             base_front_y,
-            base_z
+            base_z,
         ),
 
         (
             base_outer,
             base_front_y,
-            base_z + 0.020
+            base_z + 0.020,
         ),
 
         (
             tip_x,
             tip_front_y,
-            tip_z
+            tip_z,
         ),
 
         (
             base_inner,
             base_rear_y,
-            base_z
+            base_z,
         ),
 
         (
             base_outer,
             base_rear_y,
-            base_z + 0.020
+            base_z + 0.020,
         ),
 
         (
             tip_x,
             tip_rear_y,
-            tip_z
+            tip_z,
         ),
     ]
 
     faces = [
-
-        (
-            0,
-            1,
-            2
-        ),
-
-        (
-            3,
-            5,
-            4
-        ),
-
-        (
-            0,
-            3,
-            4,
-            1
-        ),
-
-        (
-            1,
-            4,
-            5,
-            2
-        ),
-
-        (
-            2,
-            5,
-            3,
-            0
-        ),
+        (0, 1, 2),
+        (3, 5, 4),
+        (0, 3, 4, 1),
+        (1, 4, 5, 2),
+        (2, 5, 3, 0),
     ]
 
     ear = mesh_object(
@@ -1145,13 +977,13 @@ def create_ear(
         ],
         root,
         "ear",
-        True
+        True,
     )
 
     add_bevel(
         ear,
-        0.008,
-        2
+        0.009,
+        2,
     )
 
     inner_offset = (
@@ -1162,21 +994,39 @@ def create_ear(
     inner_vertices = [
 
         (
-            side_sign * 0.098 + inner_offset,
-            base_front_y - 0.003,
-            base_z + 0.045
+            side_sign
+            * 0.078
+            + inner_offset,
+
+            base_front_y
+            - 0.003,
+
+            base_z
+            + 0.045,
         ),
 
         (
-            side_sign * 0.166 + inner_offset,
-            base_front_y - 0.003,
-            base_z + 0.055
+            side_sign
+            * 0.143
+            + inner_offset,
+
+            base_front_y
+            - 0.003,
+
+            base_z
+            + 0.060,
         ),
 
         (
-            side_sign * 0.135 + inner_offset,
-            tip_front_y - 0.003,
-            tip_z - 0.065
+            side_sign
+            * 0.105
+            + inner_offset,
+
+            tip_front_y
+            - 0.003,
+
+            tip_z
+            - 0.070,
         ),
     ]
 
@@ -1187,7 +1037,7 @@ def create_ear(
             (
                 0,
                 1,
-                2
+                2,
             )
         ],
         [
@@ -1195,13 +1045,14 @@ def create_ear(
         ],
         root,
         "ear_detail",
-        False
+        False,
     )
 
     return (
         ear,
-        inner
+        inner,
     )
+
 
 def sphere_detail(
     name,
@@ -1211,25 +1062,24 @@ def sphere_detail(
     root,
     region,
     segments=16,
-    rings=8
+    rings=8,
 ):
 
     bpy.ops.mesh.primitive_uv_sphere_add(
         segments=segments,
         ring_count=rings,
-        location=location
+        location=location,
     )
 
     obj = bpy.context.object
 
     obj.name = name
-
     obj.scale = scale
 
     bpy.ops.object.transform_apply(
         location=False,
         rotation=False,
-        scale=True
+        scale=True,
     )
 
     obj.data.materials.append(
@@ -1253,7 +1103,7 @@ def create_mane(
     root_points,
     drop_points,
     dark,
-    root
+    root,
 ):
 
     if len(
@@ -1270,10 +1120,10 @@ def create_mane(
 
     for (
         root_point,
-        drop_point
+        drop_point,
     ) in zip(
         root_points,
-        drop_points
+        drop_points,
     ):
 
         vertices.append(
@@ -1287,7 +1137,9 @@ def create_mane(
     faces = []
 
     for index in range(
-        len(root_points) - 1
+        len(
+            root_points
+        ) - 1
     ):
 
         base = (
@@ -1312,7 +1164,7 @@ def create_mane(
         )
 
     mane = mesh_object(
-        "RiverwatchV80Mane",
+        "RiverwatchV92Mane",
         vertices,
         faces,
         [
@@ -1320,21 +1172,21 @@ def create_mane(
         ],
         root,
         "mane",
-        True
+        True,
     )
 
     solidify = mane.modifiers.new(
         "RiverwatchManeThickness",
-        "SOLIDIFY"
+        "SOLIDIFY",
     )
 
-    solidify.thickness = 0.032
+    solidify.thickness = 0.045
     solidify.offset = 0.0
 
     add_bevel(
         mane,
         0.010,
-        2
+        2,
     )
 
     return mane
@@ -1342,48 +1194,29 @@ def create_mane(
 
 def create_forelock(
     dark,
-    root
+    root,
 ):
 
     vertices = [
-
-        (
-            -0.055,
-            -1.010,
-            2.235
-        ),
-
-        (
-            0.050,
-            -1.015,
-            2.235
-        ),
-
-        (
-            0.035,
-            -1.215,
-            2.060
-        ),
-
-        (
-            -0.075,
-            -1.285,
-            2.025
-        ),
+        (-0.060, -1.045, 2.180),
+        (0.055, -1.045, 2.180),
+        (0.040, -1.220, 2.045),
+        (-0.020, -1.330, 1.985),
+        (-0.085, -1.235, 2.020),
     ]
 
     faces = [
-
         (
             0,
             1,
             2,
-            3
+            3,
+            4,
         )
     ]
 
     forelock = mesh_object(
-        "RiverwatchV80Forelock",
+        "RiverwatchV92Forelock",
         vertices,
         faces,
         [
@@ -1391,24 +1224,147 @@ def create_forelock(
         ],
         root,
         "mane",
-        True
+        True,
     )
 
     solidify = forelock.modifiers.new(
         "RiverwatchForelockThickness",
-        "SOLIDIFY"
+        "SOLIDIFY",
     )
 
-    solidify.thickness = 0.025
+    solidify.thickness = 0.022
     solidify.offset = 0.0
 
     add_bevel(
         forelock,
-        0.008,
-        2
+        0.007,
+        2,
     )
 
     return forelock
+
+
+def create_tail_fan(
+    center_stations,
+    dark,
+    root,
+):
+
+    offsets = [
+        -0.085,
+        -0.042,
+        0.000,
+        0.042,
+        0.085,
+    ]
+
+    objects = []
+
+    count = len(
+        center_stations
+    )
+
+    for strand_index, offset in enumerate(
+        offsets
+    ):
+
+        strand_stations = []
+
+        for index, station in enumerate(
+            center_stations
+        ):
+
+            (
+                y,
+                z,
+                radius,
+            ) = station
+
+            progress = (
+                index
+                / max(
+                    1,
+                    count - 1,
+                )
+            )
+
+            spread = (
+                0.22
+                + progress
+                * 0.78
+            )
+
+            x = (
+                offset
+                * spread
+            )
+
+            strand_y = (
+                y
+                + abs(
+                    offset
+                )
+                * progress
+                * 0.20
+            )
+
+            strand_z = (
+                z
+                + (
+                    0.015
+                    if strand_index % 2 == 0
+                    else -0.010
+                )
+                * progress
+            )
+
+            strand_radius = (
+                radius
+                * (
+                    0.72
+                    if strand_index in (
+                        0,
+                        4,
+                    )
+                    else 0.82
+                )
+            )
+
+            strand_stations.append(
+                (
+                    x,
+                    strand_y,
+                    strand_z,
+                    strand_radius,
+                    strand_radius,
+                    strand_radius,
+                    1.0,
+                    1.0,
+                )
+            )
+
+        tail_obj = path_loft(
+            (
+                "RiverwatchV92TailStrand"
+                + str(
+                    strand_index + 1
+                )
+            ),
+            strand_stations,
+            [
+                dark
+            ],
+            root,
+            "tail",
+            RING_10,
+            True,
+        )
+
+        objects.append(
+            tail_obj
+        )
+
+    return objects
 
 
 def create_root(
@@ -1416,8 +1372,8 @@ def create_root(
 ):
 
     root = bpy.data.objects.new(
-        "RiverwatchHorseV80Root",
-        None
+        "RiverwatchHorseV92Root",
+        None,
     )
 
     bpy.context.collection.objects.link(
@@ -1426,7 +1382,7 @@ def create_root(
 
     root[
         "broken_knight_horse_detail"
-    ] = "v80_fresh_anatomy_checkpoint"
+    ] = "v92_structural_geometry_checkpoint"
 
     root[
         "broken_knight_horse_version"
@@ -1434,27 +1390,35 @@ def create_root(
 
     root[
         "broken_knight_horse_method"
-    ] = "fresh_authored_surface_cages"
+    ] = "fixed_skull_buried_limbs_shaped_hooves"
 
     root[
         "broken_knight_horse_base"
-    ] = "none_fresh_rebuild"
+    ] = "fresh_v80_family_rebuild"
 
     root[
         "broken_knight_horse_body"
-    ] = "measured_continuous_station_cage"
+    ] = "measured_fixed_axis_station_cage"
 
     root[
         "broken_knight_horse_neck"
-    ] = "forward_arch_asymmetric_surface_loft"
+    ] = "forward_arch_surface_loft"
 
     root[
         "broken_knight_horse_head"
-    ] = "broad_cheek_short_face_integrated_muzzle"
+    ] = "fixed_axis_equine_skull_cage"
 
     root[
         "broken_knight_horse_legs"
-    ] = "continuous_anatomical_limb_lofts_no_ball_joints"
+    ] = "buried_weight_bearing_surface_lofts"
+
+    root[
+        "broken_knight_horse_hooves"
+    ] = "eight_sided_tapered_hoof_wedges"
+
+    root[
+        "broken_knight_horse_tail"
+    ] = "five_continuous_lofted_hair_masses"
 
     root[
         "broken_knight_horse_tack"
@@ -1466,7 +1430,7 @@ def create_root(
 
     root[
         "broken_knight_horse_goal"
-    ] = "reach_strong_anatomy_before_reinstalling_tack"
+    ] = "reach_strong_naked_anatomy_before_tack"
 
     return root
 
@@ -1478,54 +1442,59 @@ def build():
     clear_scene()
 
     coat = make_material(
-        "Riverwatch V80 Warm Bay",
+        "Riverwatch V92 Warm Bay",
         tuning.COAT,
-        0.76
+        0.76,
     )
 
     dark = make_material(
-        "Riverwatch V80 Dark Points",
+        "Riverwatch V92 Dark Points",
         tuning.DARK,
-        0.70
+        0.70,
     )
 
     hoof = make_material(
-        "Riverwatch V80 Hoof",
+        "Riverwatch V92 Hoof",
         tuning.HOOF,
-        0.84
+        0.84,
     )
 
     muzzle = make_material(
-        "Riverwatch V80 Muzzle",
+        "Riverwatch V92 Muzzle",
         tuning.MUZZLE,
-        0.90
+        0.90,
     )
 
     eye = make_material(
-        "Riverwatch V80 Eye",
+        "Riverwatch V92 Eye",
         tuning.EYE,
-        0.24
+        0.24,
     )
 
     highlight = make_material(
-        "Riverwatch V80 Eye Highlight",
+        "Riverwatch V92 Eye Highlight",
         tuning.EYE_HIGHLIGHT,
-        0.18
+        0.18,
     )
 
     root = create_root(
         tuning
     )
 
-    body = body_mesh(
-        "RiverwatchV80Body",
+    body = fixed_y_loft(
+        "RiverwatchV92Body",
         tuning.BODY_STATIONS,
-        coat,
-        root
+        [
+            coat
+        ],
+        root,
+        "anatomy",
+        RING_12,
+        True,
     )
 
     neck = path_loft(
-        "RiverwatchV80Neck",
+        "RiverwatchV92Neck",
         tuning.NECK_STATIONS,
         [
             coat
@@ -1533,123 +1502,124 @@ def build():
         root,
         "anatomy",
         RING_12,
-        True
+        True,
     )
 
-    head = path_loft(
-        "RiverwatchV80Head",
+    head = fixed_y_loft(
+        "RiverwatchV92Head",
         tuning.HEAD_STATIONS,
         [
             coat,
-            muzzle
+            muzzle,
         ],
         root,
         "anatomy",
         RING_12,
-        True
+        True,
     )
 
     assign_head_muzzle(
-        head
+        head,
+        -1.625,
     )
 
     front_near = path_loft(
-        "RiverwatchV80FrontUpperNear",
+        "RiverwatchV92FrontLegNear",
         limb_stations(
             -tuning.FRONT_LEG_X,
-            tuning.FRONT_LEG_STATIONS
+            tuning.FRONT_LEG_STATIONS,
         ),
         [
             coat,
-            dark
+            dark,
         ],
         root,
         "front_leg",
-        RING_8,
-        True
+        RING_10,
+        True,
     )
 
     front_far = path_loft(
-        "RiverwatchV80FrontUpperFar",
+        "RiverwatchV92FrontLegFar",
         limb_stations(
             tuning.FRONT_LEG_X,
-            tuning.FRONT_LEG_STATIONS
+            tuning.FRONT_LEG_STATIONS,
         ),
         [
             coat,
-            dark
+            dark,
         ],
         root,
         "front_leg",
-        RING_8,
-        True
+        RING_10,
+        True,
     )
 
     assign_dark_lower_leg(
         front_near,
-        0.530
+        0.525,
     )
 
     assign_dark_lower_leg(
         front_far,
-        0.530
+        0.525,
     )
 
     hind_near = path_loft(
-        "RiverwatchV80ThighNear",
+        "RiverwatchV92HindLegNear",
         limb_stations(
             -tuning.HIND_LEG_X,
-            tuning.HIND_LEG_STATIONS
+            tuning.HIND_LEG_STATIONS,
         ),
         [
             coat,
-            dark
+            dark,
         ],
         root,
         "hind_leg",
-        RING_8,
-        True
+        RING_10,
+        True,
     )
 
     hind_far = path_loft(
-        "RiverwatchV80ThighFar",
+        "RiverwatchV92HindLegFar",
         limb_stations(
             tuning.HIND_LEG_X,
-            tuning.HIND_LEG_STATIONS
+            tuning.HIND_LEG_STATIONS,
         ),
         [
             coat,
-            dark
+            dark,
         ],
         root,
         "hind_leg",
-        RING_8,
-        True
+        RING_10,
+        True,
     )
 
     assign_dark_lower_leg(
         hind_near,
-        0.500
+        0.500,
     )
 
     assign_dark_lower_leg(
         hind_far,
-        0.500
+        0.500,
     )
 
     for side_sign, suffix in (
         (
             -1.0,
-            "Near"
+            "Near",
         ),
         (
             1.0,
-            "Far"
+            "Far",
         ),
     ):
 
         create_hoof(
-            "RiverwatchV80FrontHoof"
+            "RiverwatchV92FrontHoof"
             + suffix,
 
             side_sign
@@ -1672,11 +1642,11 @@ def build():
             ],
 
             hoof,
-            root
+            root,
         )
 
         create_hoof(
-            "RiverwatchV80HindHoof"
+            "RiverwatchV92HindHoof"
             + suffix,
 
             side_sign
@@ -1699,136 +1669,127 @@ def build():
             ],
 
             hoof,
-            root
+            root,
         )
 
     create_ear(
-        "RiverwatchV80EarNear",
+        "RiverwatchV92EarNear",
         -1.0,
         coat,
         dark,
-        root
+        root,
     )
 
     create_ear(
-        "RiverwatchV80EarFar",
+        "RiverwatchV92EarFar",
         1.0,
         coat,
         dark,
-        root
+        root,
     )
 
     for side_sign, suffix in (
         (
             -1.0,
-            "Near"
+            "Near",
         ),
         (
             1.0,
-            "Far"
+            "Far",
         ),
     ):
 
-        eye_x = (
-            side_sign
-            * 0.250
-        )
-
         sphere_detail(
-            "RiverwatchV80Eye"
+            "RiverwatchV92Eye"
             + suffix,
 
             (
-                eye_x,
-                -1.235,
-                2.055
+                side_sign
+                * 0.174,
+
+                -1.245,
+                2.055,
             ),
 
             (
-                0.038,
-                0.048,
-                0.046
+                0.028,
+                0.034,
+                0.032,
             ),
 
             eye,
             root,
             "eye",
             16,
-            8
+            8,
         )
 
         sphere_detail(
-            "RiverwatchV80EyeHighlight"
+            "RiverwatchV92EyeHighlight"
             + suffix,
 
             (
                 side_sign
-                * 0.276,
+                * 0.193,
 
-                -1.255,
-                2.072
+                -1.260,
+                2.066,
             ),
 
             (
-                0.010,
-                0.010,
-                0.010
+                0.007,
+                0.007,
+                0.007,
             ),
 
             highlight,
             root,
             "eye_detail",
             12,
-            6
+            6,
         )
 
         sphere_detail(
-            "RiverwatchV80Nostril"
+            "RiverwatchV92Nostril"
             + suffix,
 
             (
                 side_sign
-                * 0.125,
+                * 0.090,
 
-                -1.690,
-                1.795
+                -1.805,
+                1.705,
             ),
 
             (
-                0.033,
-                0.021,
-                0.025
+                0.024,
+                0.014,
+                0.018,
             ),
 
             dark,
             root,
             "muzzle_detail",
             14,
-            7
+            7,
         )
 
     create_mane(
         tuning.MANE_ROOT,
         tuning.MANE_DROP,
         dark,
-        root
+        root,
     )
 
     create_forelock(
         dark,
-        root
+        root,
     )
 
-    tail = path_loft(
-        "RiverwatchV80Tail",
-        tuning.TAIL_STATIONS,
-        [
-            dark
-        ],
+    create_tail_fan(
+        tuning.TAIL_CENTER_STATIONS,
+        dark,
         root,
-        "tail",
-        RING_8,
-        True
     )
 
     bpy.context.scene[
@@ -1843,14 +1804,18 @@ def build():
         "broken_knight_horse_tack_status"
     ] = "DEFERRED"
 
+    bpy.context.scene[
+        "broken_knight_horse_structural_pass"
+    ] = "V92"
+
     BLEND_FILE.parent.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     GLB_FILE.parent.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     bpy.ops.wm.save_as_mainfile(
@@ -1903,7 +1868,7 @@ def build():
     )
 
     print(
-        "RIVERWATCH_HORSE_V80_BUILT"
+        "RIVERWATCH_HORSE_V92_BUILT"
     )
 
     print(
@@ -1912,7 +1877,7 @@ def build():
     )
 
     print(
-        "METHOD=FRESH_AUTHORED_SURFACE_CAGES"
+        "METHOD=V92_STRUCTURAL_GEOMETRY"
     )
 
     print(

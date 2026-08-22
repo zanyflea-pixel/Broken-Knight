@@ -1,7 +1,7 @@
 {
     "status":  "READY_FOR_CHATGPT_TRANSPORT",
-    "version":  "V91",
-    "generated_utc":  "2026-08-22T20:06:56.6068435Z",
+    "version":  "V92",
+    "generated_utc":  "2026-08-22T20:22:12.7674826Z",
     "preferred_retrieval_order":  [
                                       "captures/horse-review/auto/chat/01_silhouette.jpg",
                                       "captures/horse-review/auto/chat/02_head.jpg",
@@ -13,9 +13,9 @@
                        "role":  "whole_horse_silhouette",
                        "image_path":  "captures/horse-review/auto/chat/01_silhouette.jpg",
                        "base64_path":  "captures/horse-review/auto/chat/01_silhouette.b64.txt",
-                       "image_bytes":  8980,
-                       "base64_bytes":  12226,
-                       "sha256":  "4A7E5825873DC4A2C31C6503F18058D878B4B79C79B1A4A92559373E9BABA2B8",
+                       "image_bytes":  9014,
+                       "base64_bytes":  12272,
+                       "sha256":  "178DCF388E9BA4067E94C77CE1C234747485F402D50A04C7926F4A38A39F3113",
                        "views":  [
                                      "01_side_left.png",
                                      "02_front_3q.png",
@@ -28,9 +28,9 @@
                        "role":  "head_detail",
                        "image_path":  "captures/horse-review/auto/chat/02_head.jpg",
                        "base64_path":  "captures/horse-review/auto/chat/02_head.b64.txt",
-                       "image_bytes":  4973,
-                       "base64_bytes":  6772,
-                       "sha256":  "310055A7229404C83407478020B86BC692C174C6239098A8B2D4CFB2676453DB",
+                       "image_bytes":  5068,
+                       "base64_bytes":  6902,
+                       "sha256":  "5A4BECC0AB4B8BF19110D87B99578DD1911282045A7994568BCCB6A88C76B816",
                        "views":  [
                                      "06_head_detail.png"
                                  ]
@@ -39,9 +39,9 @@
                        "role":  "limb_detail",
                        "image_path":  "captures/horse-review/auto/chat/03_legs.jpg",
                        "base64_path":  "captures/horse-review/auto/chat/03_legs.b64.txt",
-                       "image_bytes":  8598,
-                       "base64_bytes":  11704,
-                       "sha256":  "BF8430C6BC5B145551625A4ACA4796EDC089FE93C426B8EBDF23BD10719291EB",
+                       "image_bytes":  7226,
+                       "base64_bytes":  9838,
+                       "sha256":  "EE1F3959E20EB6B299BB995339B459DBEDC38B97E0825D656A299B6925942CFD",
                        "views":  [
                                      "07_front_detail.png",
                                      "08_rear_detail.png"
