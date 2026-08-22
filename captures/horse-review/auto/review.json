@@ -1,9 +1,9 @@
 {
     "status":  "READY_FOR_CHATGPT",
-    "version":  "V87",
-    "generated_utc":  "2026-08-22T18:52:04.5268839Z",
+    "version":  "V88",
+    "generated_utc":  "2026-08-22T19:07:52.1363401Z",
     "branch":  "main",
-    "runtime_sha256":  "E286253EEC1FCE00C592C7895781D1F5CCBDA0D533C681445234F91D8E08398B",
+    "runtime_sha256":  "3EC1E7265446BBBDA6C4467FCF45FAC388D670CC498FD497B87D8684101664F5",
     "review_directory":  "captures/horse-review/auto/views",
     "review_count":  8,
     "review_views":  [
