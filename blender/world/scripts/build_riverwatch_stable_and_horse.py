@@ -99286,7 +99286,7 @@ def build_horse_model_v67_base(arm):
 
 
 
-def build_horse_model(arm):
+def build_horse_model_v68_base(arm):
 
     import bpy
     import math
@@ -100437,6 +100437,1295 @@ def build_horse_model(arm):
     print(
         "BROKEN_KNIGHT_HORSE_V68",
         "ANATOMY_FUSION_COMPLETE"
+    )
+
+
+
+def build_horse_model(arm):
+
+    import bpy
+    import math
+
+    from mathutils import Vector
+
+    # ========================================================
+    # BROKEN KNIGHT HORSE V69
+    #
+    # REFERENCE MASS + PROPORTION OVERHAUL
+    #
+    # V68 gave us a continuous anatomy mesh.
+    #
+    # V69 now pushes that mesh HARD toward the actual
+    # generated reference.
+    #
+    # ========================================================
+
+    build_horse_model_v68_base(
+        arm
+    )
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V69",
+        "V68_BASE_COMPLETE"
+    )
+
+    # ========================================================
+    # HELPERS
+    # ========================================================
+
+    def select_none():
+
+        bpy.ops.object.select_all(
+            action="DESELECT"
+        )
+
+    def select_only(obj):
+
+        select_none()
+
+        obj.select_set(
+            True
+        )
+
+        bpy.context.view_layer.objects.active = obj
+
+    def smooth(obj):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = True
+
+    def bind(obj, region):
+
+        obj.parent = arm
+
+        obj[
+            "broken_knight_region"
+        ] = region
+
+    def world_transform_mesh(
+        obj,
+        function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for vertex in obj.data.vertices:
+
+            world = (
+                matrix
+                @ vertex.co
+            )
+
+            world = function(
+                world
+            )
+
+            vertex.co = (
+                inverse
+                @ world
+            )
+
+        obj.data.update()
+
+    def world_transform_curve(
+        obj,
+        function
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "CURVE"
+        ):
+            return
+
+        matrix = obj.matrix_world.copy()
+        inverse = matrix.inverted()
+
+        for spline in obj.data.splines:
+
+            for point in spline.points:
+
+                local = Vector(
+                    (
+                        point.co.x,
+                        point.co.y,
+                        point.co.z
+                    )
+                )
+
+                world = (
+                    matrix
+                    @ local
+                )
+
+                world = function(
+                    world
+                )
+
+                local_new = (
+                    inverse
+                    @ world
+                )
+
+                point.co = (
+                    local_new.x,
+                    local_new.y,
+                    local_new.z,
+                    1.0
+                )
+
+    def world_transform(
+        obj,
+        function
+    ):
+
+        if obj is None:
+            return
+
+        if obj.type == "MESH":
+
+            world_transform_mesh(
+                obj,
+                function
+            )
+
+        elif obj.type == "CURVE":
+
+            world_transform_curve(
+                obj,
+                function
+            )
+
+    def scale_about(
+        obj,
+        center,
+        sx,
+        sy,
+        sz
+    ):
+
+        c = Vector(
+            center
+        )
+
+        def transform(point):
+
+            p = point.copy()
+
+            delta = (
+                p - c
+            )
+
+            delta.x *= sx
+            delta.y *= sy
+            delta.z *= sz
+
+            return (
+                c + delta
+            )
+
+        world_transform(
+            obj,
+            transform
+        )
+
+    def translate_world(
+        obj,
+        amount
+    ):
+
+        delta = Vector(
+            amount
+        )
+
+        def transform(point):
+
+            return (
+                point
+                + delta
+            )
+
+        world_transform(
+            obj,
+            transform
+        )
+
+    def smooth_modifier(
+        obj,
+        factor=0.18,
+        iterations=2
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V69 Organic Blend",
+            "SMOOTH"
+        )
+
+        modifier.factor = factor
+        modifier.iterations = iterations
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+        smooth(
+            obj
+        )
+
+    def bevel(
+        obj,
+        width=0.018,
+        segments=2
+    ):
+
+        if (
+            obj is None
+            or
+            obj.type != "MESH"
+        ):
+            return
+
+        select_only(
+            obj
+        )
+
+        modifier = obj.modifiers.new(
+            "V69 Soft Edge",
+            "BEVEL"
+        )
+
+        modifier.width = width
+        modifier.segments = segments
+        modifier.limit_method = "ANGLE"
+        modifier.angle_limit = math.radians(
+            32.0
+        )
+
+        bpy.ops.object.modifier_apply(
+            modifier=modifier.name
+        )
+
+        smooth(
+            obj
+        )
+
+    def create_ico(
+        name,
+        location,
+        scale,
+        material,
+        region,
+        subdivisions=2
+    ):
+
+        bpy.ops.mesh.primitive_ico_sphere_add(
+            subdivisions=subdivisions,
+            radius=1.0,
+            location=location
+        )
+
+        obj = bpy.context.object
+
+        obj.name = name
+
+        obj.scale = Vector(
+            scale
+        )
+
+        bpy.ops.object.transform_apply(
+            location=False,
+            rotation=False,
+            scale=True
+        )
+
+        obj.data.materials.append(
+            material
+        )
+
+        bind(
+            obj,
+            region
+        )
+
+        smooth(
+            obj
+        )
+
+        return obj
+
+    # ========================================================
+    # MATERIALS
+    # ========================================================
+
+    coat = bpy.data.materials.get(
+        "Riverwatch V67 Warm Bay"
+    )
+
+    dark = bpy.data.materials.get(
+        "Riverwatch V67 Dark Points"
+    )
+
+    hoof_material = bpy.data.materials.get(
+        "Riverwatch V67 Hoof"
+    )
+
+    leather = bpy.data.materials.get(
+        "Riverwatch V67 Saddle Leather"
+    )
+
+    leather_light = bpy.data.materials.get(
+        "Riverwatch V67 Saddle Highlight"
+    )
+
+    if coat is None:
+        raise RuntimeError(
+            "Horse coat material missing."
+        )
+
+    if dark is None:
+        raise RuntimeError(
+            "Horse dark material missing."
+        )
+
+    if leather is None:
+        raise RuntimeError(
+            "Horse saddle leather missing."
+        )
+
+    if leather_light is None:
+        leather_light = leather
+
+    # ========================================================
+    # ANATOMY CORE
+    # ========================================================
+
+    core = bpy.data.objects.get(
+        "RiverwatchV68AnatomyCore"
+    )
+
+    if core is None:
+        raise RuntimeError(
+            "V68 anatomy core missing."
+        )
+
+    # ========================================================
+    # MASS OVERHAUL
+    #
+    # The reference is much heavier than V68.
+    #
+    # ========================================================
+
+    head_pivot_y = -0.70
+    head_pivot_z = 2.16
+    head_angle = math.radians(
+        9.5
+    )
+
+    head_cos = math.cos(
+        head_angle
+    )
+
+    head_sin = math.sin(
+        head_angle
+    )
+
+    def rotate_head(point):
+
+        p = point.copy()
+
+        y = (
+            p.y
+            - head_pivot_y
+        )
+
+        z = (
+            p.z
+            - head_pivot_z
+        )
+
+        new_y = (
+            y * head_cos
+            - z * head_sin
+        )
+
+        new_z = (
+            y * head_sin
+            + z * head_cos
+        )
+
+        p.y = (
+            head_pivot_y
+            + new_y
+        )
+
+        p.z = (
+            head_pivot_z
+            + new_z
+        )
+
+        return p
+
+    def anatomy_transform(point):
+
+        p = point.copy()
+
+        original_y = p.y
+        original_z = p.z
+
+        # ----------------------------------------------------
+        # HEART GIRTH / CHEST
+        #
+        # Much broader and deeper.
+        # ----------------------------------------------------
+
+        if (
+            original_y >= -0.46
+            and
+            original_y < 0.10
+            and
+            original_z > 0.77
+        ):
+
+            p.x *= 1.155
+
+            chest_center_z = 1.34
+
+            p.z = (
+                chest_center_z
+                + (
+                    p.z
+                    - chest_center_z
+                )
+                * 1.145
+            )
+
+            if p.z < 1.20:
+                p.z -= 0.035
+
+        # ----------------------------------------------------
+        # BARREL
+        #
+        # Reference horse is much more substantial here.
+        # ----------------------------------------------------
+
+        if (
+            original_y >= 0.10
+            and
+            original_y < 0.73
+            and
+            original_z > 0.76
+        ):
+
+            p.x *= 1.105
+
+            barrel_center_z = 1.29
+
+            p.z = (
+                barrel_center_z
+                + (
+                    p.z
+                    - barrel_center_z
+                )
+                * 1.115
+            )
+
+            if p.z < 1.16:
+                p.z -= 0.025
+
+        # ----------------------------------------------------
+        # CROUP / HINDQUARTER
+        #
+        # Large rounded draft-like power.
+        # ----------------------------------------------------
+
+        if (
+            original_y >= 0.73
+            and
+            original_y < 1.40
+            and
+            original_z > 0.82
+        ):
+
+            p.x *= 1.17
+
+            croup_center_z = 1.40
+
+            p.z = (
+                croup_center_z
+                + (
+                    p.z
+                    - croup_center_z
+                )
+                * 1.17
+            )
+
+            if p.z > 1.50:
+                p.z += 0.035
+
+            if p.z < 1.18:
+                p.z -= 0.025
+
+        # ----------------------------------------------------
+        # NECK
+        #
+        # Shorter and thicker.
+        #
+        # Bring the poll closer to the shoulders.
+        # ----------------------------------------------------
+
+        if (
+            original_y < -0.28
+            and
+            original_z > 1.22
+        ):
+
+            neck_pivot_y = -0.28
+
+            p.y = (
+                neck_pivot_y
+                + (
+                    p.y
+                    - neck_pivot_y
+                )
+                * 0.885
+            )
+
+            p.x *= 1.095
+
+            # Heavy neck base.
+
+            if (
+                original_z < 1.72
+                and
+                original_y > -0.72
+            ):
+
+                p.x *= 1.075
+                p.z -= 0.045
+
+            # Strong crest.
+
+            if (
+                original_z > 1.95
+                and
+                original_y > -0.76
+            ):
+
+                p.z += 0.035
+
+        # ----------------------------------------------------
+        # HEAD
+        #
+        # Rotate downward around poll.
+        # Also shorten longitudinal reach.
+        # ----------------------------------------------------
+
+        if (
+            original_y < -0.69
+            and
+            original_z > 1.54
+        ):
+
+            p = rotate_head(
+                p
+            )
+
+            face_pivot_y = -0.90
+
+            p.y = (
+                face_pivot_y
+                + (
+                    p.y
+                    - face_pivot_y
+                )
+                * 0.94
+            )
+
+            p.x *= 0.965
+
+        return p
+
+    world_transform_mesh(
+        core,
+        anatomy_transform
+    )
+
+    smooth_modifier(
+        core,
+        0.16,
+        2
+    )
+
+    # ========================================================
+    # HEAD DETAILS FOLLOW NEW HEAD ANGLE
+    # ========================================================
+
+    head_mesh_prefixes = (
+
+        "RiverwatchV68Muzzle",
+        "RiverwatchV68Eye",
+        "RiverwatchV68Nostril",
+        "RiverwatchV68Ear",
+        "RiverwatchV68Forelock",
+        "RiverwatchV68BitRing",
+    )
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            head_mesh_prefixes
+        ):
+
+            world_transform(
+                obj,
+                rotate_head
+            )
+
+    # Muzzle now more compact and horse-like.
+
+    muzzle = bpy.data.objects.get(
+        "RiverwatchV68Muzzle"
+    )
+
+    if muzzle is not None:
+
+        scale_about(
+            muzzle,
+            (
+                0.0,
+                -1.25,
+                1.72
+            ),
+            0.92,
+            0.87,
+            0.94
+        )
+
+    # Shorter ears, slightly broader at base.
+
+    for name in (
+        "RiverwatchV68EarLeft",
+        "RiverwatchV68EarRight"
+    ):
+
+        ear = bpy.data.objects.get(
+            name
+        )
+
+        if ear is not None:
+
+            scale_about(
+                ear,
+                (
+                    0.0,
+                    -0.67,
+                    2.28
+                ),
+                1.10,
+                1.03,
+                0.85
+            )
+
+    # ========================================================
+    # BRIDLE FOLLOWS THE HEAD
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV68BridleCheek"
+        ):
+
+            world_transform(
+                obj,
+                rotate_head
+            )
+
+        elif obj.name.startswith(
+            "RiverwatchV68BrowBand"
+        ):
+
+            world_transform(
+                obj,
+                rotate_head
+            )
+
+        elif obj.name.startswith(
+            "RiverwatchV68Rein"
+        ):
+
+            def rein_transform(point):
+
+                p = point.copy()
+
+                if p.y < -0.62:
+                    p = rotate_head(
+                        p
+                    )
+
+                return p
+
+            world_transform(
+                obj,
+                rein_transform
+            )
+
+    # Bring bit rings closer to muzzle.
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV68BitRing"
+        ):
+
+            def bit_inward(point):
+
+                p = point.copy()
+                p.x *= 0.88
+
+                return p
+
+            world_transform(
+                obj,
+                bit_inward
+            )
+
+    # ========================================================
+    # MANE
+    #
+    # Reference mane is deep, layered and heavy.
+    # ========================================================
+
+    mane = bpy.data.objects.get(
+        "RiverwatchV68Mane"
+    )
+
+    if mane is not None:
+
+        def mane_transform(point):
+
+            p = point.copy()
+
+            original_y = p.y
+
+            # Follow shortened neck.
+            neck_pivot_y = -0.28
+
+            if original_y < -0.28:
+
+                p.y = (
+                    neck_pivot_y
+                    + (
+                        p.y
+                        - neck_pivot_y
+                    )
+                    * 0.89
+                )
+
+            # Follow head rotation at front.
+            if original_y < -0.68:
+
+                p = rotate_head(
+                    p
+                )
+
+            # Fuller side fall.
+            if p.x < 0.0:
+                p.x *= 1.12
+
+            if (
+                p.z < 1.95
+                and
+                p.y < -0.32
+            ):
+                p.z -= 0.045
+
+            return p
+
+        world_transform_mesh(
+            mane,
+            mane_transform
+        )
+
+    # ========================================================
+    # LOWER LEGS
+    #
+    # V68 looks like it is standing on steel rods.
+    #
+    # Reference legs are substantially thicker.
+    # ========================================================
+
+    front_lower_names = (
+
+        "RiverwatchV68FrontLeftLower",
+        "RiverwatchV68FrontRightLower",
+    )
+
+    for name in front_lower_names:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                (
+                    0.0,
+                    0.0,
+                    0.42
+                ),
+                1.42,
+                1.37,
+                1.00
+            )
+
+    front_fetlock_names = (
+
+        "RiverwatchV68FrontLeftFetlock",
+        "RiverwatchV68FrontRightFetlock",
+    )
+
+    for name in front_fetlock_names:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                (
+                    0.0,
+                    0.0,
+                    0.18
+                ),
+                1.32,
+                1.30,
+                1.18
+            )
+
+    hind_cannon_names = (
+
+        "RiverwatchV68HindLeftCannon",
+        "RiverwatchV68HindRightCannon",
+    )
+
+    for name in hind_cannon_names:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                (
+                    0.0,
+                    1.10,
+                    0.40
+                ),
+                1.40,
+                1.35,
+                1.00
+            )
+
+    hind_fetlock_names = (
+
+        "RiverwatchV68HindLeftFetlock",
+        "RiverwatchV68HindRightFetlock",
+    )
+
+    for name in hind_fetlock_names:
+
+        obj = bpy.data.objects.get(
+            name
+        )
+
+        if obj is not None:
+
+            scale_about(
+                obj,
+                (
+                    0.0,
+                    1.08,
+                    0.18
+                ),
+                1.32,
+                1.30,
+                1.18
+            )
+
+    # ========================================================
+    # HOOFS
+    #
+    # Large, weighted, draft-horse style.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if (
+            obj.name.startswith(
+                "RiverwatchV68"
+            )
+            and
+            obj.name.endswith(
+                "Hoof"
+            )
+        ):
+
+            if "Front" in obj.name:
+
+                center = (
+                    0.0,
+                    -0.13,
+                    0.07
+                )
+
+            else:
+
+                center = (
+                    0.0,
+                    1.00,
+                    0.07
+                )
+
+            scale_about(
+                obj,
+                center,
+                1.32,
+                1.22,
+                1.23
+            )
+
+            bevel(
+                obj,
+                0.025,
+                2
+            )
+
+    # ========================================================
+    # TAIL
+    # ========================================================
+
+    tail = bpy.data.objects.get(
+        "RiverwatchV68Tail"
+    )
+
+    if tail is not None:
+
+        def tail_transform(point):
+
+            p = point.copy()
+
+            p.x *= 1.18
+
+            # Stronger tail root.
+
+            if p.z > 1.20:
+                p.x *= 1.10
+
+            # Lower fall slightly backward.
+            if p.z < 0.95:
+                p.y += 0.035
+
+            return p
+
+        world_transform_mesh(
+            tail,
+            tail_transform
+        )
+
+    # ========================================================
+    # BODY GEAR RAISE
+    #
+    # Body is now deeper/larger.
+    # Lift equipment slightly so it continues sitting on the
+    # horse rather than intersecting it.
+    # ========================================================
+
+    tack_prefixes = (
+
+        "RiverwatchV68Blanket",
+        "RiverwatchV68Saddle",
+        "RiverwatchV68Bag",
+        "RiverwatchV68Girth",
+        "RiverwatchV68Stirrup",
+    )
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            tack_prefixes
+        ):
+
+            translate_world(
+                obj,
+                (
+                    0.0,
+                    0.0,
+                    0.055
+                )
+            )
+
+    # ========================================================
+    # SADDLE REBUILD
+    #
+    # Delete flat V68 seat and replace it with a curved
+    # medieval saddle seat + pommel + cantle.
+    # ========================================================
+
+    old_seat = bpy.data.objects.get(
+        "RiverwatchV68SaddleSeat"
+    )
+
+    if old_seat is not None:
+
+        bpy.data.objects.remove(
+            old_seat,
+            do_unlink=True
+        )
+
+    saddle_base = bpy.data.objects.get(
+        "RiverwatchV68Saddle"
+    )
+
+    if saddle_base is not None:
+
+        scale_about(
+            saddle_base,
+            (
+                0.0,
+                0.46,
+                1.87
+            ),
+            0.94,
+            0.95,
+            0.94
+        )
+
+    create_ico(
+        "RiverwatchV69SaddleSeat",
+        (
+            0.0,
+            0.46,
+            1.965
+        ),
+        (
+            0.31,
+            0.26,
+            0.085
+        ),
+        leather_light,
+        "saddle",
+        2
+    )
+
+    create_ico(
+        "RiverwatchV69SaddlePommel",
+        (
+            0.0,
+            0.18,
+            2.015
+        ),
+        (
+            0.27,
+            0.115,
+            0.12
+        ),
+        leather,
+        "saddle",
+        2
+    )
+
+    create_ico(
+        "RiverwatchV69SaddleCantle",
+        (
+            0.0,
+            0.73,
+            2.035
+        ),
+        (
+            0.28,
+            0.115,
+            0.14
+        ),
+        leather,
+        "saddle",
+        2
+    )
+
+    # ========================================================
+    # SADDLEBAGS
+    #
+    # Reference bags are sizeable but not giant boxes.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV68Bag"
+        ):
+
+            scale_about(
+                obj,
+                (
+                    0.0,
+                    0.70,
+                    1.49
+                ),
+                0.94,
+                0.94,
+                0.95
+            )
+
+    # ========================================================
+    # BLANKET
+    #
+    # Keep blue target silhouette but hug body better.
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV68Blanket"
+        ):
+
+            def blanket_hug(point):
+
+                p = point.copy()
+
+                if p.x > 0.0:
+                    p.x -= 0.025
+                elif p.x < 0.0:
+                    p.x += 0.025
+
+                return p
+
+            world_transform(
+                obj,
+                blanket_hug
+            )
+
+    # ========================================================
+    # RENAME V68 -> V69
+    # ========================================================
+
+    for obj in list(
+        bpy.data.objects
+    ):
+
+        if obj.name.startswith(
+            "RiverwatchV68"
+        ):
+
+            obj.name = obj.name.replace(
+                "RiverwatchV68",
+                "RiverwatchV69",
+                1
+            )
+
+    core.name = "RiverwatchV69AnatomyCore"
+
+    # ========================================================
+    # METADATA
+    # ========================================================
+
+    arm[
+        "broken_knight_horse_detail"
+    ] = "reference_mass_overhaul_v69"
+
+    arm[
+        "broken_knight_horse_v69_reference"
+    ] = "horse_turntable_reference_sheet"
+
+    arm[
+        "broken_knight_horse_v69_chest"
+    ] = "much_deeper_and_broader"
+
+    arm[
+        "broken_knight_horse_v69_barrel"
+    ] = "heavy_compact_courser"
+
+    arm[
+        "broken_knight_horse_v69_croup"
+    ] = "large_round_powerful"
+
+    arm[
+        "broken_knight_horse_v69_neck"
+    ] = "shorter_thicker_upright"
+
+    arm[
+        "broken_knight_horse_v69_head"
+    ] = "downward_rotated_shorter_reach"
+
+    arm[
+        "broken_knight_horse_v69_lower_legs"
+    ] = "major_weight_bearing_thickness_increase"
+
+    arm[
+        "broken_knight_horse_v69_hooves"
+    ] = "large_draft_style"
+
+    arm[
+        "broken_knight_horse_v69_saddle"
+    ] = "curved_seat_pommel_cantle"
+
+    arm[
+        "broken_knight_horse_v69_goal"
+    ] = "large_visual_jump_toward_reference"
+
+    arm[
+        "broken_knight_horse_animation_acceptance"
+    ] = "ignored_during_reference_modeling"
+
+    print(
+        "BROKEN_KNIGHT_HORSE_V69",
+        "REFERENCE_MASS_OVERHAUL_COMPLETE"
     )
 
 def reset_pose(arm):
