@@ -1,0 +1,46 @@
+{
+  "status": "V101_DIRECT_EDIT_READY",
+  "version": "V101",
+  "source": "V100 exact V67 baseline",
+  "method": "DIRECT_VERTEX_ANATOMY_EDIT",
+  "procedural_rebuild": false,
+  "remesh": false,
+  "main_object": "RiverwatchHorseBody",
+  "mesh_vertices": 3149,
+  "mesh_polygons": 3248,
+  "front_is_max_y": false,
+  "material_mask_fallback": false,
+  "body_vertex_count": 1045,
+  "dark_vertex_count": 606,
+  "hoof_vertex_count": 304,
+  "tack_vertices_excluded": 1044,
+  "moved_unique_vertices": 1137,
+  "move_counts": {
+    "forelegs": 395,
+    "hindlegs": 596,
+    "hooves": 304,
+    "shoulder": 269
+  },
+  "changes": [
+    "increase lower-leg dimensionality",
+    "define foreleg knee mass",
+    "define hind hock mass",
+    "define fetlock mass",
+    "taper pastern region",
+    "add pastern forward inclination",
+    "widen and lengthen existing hoof geometry",
+    "extend hoof toe",
+    "modestly widen shoulder/chest",
+    "slightly deepen lower chest"
+  ],
+  "preserved": [
+    "V67 torso proportions",
+    "V67 croup",
+    "V67 neck proportions",
+    "V67 head proportions",
+    "tack material vertices",
+    "V100 baseline file",
+    "V94 live horse",
+    "runtime horse"
+  ]
+}
