@@ -18,6 +18,8 @@ var profile:Dictionary={}
 var stage:=0
 var seals_cleansed:=0
 var sigils_recovered:=0
+var completed_seals:Array[int]=[]
+var completed_sigils:Array[int]=[]
 var reward_choice:=""
 var side_progress:Dictionary={"pyres":0,"gravebloom":0,"cache":false,"scout":false,"ossuary_cache":false}
 var cleared_encounters:Dictionary={}
@@ -126,9 +128,11 @@ func activate(data:Dictionary)->void:
             if stage==3:stage=4
         "grave_seal":
             if stage!=4:return
-            data.active=false;data["completed"]=true
-            seals_cleansed+=1
             var seal_index:=int(data.get("index",0))
+            if seal_index in completed_seals:return
+            completed_seals.append(seal_index)
+            seals_cleansed=completed_seals.size()
+            data.active=false;data["completed"]=true
             var position:Vector3=data.get("position",Vector3.ZERO)
             director._burst(position,Color(.46,.78,1.0),3.0)
             _spawn_group("seal_%d"%seal_index,Vector2(position.x,position.z)+Vector2(5,3),["shambler","runner"] if seal_index<2 else ["graveguard","shambler"])
@@ -147,8 +151,11 @@ func activate(data:Dictionary)->void:
             player.set_interior_mode(false);player.global_position=director._ground(Vector3(OSSUARY_POINT.x,0,OSSUARY_POINT.y+14));player.velocity=Vector3.ZERO
         "ward_sigil":
             if stage!=5:return
+            var sigil_index:=int(data.get("index",0))
+            if sigil_index in completed_sigils:return
+            completed_sigils.append(sigil_index)
+            sigils_recovered=completed_sigils.size()
             data.active=false;data["completed"]=true
-            sigils_recovered+=1
             director._burst(data.get("position",Vector3.ZERO),Color(.35,.82,1.0),3.2)
             director._notify("Ossuary ward sigil  %d / 3"%sigils_recovered,Color(.55,.86,1.0))
             if sigils_recovered>=3:
@@ -157,15 +164,17 @@ func activate(data:Dictionary)->void:
                 director._notify("The Gravebound Champion breaks its final chain",Color(1.0,.30,.10))
         "reward_blade":
             if stage!=7:return
+            if not player.add_bag_item({"id":"barrowfen_vigil_blade","name":"Barrowfen Vigil Blade","slot":"mainhand","visual":"sword","icon":8,"power":25,"armor":0,"hp":8,"mana":0,"description":"An anti-undead sword tempered with graveglass. Power +25, HP +8."}):
+                director._notify("Your bag is full — make room before claiming the Vigil Blade",Color(1.0,.45,.24));return
             reward_choice="blade";stage=8
-            player.add_bag_item({"id":"barrowfen_vigil_blade","name":"Barrowfen Vigil Blade","slot":"mainhand","visual":"sword","icon":8,"power":25,"armor":0,"hp":8,"mana":0,"description":"An anti-undead sword tempered with graveglass. Power +25, HP +8."})
             player.add_material("grave_tokens",8)
             _disable_reward_interactions()
             director._notify("Claimed Barrowfen Vigil Blade — return to Captain Mera",Color(1.0,.72,.22))
         "reward_bulwark":
             if stage!=7:return
+            if not player.add_bag_item({"id":"barrowfen_ward_bulwark","name":"Barrowfen Ward Bulwark","slot":"offhand","visual":"shield","icon":9,"power":7,"armor":21,"hp":28,"mana":0,"description":"A graveward shield. Armor +21, HP +28, Power +7."}):
+                director._notify("Your bag is full — make room before claiming the Ward Bulwark",Color(1.0,.45,.24));return
             reward_choice="bulwark";stage=8
-            player.add_bag_item({"id":"barrowfen_ward_bulwark","name":"Barrowfen Ward Bulwark","slot":"offhand","visual":"shield","icon":9,"power":7,"armor":21,"hp":28,"mana":0,"description":"A graveward shield. Armor +21, HP +28, Power +7."})
             player.add_material("grave_tokens",8)
             _disable_reward_interactions()
             director._notify("Claimed Barrowfen Ward Bulwark — return to Captain Mera",Color(1.0,.72,.22))
@@ -173,9 +182,10 @@ func activate(data:Dictionary)->void:
             if stage<7:
                 director._notify("The Champion's grave-chain still seals this coffer",Color(.74,.70,.62));return
             if bool(side_progress.get("ossuary_cache",false)):return
+            if not player.add_bag_item({"id":"corrupted_bell_fragment","name":"Corrupted Bell Fragment","slot":"relic","icon":10,"power":3,"armor":0,"hp":6,"mana":4,"description":"A cracked piece of the stolen Barrowfen bell. Useful proof, and a potent future gravecraft reagent."}):
+                director._notify("Your bag is full — make room before opening the Champion's coffer",Color(1.0,.45,.24));return
             side_progress["ossuary_cache"]=true;data.active=false
             player.hero_gold+=55;player.add_material("grave_tokens",4);player.add_material("essence",2)
-            player.add_bag_item({"id":"corrupted_bell_fragment","name":"Corrupted Bell Fragment","slot":"relic","icon":10,"power":3,"armor":0,"hp":6,"mana":4,"description":"A cracked piece of the stolen Barrowfen bell. Useful proof, and a potent future gravecraft reagent."})
             director._notify("CHAMPION COFFER — Corrupted Bell Fragment, Grave Tokens, essence and 55 gold",Color(1.0,.72,.22))
         "hidden_cache":
             if side_progress.cache:return
@@ -264,7 +274,9 @@ func _spawn_authored_population()->void:
 
 
 func _spawn_ossuary_population()->void:
-    if _spawned_encounters.get("ossuary_wings",false):return
+    if _spawned_encounters.get("ossuary_wings",false) or _has_living_encounter("ossuary_wings"):
+        _spawned_encounters["ossuary_wings"]=true
+        return
     _spawned_encounters["ossuary_wings"]=true
     var positions=[Vector3(-32,.18,48),Vector3(30,.18,31),Vector3(-33,.18,2),Vector3(33,.18,-22),Vector3(-28,.18,-43)]
     var variants=["shambler","runner","graveguard","carrier","graveguard"]
@@ -272,7 +284,7 @@ func _spawn_ossuary_population()->void:
 
 
 func _spawn_champion()->void:
-    if _champion_spawned or _encounter_recently_cleared("ossuary_champion"):return
+    if _champion_spawned or _has_living_encounter("ossuary_champion") or _encounter_recently_cleared("ossuary_champion"):return
     _champion_spawned=true
     director._spawn_zombie(Vector2.ZERO,"champion","ossuary_champion",true,OSSUARY_BASE+Vector3(0,.18,-70),OSSUARY_BOUNDS)
 
@@ -327,22 +339,31 @@ func _objective_position()->Vector2:
 
 
 func get_save_state()->Dictionary:
-    return {"stage":stage,"seals":seals_cleansed,"sigils":sigils_recovered,"reward":reward_choice,"side":side_progress,"cleared":cleared_encounters,"discovered":discovered,"event_cooldown":_event_cooldown,"contract_active":contract_active,"contract_goal":contract_goal,"contract_kills":contract_kills,"contract_round":contract_round}
+    return {"stage":stage,"seals":seals_cleansed,"sigils":sigils_recovered,"completed_seals":completed_seals.duplicate(),"completed_sigils":completed_sigils.duplicate(),"reward":reward_choice,"side":side_progress.duplicate(true),"cleared":cleared_encounters.duplicate(true),"discovered":discovered.duplicate(true),"event_cooldown":_event_cooldown,"contract_active":contract_active,"contract_goal":contract_goal,"contract_kills":contract_kills,"contract_round":contract_round}
 
 
 func load_save_state(data:Dictionary)->void:
-    stage=clampi(int(data.get("stage",stage)),0,9)
-    seals_cleansed=clampi(int(data.get("seals",seals_cleansed)),0,3)
-    sigils_recovered=clampi(int(data.get("sigils",sigils_recovered)),0,3)
-    reward_choice=str(data.get("reward",reward_choice))
+    stage=clampi(int(data.get("stage",0)),0,9)
+    var legacy_seals:=clampi(int(data.get("seals",0)),0,3)
+    var legacy_sigils:=clampi(int(data.get("sigils",0)),0,3)
+    completed_seals=_validated_objective_ids(data.get("completed_seals",range(legacy_seals)))
+    completed_sigils=_validated_objective_ids(data.get("completed_sigils",range(legacy_sigils)))
+    seals_cleansed=completed_seals.size()
+    sigils_recovered=completed_sigils.size()
+    reward_choice=str(data.get("reward",""))
+    side_progress={"pyres":0,"gravebloom":0,"cache":false,"scout":false,"ossuary_cache":false}
     side_progress.merge(data.get("side",{}),true)
+    cleared_encounters={}
     cleared_encounters.merge(data.get("cleared",{}),true)
+    discovered={"riverwatch":true}
     discovered.merge(data.get("discovered",{}),true)
-    _event_cooldown=float(data.get("event_cooldown",_event_cooldown))
-    contract_active=str(data.get("contract_active",contract_active));contract_goal=int(data.get("contract_goal",contract_goal));contract_kills=int(data.get("contract_kills",contract_kills));contract_round=int(data.get("contract_round",contract_round))
+    _event_cooldown=float(data.get("event_cooldown",420.0))
+    contract_active=str(data.get("contract_active",""));contract_goal=int(data.get("contract_goal",0));contract_kills=int(data.get("contract_kills",0));contract_round=int(data.get("contract_round",0))
+    _spawned_encounters.clear()
+    _champion_spawned=false
     for interaction in _story_interactions:
-        if str(interaction.get("story_id",""))=="grave_seal" and int(interaction.get("index",0))<seals_cleansed:interaction["completed"]=true
-        if str(interaction.get("story_id",""))=="ward_sigil" and int(interaction.get("index",0))<sigils_recovered:interaction["completed"]=true
+        if str(interaction.get("story_id",""))=="grave_seal":interaction["completed"]=int(interaction.get("index",0)) in completed_seals
+        if str(interaction.get("story_id",""))=="ward_sigil":interaction["completed"]=int(interaction.get("index",0)) in completed_sigils
     for enemy_index in range(director.minions.size()-1,-1,-1):
         var enemy:Dictionary=director.minions[enemy_index]
         var encounter_id:=str(enemy.get("encounter_id",""))
@@ -352,9 +373,26 @@ func load_save_state(data:Dictionary)->void:
         director.minions.remove_at(enemy_index)
     if stage>=5:_spawn_ossuary_population()
     if stage==6:_spawn_champion()
+    if stage==2 and not _has_living_encounter("courier_ambush"):
+        # Active enemies are not serialized. Rebuild the entire encounter and
+        # its 0/5 counter together so loading during the ambush cannot strand
+        # the campaign at a completed-looking but non-advancing objective.
+        cleared_encounters.erase("courier_ambush")
+        _spawn_group("courier_ambush",WAGON_POINT+Vector2(8,-6),["shambler","shambler","shambler","runner","runner"])
     if not contract_active.is_empty() and not _has_living_encounter("contract_%s"%contract_active):
+        contract_kills=0
         _spawn_group("contract_%s"%contract_active,_contract_position(),_contract_variants(contract_active))
     _sync_interaction_states()
+
+
+func _validated_objective_ids(value:Variant)->Array[int]:
+    var result:Array[int]=[]
+    if not value is Array:return result
+    for raw_id in value:
+        var objective_id:=int(raw_id)
+        if objective_id>=0 and objective_id<3 and objective_id not in result:result.append(objective_id)
+    result.sort()
+    return result
 
 
 func _contract_position()->Vector2:
@@ -404,9 +442,9 @@ func _sync_interaction_states()->void:
         match str(interaction.story_id):
             "wagon":interaction.active=stage==1
             "scout":interaction.active=stage>=3 and stage<=4
-            "grave_seal":interaction.active=stage==4 and not bool(interaction.get("completed",false))
+            "grave_seal":interaction.active=stage==4 and int(interaction.get("index",0)) not in completed_seals
             "ossuary_enter":interaction.active=stage>=5
-            "ward_sigil":interaction.active=stage==5 and not bool(interaction.get("completed",false))
+            "ward_sigil":interaction.active=stage==5 and int(interaction.get("index",0)) not in completed_sigils
             "reward_blade","reward_bulwark":interaction.active=stage==7
             "ossuary_cache":interaction.active=stage>=7 and not bool(side_progress.get("ossuary_cache",false))
             _:pass

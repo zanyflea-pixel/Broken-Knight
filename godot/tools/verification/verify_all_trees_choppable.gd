@@ -9,10 +9,11 @@ func _run()->void:
     var failures:Array[String]=[]
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
     root.add_child(main)
-    await process_frame
-    await process_frame
     var director:Node=main.get_node("GameplayDirector")
     var player:CharacterBody3D=main.get_node("Player")
+    var boot_deadline:=Time.get_ticks_msec()+20000
+    while director._forest_trees.is_empty() and Time.get_ticks_msec()<boot_deadline:
+        await process_frame
     var trees:Array=director._forest_trees
     if trees.size()<1000:failures.append("world tree registry too small: %d"%trees.size())
     if trees.is_empty():

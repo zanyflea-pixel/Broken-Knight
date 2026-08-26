@@ -51,24 +51,31 @@ func refresh()->void:
     if materials:materials.text="HERBS %d   LOGS %d   ORE %d   SCRAP %d   LEATHER %d   CLOTH %d   STONE %d   RESIN %d   MUSHROOMS %d   CRYSTAL %d   ESSENCE %d"%[hero.herbs,hero.logs,hero.ore,hero.scrap,hero.leather,hero.cloth,hero.stone,hero.resin,hero.mushrooms,hero.crystal,hero.essence]
     for child in recipe_root.get_children():child.queue_free()
     var last_category:=""
-    for recipe in director.get_recipes():
+    var visible_recipes:=_visible_recipes()
+    for recipe in visible_recipes:
         var category:String=recipe.get("category","General")
         if category!=last_category:
             var category_label:=Label.new();category_label.text=category.to_upper();category_label.add_theme_color_override("font_color",Color(.93,.66,.24));category_label.add_theme_font_size_override("font_size",18);recipe_root.add_child(category_label);last_category=category
         var requirement:=_cost_text(recipe.get("cost",{}))
         if not str(recipe.get("ingredient_id","")).is_empty():requirement="1 Raw Fish"
         var button:=Button.new();button.text="%s    —    %s"%[recipe.get("name","Recipe"),requirement];button.alignment=HORIZONTAL_ALIGNMENT_LEFT;button.custom_minimum_size=Vector2(0,38);button.disabled=not director.can_craft_recipe(recipe);button.pressed.connect(_select_recipe.bind(str(recipe.id)));recipe_root.add_child(button)
-    if selected_recipe.is_empty() and not director.get_recipes().is_empty():_select_recipe(str(director.get_recipes()[0].id))
+    if selected_recipe.is_empty() and not visible_recipes.is_empty():_select_recipe(str(visible_recipes[0].id))
 
 
 func _select_recipe(recipe_id:String)->void:
     selected_recipe=recipe_id
-    for recipe in director.get_recipes():
+    for recipe in _visible_recipes():
         if str(recipe.id)!=recipe_id:continue
         var requirement:=_cost_text(recipe.get("cost",{}))
         if not str(recipe.get("ingredient_id","")).is_empty():requirement="1 Raw Fish"
         detail.text="[color=#f2c45d][font_size=23][b]%s[/b][/font_size][/color]\n\n%s\n\n[color=#91b9d8]Requires[/color]\n%s\n\n[color=#8fd09b]%s[/color]"%[recipe.name,recipe.get("description",""),requirement,"Ready to craft" if director.can_craft_recipe(recipe) else "Ingredients missing"]
         break
+
+
+func _visible_recipes()->Array:
+    var recipes:Array=director.get_recipes()
+    if str(station.get("kind",""))!="cooking":return recipes
+    return recipes.filter(func(recipe:Dictionary)->bool:return str(recipe.get("category",""))=="Cooking")
 
 
 func _craft_selected()->void:

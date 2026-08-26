@@ -190,7 +190,7 @@ func refresh()->void:
     for child in slots_root.get_children():
         slots_root.remove_child(child)
         child.queue_free()
-    for slot in ["head","chest","shoulders","hands","feet","pants","mainhand","offhand"]:
+    for slot in ["head","chest","shoulders","hands","feet","pants","mainhand","offhand","ring_left","ring_right"]:
         var card:=EquipmentSlot.new()
         card.setup(hero,self,"equip",slot,state.slots.get(slot,{}))
         slots_root.add_child(card)

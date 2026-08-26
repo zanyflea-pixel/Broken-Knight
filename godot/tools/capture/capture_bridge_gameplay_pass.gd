@@ -7,9 +7,9 @@ func _init() -> void:
 
 func _run() -> void:
     var main := (load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     var player: Node3D = main.get_node("Player")
     var site: Dictionary = main._terrain_builder._bridge_sites_cache[0]
     var center: Vector2 = site.position

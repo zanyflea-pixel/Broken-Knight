@@ -1,7 +1,7 @@
 extends RefCounted
 
 const TERRAIN_MATERIAL_COLOR := Color(1.0, 1.0, 1.0, 1.0)
-const TERRAIN_CACHE_VERSION:=36
+const TERRAIN_CACHE_VERSION:=60
 const TERRAIN_MESH_CACHE_VERSION:=3
 const TERRAIN_PROFILE_PATH:="res://data/world/profile.json"
 const MAX_RIVER_BANK_GRADE:=0.42
@@ -20,6 +20,7 @@ var _river_segment_buckets:Dictionary={}
 var _river_walkable_buckets:Dictionary={}
 var _surface_route_buckets:Dictionary={}
 var _river_junctions:Array[Vector2]=[]
+var _waterfall_grade_breaks:Array[Dictionary]=[]
 var _last_sampled_river_distance := -1.0
 const RIVER_BUCKET_SIZE:=256.0
 
@@ -95,6 +96,21 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
                 heights[grid_index] = h
                 river_distances[grid_index] = _last_sampled_river_distance
         heights=_stabilize_heightfield(heights,grid_resolution,world_size)
+        # Global slope repair must never become the final authority inside a
+        # water channel. Reassert the authored bed and shoreline support after
+        # stabilization; otherwise a low neighbouring valley can drag the
+        # river vertices metres below the liquid and make the ribbon float.
+        heights=_restore_river_channel_integrity(heights,river_distances,grid_resolution,world_size,water_level,profile)
+        # Stabilizing steep river and mountain cells can tug the final row of
+        # a settlement pad away from its authored elevation. Restore the
+        # genuinely usable town interior, then feather it over several grid
+        # cells so buildings never straddle a warped or stepped foundation.
+        heights=_restore_settlement_interiors(heights,grid_resolution,world_size,profile)
+        heights=_stabilize_heightfield_around_locked_rivers(heights,river_distances,grid_resolution,world_size,profile)
+        # Adjacent streamed regions own separate heightfields. Reassert their
+        # shared outer row after slope stabilization so both collision meshes
+        # meet vertex-for-vertex instead of opening a visible/fall-through seam.
+        heights=_restore_streaming_seam_edges(heights,grid_resolution,world_size,water_level,profile)
         _store_heightfield_cache(terrain_cache_path,heights,river_distances)
         _profile_generation_step("heightfield",profile_start_usec)
 
@@ -120,25 +136,39 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
     var terrain_instance: MeshInstance3D = MeshInstance3D.new()
     terrain_instance.name = "TerrainMesh"
     terrain_instance.mesh = terrain_mesh
-    terrain_instance.material_override = _make_terrain_material()
+    terrain_instance.material_override = _make_terrain_material(profile)
     # The 28 m gameplay heightfield is deliberately coarse. Let it receive
     # shadows from trees and buildings, but do not let its own huge triangles
     # cast block-shaped mountain shadows across towns and roads.
     terrain_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     terrain_root.add_child(terrain_instance)
-    var collision_path:=_terrain_mesh_cache_path(profile,"collision")
-    var terrain_shape:ConcavePolygonShape3D
-    if ResourceLoader.exists(collision_path):terrain_shape=load(collision_path) as ConcavePolygonShape3D
-    if terrain_shape==null:
-        terrain_shape=terrain_mesh.create_trimesh_shape()
-        _ensure_world_cache_directory()
-        ResourceSaver.save(terrain_shape,collision_path)
+    var terrain_shape:Shape3D
+    var terrain_collision_scale:=Vector3.ONE
+    if profile.get("streamed_heightmap_collision",false):
+        # A terrain heightfield is already a regular grid. Feeding its values
+        # directly to the physics server avoids deserializing a huge duplicate
+        # triangle soup on the travel frame when an adjacent region appears.
+        var heightmap_shape:=HeightMapShape3D.new()
+        heightmap_shape.map_width=grid_resolution+1
+        heightmap_shape.map_depth=grid_resolution+1
+        heightmap_shape.map_data=heights
+        terrain_shape=heightmap_shape
+        var terrain_cell_size:float=world_size/float(grid_resolution)
+        terrain_collision_scale=Vector3(terrain_cell_size,1.0,terrain_cell_size)
+    else:
+        var collision_path:=_terrain_mesh_cache_path(profile,"collision")
+        if ResourceLoader.exists(collision_path):terrain_shape=load(collision_path) as ConcavePolygonShape3D
+        if terrain_shape==null:
+            terrain_shape=terrain_mesh.create_trimesh_shape()
+            _ensure_world_cache_directory()
+            ResourceSaver.save(terrain_shape,collision_path)
     var terrain_body:=StaticBody3D.new()
     terrain_body.name="TerrainMesh_StaticBody"
     terrain_body.collision_layer=1
     var terrain_collision:=CollisionShape3D.new()
     terrain_collision.name="TerrainMeshCollision"
     terrain_collision.shape=terrain_shape
+    terrain_collision.scale=terrain_collision_scale
     terrain_body.add_child(terrain_collision)
     terrain_instance.add_child(terrain_body)
     _profile_generation_step("collision",profile_start_usec)
@@ -199,7 +229,8 @@ func generate_world(terrain_root: Node3D, profile: Dictionary) -> Dictionary:
                 if float(local_river.get("distance", INF)) < channel_limit:
                     inside_channel = true
             var on_bridge := not _bridge_deck_info(point, profile).is_empty()
-            return inside_world and (not inside_channel or on_bridge),
+            var inside_ocean:=_point_inside_ocean_water(point,profile,12.0)
+            return inside_world and not inside_ocean and (not inside_channel or on_bridge),
     }
 
 
@@ -220,8 +251,9 @@ func _terrain_cache_path(profile:Dictionary)->String:
     for key in [
         "world_size","grid_resolution","water_level","controlled_aqueduct",
         "spawn_site","town_sites","mountain_chains","landform_regions",
-        "pond_sites","river_corridors","road_corridors","trail_corridors",
+        "pond_sites","ocean_basins","waterfall_sites","river_corridors","road_corridors","trail_corridors",
         "ford_sites","forest_regions","landmark_sites","map_sites",
+        "region_origin","seam_edges",
     ]:
         terrain_profile[key]=profile.get(key)
     var profile_hash:=str(hash(terrain_profile)).replace("-","n")
@@ -351,6 +383,248 @@ func _stabilize_heightfield(heights:PackedFloat32Array,grid_resolution:int,world
     return heights
 
 
+func _restore_river_channel_integrity(heights:PackedFloat32Array,river_distances:PackedFloat32Array,grid_resolution:int,world_size:float,water_level:float,profile:Dictionary)->PackedFloat32Array:
+    if profile.get("river_corridors",[]).is_empty():return heights
+    var maximum_width:=0.0
+    for river_value in profile.get("river_corridors",[]):
+        if not river_value is Dictionary:continue
+        var river:Dictionary=river_value
+        maximum_width=maxf(maximum_width,float(river.get("width",44.0)))
+        maximum_width=maxf(maximum_width,float(river.get("source_width",maximum_width)))
+        maximum_width=maxf(maximum_width,float(river.get("mouth_width",maximum_width)))
+    var grid_step:=world_size/maxf(1.0,float(grid_resolution))
+    # Protect the complete triangle support beneath visible water. The outer
+    # bank is then relaxed around these locked vertices in the next pass,
+    # preserving both contact and the global single-cell grade contract.
+    var restore_radius:=maximum_width*.42+grid_step*.55
+    var stride:=grid_resolution+1
+    for z_index in range(stride):
+        for x_index in range(stride):
+            var index:=z_index*stride+x_index
+            var distance:=float(river_distances[index])
+            if distance<0.0 or distance>restore_radius:continue
+            var x:=_grid_to_world(x_index,grid_resolution,world_size)
+            var z:=_grid_to_world(z_index,grid_resolution,world_size)
+            heights[index]=_sample_height(x,z,profile,world_size,water_level)
+    return heights
+
+
+func _stabilize_heightfield_around_locked_rivers(heights:PackedFloat32Array,river_distances:PackedFloat32Array,grid_resolution:int,world_size:float,profile:Dictionary)->PackedFloat32Array:
+    var maximum_width:=0.0
+    for river_value in profile.get("river_corridors",[]):
+        if not river_value is Dictionary:continue
+        var river:Dictionary=river_value
+        maximum_width=maxf(maximum_width,float(river.get("width",44.0)))
+        maximum_width=maxf(maximum_width,float(river.get("source_width",maximum_width)))
+        maximum_width=maxf(maximum_width,float(river.get("mouth_width",maximum_width)))
+    var grid_step:=world_size/maxf(1.0,float(grid_resolution))
+    var lock_radius:=maximum_width*.42+grid_step*.55+.01
+    var locks:=PackedByteArray();locks.resize(heights.size())
+    var stride:=grid_resolution+1
+    var protected_sites:Array=[]
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if not spawn_site.is_empty():protected_sites.append(spawn_site)
+    protected_sites.append_array(profile.get("town_sites",[]))
+    for map_site in profile.get("map_sites",[]):
+        if map_site is Dictionary and map_site.get("usable_ground",false):protected_sites.append(map_site)
+    for z_index in range(stride):
+        for x_index in range(stride):
+            var index:=z_index*stride+x_index
+            var distance:=float(river_distances[index])
+            var locked:=distance>=0.0 and distance<=lock_radius
+            if not locked:
+                var point:=Vector2(
+                    _grid_to_world(x_index,grid_resolution,world_size),
+                    _grid_to_world(z_index,grid_resolution,world_size)
+                )
+                for site_value in protected_sites:
+                    if not site_value is Dictionary:continue
+                    var site:Dictionary=site_value
+                    var inner_radius:=float(site.get("radius",120.0))*minf(float(site.get("ground_inner_ratio",.78)),.78)
+                    if point.distance_squared_to(Vector2(site.get("position",Vector2.ZERO)))<=inner_radius*inner_radius:
+                        locked=true
+                        break
+            locks[index]=1 if locked else 0
+    var maximum_delta:=grid_step*MAX_TERRAIN_CELL_GRADE
+    for iteration in range(28):
+        var changed:=false
+        for z_index in range(stride):
+            for x_index in range(stride):
+                var index:=z_index*stride+x_index
+                if x_index<grid_resolution:
+                    changed=_constrain_height_pair(heights,locks,index,index+1,maximum_delta) or changed
+                if z_index<grid_resolution:
+                    changed=_constrain_height_pair(heights,locks,index,index+stride,maximum_delta) or changed
+        for z_index in range(grid_resolution,-1,-1):
+            for x_index in range(grid_resolution,-1,-1):
+                var index:=z_index*stride+x_index
+                if x_index>0:
+                    changed=_constrain_height_pair(heights,locks,index,index-1,maximum_delta) or changed
+                if z_index>0:
+                    changed=_constrain_height_pair(heights,locks,index,index-stride,maximum_delta) or changed
+        if not changed:break
+    return heights
+
+
+func _constrain_height_pair(heights:PackedFloat32Array,locks:PackedByteArray,index_a:int,index_b:int,maximum_delta:float)->bool:
+    var height_a:=float(heights[index_a])
+    var height_b:=float(heights[index_b])
+    var difference:=height_a-height_b
+    if absf(difference)<=maximum_delta:return false
+    var a_locked:=locks[index_a]!=0
+    var b_locked:=locks[index_b]!=0
+    if a_locked and b_locked:
+        # Authored water can contain a deliberate waterfall step. Both sides
+        # still remain real terrain and are never separated from the liquid.
+        return false
+    if a_locked:
+        heights[index_b]=height_a-signf(difference)*maximum_delta
+    elif b_locked:
+        heights[index_a]=height_b+signf(difference)*maximum_delta
+    else:
+        var midpoint:=(height_a+height_b)*.5
+        var half_delta:=maximum_delta*.5*signf(difference)
+        heights[index_a]=midpoint+half_delta
+        heights[index_b]=midpoint-half_delta
+    return true
+
+
+func _restore_settlement_interiors(heights:PackedFloat32Array,grid_resolution:int,world_size:float,profile:Dictionary)->PackedFloat32Array:
+    var sites:Array=[]
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if not spawn_site.is_empty():sites.append(spawn_site)
+    sites.append_array(profile.get("town_sites",[]))
+    for map_site in profile.get("map_sites",[]):
+        if map_site is Dictionary and map_site.get("usable_ground",false):sites.append(map_site)
+    if sites.is_empty():return heights
+    var cell_size:=world_size/maxf(1.0,float(grid_resolution))
+    var repair_sites:Array=[]
+    for site_value in sites:
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var radius:=float(site.get("radius",120.0))
+        var inner_radius:=radius*minf(float(site.get("ground_inner_ratio",.78)),.78)
+        var minimum:=INF
+        var maximum:=-INF
+        for z_index in range(grid_resolution+1):
+            var world_z:=_grid_to_world(z_index,grid_resolution,world_size)
+            for x_index in range(grid_resolution+1):
+                var world_x:=_grid_to_world(x_index,grid_resolution,world_size)
+                if Vector2(world_x,world_z).distance_squared_to(center)>inner_radius*inner_radius:continue
+                var value:=float(heights[_grid_index(x_index,z_index,grid_resolution)])
+                minimum=minf(minimum,value);maximum=maxf(maximum,value)
+        # Do not touch an already stable settlement. Rebuilding every pad
+        # unnecessarily disturbed Crownspire's intentional high-ground blend.
+        if maximum-minimum>1.25:repair_sites.append(site)
+    if repair_sites.is_empty():return heights
+    for z_index in range(grid_resolution+1):
+        var world_z:=_grid_to_world(z_index,grid_resolution,world_size)
+        for x_index in range(grid_resolution+1):
+            var world_x:=_grid_to_world(x_index,grid_resolution,world_size)
+            var point:=Vector2(world_x,world_z)
+            var grid_index:=_grid_index(x_index,z_index,grid_resolution)
+            for site_value in repair_sites:
+                if not site_value is Dictionary:continue
+                var site:Dictionary=site_value
+                var center:Vector2=site.get("position",Vector2.ZERO)
+                var radius:=float(site.get("radius",120.0))
+                var authored_inner:=float(site.get("ground_inner_ratio",.78))
+                # .78 is wide enough to keep every triangle sampled inside the
+                # gameplay town core level, without flattening a whole region.
+                var inner_radius:=radius*minf(authored_inner,.78)
+                # Match the broad authored settlement transition. A short
+                # repair ring around Crownspire reintroduced an eight-metre
+                # single-cell ledge even though its interior became level.
+                var outer_radius:=maxf(
+                    radius*1.55,
+                    maxf(radius*authored_inner+72.0,inner_radius+cell_size*5.0)
+                )
+                var distance:=point.distance_to(center)
+                if distance>outer_radius:continue
+                var target:=float(site.get("ground_height",heights[grid_index]))
+                if distance<=inner_radius:
+                    heights[grid_index]=target
+                else:
+                    var weight:=1.0-_smoothstep(inner_radius,outer_radius,distance)
+                    heights[grid_index]=lerpf(float(heights[grid_index]),target,weight)
+                break
+    return heights
+
+
+func _restore_streaming_seam_edges(heights:PackedFloat32Array,grid_resolution:int,world_size:float,water_level:float,profile:Dictionary)->PackedFloat32Array:
+    var seam_edges:Array=profile.get("seam_edges",[])
+    if seam_edges.is_empty():return heights
+    var cell_size:=world_size/maxf(1.0,float(grid_resolution))
+    for seam_value in seam_edges:
+        if not seam_value is Dictionary:continue
+        var edge:=str(seam_value.get("edge",""))
+        # The final boundary row was already watertight, but the last global
+        # slope-repair pass could leave the first one or two interior rows far
+        # from that shared datum. Reassert a short section of the authored
+        # 620 m approach after stabilization so walking/riding onto a streamed
+        # neighbour cannot encounter a cliff in the final 45 m.
+        var blend_width:=maxf(64.0,float(seam_value.get("blend_width",620.0)))
+        var repair_depth:=minf(blend_width,maxf(120.0,cell_size*5.0))
+        var repair_cells:=maxi(1,ceili(repair_depth/cell_size))
+        if edge in ["north","south"]:
+            for inward_cell in range(repair_cells+1):
+                var z_index:=grid_resolution-inward_cell if edge=="north" else inward_cell
+                var world_z:=_grid_to_world(z_index,grid_resolution,world_size)
+                var inward_distance:=float(inward_cell)*cell_size
+                var weight:=1.0 if inward_cell==0 else 1.0-_smoothstep(0.0,blend_width,inward_distance)
+                for x_index in range(grid_resolution+1):
+                    var world_x:=_grid_to_world(x_index,grid_resolution,world_size)
+                    var point:=Vector2(world_x,world_z)
+                    var crossing_height:=_authored_streaming_river_crossing_height(world_x,seam_value,profile)
+                    var endpoint_influence:=_streaming_river_endpoint_influence(point,edge,profile)
+                    if inward_cell>0 and (is_finite(crossing_height) or endpoint_influence):continue
+                    var final_height:=_streaming_seam_curve(world_x,seam_value,profile)
+                    if inward_cell==0 and is_finite(crossing_height):final_height=crossing_height
+                    elif inward_cell==0 and endpoint_influence:final_height=_sample_height(world_x,world_z,profile,world_size,water_level)
+                    var index:=_grid_index(x_index,z_index,grid_resolution)
+                    heights[index]=lerpf(float(heights[index]),final_height,weight)
+        elif edge in ["east","west"]:
+            for inward_cell in range(repair_cells+1):
+                var x_index:=grid_resolution-inward_cell if edge=="east" else inward_cell
+                var world_x:=_grid_to_world(x_index,grid_resolution,world_size)
+                var inward_distance:=float(inward_cell)*cell_size
+                var weight:=1.0 if inward_cell==0 else 1.0-_smoothstep(0.0,blend_width,inward_distance)
+                for z_index in range(grid_resolution+1):
+                    var world_z:=_grid_to_world(z_index,grid_resolution,world_size)
+                    var point:=Vector2(world_x,world_z)
+                    var crossing_height:=_authored_streaming_river_crossing_height(world_z,seam_value,profile)
+                    var endpoint_influence:=_streaming_river_endpoint_influence(point,edge,profile)
+                    if inward_cell>0 and (is_finite(crossing_height) or endpoint_influence):continue
+                    var final_height:=_streaming_seam_curve(world_z,seam_value,profile)
+                    if inward_cell==0 and is_finite(crossing_height):final_height=crossing_height
+                    elif inward_cell==0 and endpoint_influence:final_height=_sample_height(world_x,world_z,profile,world_size,water_level)
+                    var index:=_grid_index(x_index,z_index,grid_resolution)
+                    heights[index]=lerpf(float(heights[index]),final_height,weight)
+    return heights
+
+
+func _authored_streaming_river_crossing_height(local_along:float,seam:Dictionary,profile:Dictionary)->float:
+    var crossings:Array=seam.get("river_crossings",[])
+    if crossings.is_empty():return INF
+    var edge:=str(seam.get("edge",""))
+    var origin:Vector2=profile.get("region_origin",Vector2.ZERO)
+    var global_along:=local_along+(origin.y if edge in ["east","west"] else origin.x)
+    var seam_height:=_streaming_seam_curve(local_along,seam,profile)
+    var best_weight:=0.0
+    var result:=seam_height
+    for crossing_value in crossings:
+        if not crossing_value is Dictionary:continue
+        var crossing:Dictionary=crossing_value
+        var width:=maxf(2.0,float(crossing.get("width",24.0)))
+        var distance:=absf(global_along-float(crossing.get("along",global_along)))
+        var weight:=1.0-_smoothstep(width*.48,width*.95,distance)
+        if weight<=best_weight:continue
+        best_weight=weight
+        result=lerpf(seam_height,float(crossing.get("bed_height",seam_height)),weight)
+    return result if best_weight>0.0 else INF
+
+
 func _sample_height(x: float, z: float, profile: Dictionary, world_size: float, water_level: float) -> float:
     if profile.get("controlled_aqueduct", false):
         return _sample_controlled_aqueduct_height(x, z, profile, water_level)
@@ -371,6 +645,8 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
     var width := 84.0
     var dist := INF
     var grade_x:=x
+    var grade_corridor_index:=-1
+    var grade_progress:=0.0
     var nearby_segments:Array=_river_segment_buckets.get(
         Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),
         []
@@ -386,6 +662,8 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
             dist = candidate_dist
             width = lerpf(float(segment_data.width_a),float(segment_data.width_b),segment_t)
             grade_x=closest_point.x
+            grade_corridor_index=int(segment_data.get("corridor_index",-1))
+            grade_progress=lerpf(float(segment_data.get("start_progress",0.0)),float(segment_data.get("end_progress",1.0)),segment_t)
     # Defensive fallback for direct unit calls made before generate_world().
     if _river_segment_buckets.is_empty():
         for candidate in corridors:
@@ -403,7 +681,7 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
     # without creating uphill water or disconnected pools.
     # A gentle world-scale fall keeps the full river close to the surrounding
     # watershed. The previous grade climbed far above low terrain downstream.
-    var channel_surface:=_river_grade(grade_x)
+    var channel_surface:=_river_grade_for_corridor(grade_x,grade_corridor_index,grade_progress,profile)
     var bed := channel_surface - 2.8
     # This is the exact rendered water datum used by WorldPreviewBuilder.
     # Keeping a second, lower "support water" height made the real terrain sit
@@ -427,7 +705,11 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
         var support_distance := Vector2(x, z).distance_to(support_center)
         if support_distance < 132.0:
             var support_weight := 1.0 - _smoothstep(86.0, 132.0, support_distance)
-            terrain_channel_bed=lerpf(terrain_channel_bed,water_surface-.18,support_weight)
+            # Bridge banks are raised to meet their approaches. Give the
+            # center channel enough depth that coarse triangles interpolating
+            # toward those banks still remain below the visible water, rather
+            # than poking dry wedges through the river beside a crossing.
+            terrain_channel_bed=lerpf(terrain_channel_bed,water_surface-2.75,support_weight)
     # South Ford sits on a sharp authored bend. Coarse terrain triangles could
     # dip beside the bridge and expose water outside the channel, so reinforce
     # only the outer bank vertices around explicitly guarded crossings.
@@ -444,6 +726,7 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
     # Grade only the road approaches beside a bridge. The river channel stays
     # carved and continuous, while both banks meet the crossing at a sensible
     # shared elevation instead of producing a giant ramp on the higher side.
+    var bridge_approach_surface:=-INF
     for bridge_site in _bridge_sites_cache:
         var bridge_center: Vector2 = bridge_site.get("position", Vector2.ZERO)
         var bridge_direction: Vector2 = bridge_site.get("direction", Vector2(0.0, 1.0))
@@ -453,8 +736,9 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
         var bridge_lateral := absf(bridge_offset.cross(bridge_direction))
         if bridge_lateral <= approach_width and bridge_along >= half_channel * 0.82 and bridge_along <= half_channel + 82.0:
             var approach_weight := 1.0 - _smoothstep(half_channel + 20.0, half_channel + 82.0, bridge_along)
-            var approach_height := _river_grade(bridge_center.x) + 0.48
+            var approach_height := _river_centerline_grade(bridge_center,profile) + 0.48
             surface = lerpf(surface, approach_height, approach_weight)
+            bridge_approach_surface=maxf(bridge_approach_surface,surface)
     # The world grid is about 22 metres between vertices. Every vertex whose
     # triangle can reach the liquid has to remain just beneath the water or a
     # distant hillside vertex can slice through the river. This support is part
@@ -484,6 +768,16 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
         # above the water. The river therefore meets real ground even if every
         # decorative bank mesh is hidden, culled or omitted at a confluence.
         var support_surface:=submerged_edge_surface
+        if bridge_approach_surface>-INF and dist>visible_water_half:
+            # River support vertices used to overwrite the bridge grading
+            # above. That left every approach as a dark, steep wedge hanging
+            # between the road and deck. Rise from the exact waterline to the
+            # authored bank height only after leaving visible water.
+            var bridge_bank_weight:=_smoothstep(visible_water_half,half_channel+6.0,dist)
+            support_surface=maxf(
+                support_surface,
+                lerpf(water_surface-.035,bridge_approach_surface,bridge_bank_weight)
+            )
         var settlement_target:=_settlement_route_target(point,surface,profile)
         if settlement_target.fixed and dist>visible_water_half+6.0:
             # Hidden diagonal support must not excavate a settlement that is
@@ -522,6 +816,7 @@ func _sample_controlled_aqueduct_height(x: float, z: float, profile: Dictionary,
     # approach a pond, but it must never lift isolated land triangles through
     # the water surface or create a fake causeway across the shoreline.
     surface=_apply_engineered_route_surface(point,surface)
+    surface=_apply_ocean_basin_surface(surface,point,profile)
     return _apply_pond_carve(surface,point,profile)
 
 
@@ -552,6 +847,8 @@ func _apply_pond_carve(input_surface:float,point:Vector2,profile:Dictionary)->fl
 
 func _land_surface_without_water(point:Vector2,profile:Dictionary)->float:
     var surface:=_natural_world_surface(point,profile)+_cave_cliff_raise(point)
+    surface=_apply_ocean_basin_surface(surface,point,profile)
+    surface=_apply_streaming_seam_surface(point,surface,profile)
     # Settlements are authored spaces, not buildings dropped onto random
     # noise. Their inner districts are level, with a broad transition back to
     # the surrounding terrain so roads and city walls meet usable ground.
@@ -585,6 +882,152 @@ func _land_surface_without_water(point:Vector2,profile:Dictionary)->float:
     return _cave_access_surface(point,surface,profile)
 
 
+func _apply_ocean_basin_surface(input_surface:float,point:Vector2,profile:Dictionary)->float:
+    var surface:=input_surface
+    for basin_value in profile.get("ocean_basins",[]):
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast":
+            surface-=_ocean_basin_depth(point,basin)
+            continue
+        var coast_points:Array=basin.get("coast_points",[])
+        if coast_points.size()<2:continue
+        var coast_x:=_coastline_x_at_z(point.y,coast_points)
+        var water_height:=float(basin.get("water_height",-.6))
+        var shelf_width:=maxf(80.0,float(basin.get("shelf_width",520.0)))
+        var land_blend:=maxf(40.0,float(basin.get("land_blend",210.0)))
+        var depth:=maxf(2.0,float(basin.get("depth",34.0)))
+        if point.x<=coast_x:
+            var seaward:=coast_x-point.x
+            # Keep several complete terrain cells at wading depth before the
+            # shelf descends. Otherwise a coarse offshore vertex can pull the
+            # interpolated shoreline metres below the water even though the
+            # authored coast sample itself is correct.
+            var grid_step:=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",256)))
+            # This headland reaches the atlas seam on a strong diagonal, so a
+            # coastline can cross several east/west cells over one north/south
+            # row. A broad natural shelf keeps every triangle touching shore
+            # shallow before the ocean begins its real descent offshore.
+            var shallow_run:=minf(shelf_width*.62,maxf(220.0,grid_step*8.0))
+            var sea_floor:=water_height-.24-depth*_smoothstep(shallow_run,shelf_width,seaward)
+            # The ocean owns its seabed on the wet side of the coastline.
+            # Using minf() only cut high vertices and preserved naturally low
+            # terrain, leaving submerged trenches directly beneath the water.
+            surface=sea_floor
+        elif point.x<coast_x+land_blend:
+            # The real terrain rises continuously from the waterline. This is
+            # a physical shore profile, not a decorative plane, so no air slit
+            # or invisible ledge can exist between land and sea.
+            var land_t:=_smoothstep(0.0,land_blend,point.x-coast_x)
+            surface=lerpf(water_height+.10,maxf(surface,water_height+.10),land_t)
+    return surface
+
+
+func _coastline_x_at_z(z:float,coast_points:Array)->float:
+    if coast_points.is_empty():return -INF
+    var first:=Vector2(coast_points[0])
+    if z<=first.y:return first.x
+    for index in range(coast_points.size()-1):
+        var a:=Vector2(coast_points[index]);var b:=Vector2(coast_points[index+1])
+        if z>=minf(a.y,b.y) and z<=maxf(a.y,b.y):
+            var span:=b.y-a.y
+            var t:=0.0 if absf(span)<.001 else clampf((z-a.y)/span,0.0,1.0)
+            return lerpf(a.x,b.x,t)
+    return Vector2(coast_points[-1]).x
+
+
+func _point_inside_ocean_water(point:Vector2,profile:Dictionary,wade_margin:float=0.0)->bool:
+    for basin_value in profile.get("ocean_basins",[]):
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast":continue
+        var coast_points:Array=basin.get("coast_points",[])
+        if coast_points.size()<2:continue
+        if str(basin.get("edge","west"))=="west" and point.x<_coastline_x_at_z(point.y,coast_points)-wade_margin:return true
+    return false
+
+
+func _apply_streaming_seam_surface(point:Vector2,surface:float,profile:Dictionary)->float:
+    # Both sides of a streamed boundary evaluate the same world-space curve.
+    # The curve is deliberately a broad mountain-pass floor rather than a flat
+    # strip, and it fades into each region far before the player sees the join.
+    var world_size:float=float(profile.get("world_size",7200.0))
+    var origin:Vector2=profile.get("region_origin",Vector2.ZERO)
+    for seam_value in profile.get("seam_edges",[]):
+        if not seam_value is Dictionary:continue
+        var seam:Dictionary=seam_value
+        var edge:=str(seam.get("edge",""))
+        var inward_distance:=INF
+        var along_coordinate:=point.x
+        if edge=="north":inward_distance=world_size*.5-point.y
+        elif edge=="south":inward_distance=point.y+world_size*.5
+        elif edge=="east":
+            inward_distance=world_size*.5-point.x
+            along_coordinate=point.y
+        elif edge=="west":
+            inward_distance=point.x+world_size*.5
+            along_coordinate=point.y
+        else:continue
+        var blend_width:=maxf(64.0,float(seam.get("blend_width",620.0)))
+        if inward_distance>=blend_width:continue
+        var seam_height:=_streaming_seam_curve(along_coordinate,seam,profile)
+        var weight:=1.0-_smoothstep(0.0,blend_width,inward_distance)
+        surface=lerpf(surface,seam_height,weight)
+    return surface
+
+
+func _streaming_seam_curve(along_coordinate:float,seam:Dictionary,profile:Dictionary)->float:
+    var origin:Vector2=profile.get("region_origin",Vector2.ZERO)
+    var edge:=str(seam.get("edge",""))
+    var global_along:=along_coordinate+(origin.y if edge in ["east","west"] else origin.x)
+    var seed:=float(abs(str(seam.get("key","world_seam")).hash())%10000)*.001
+    var seam_height:=float(seam.get("base_height",13.5))
+    seam_height+=sin(global_along*.00115+seed)*4.2
+    seam_height+=sin(global_along*.0031+seed*.37)*1.6
+    # At a four-region grid junction, pairwise seam curves alone are not
+    # sufficient: whichever edge is restored last would otherwise own the
+    # corner vertex and leave the diagonal neighbour at a different height.
+    # Adjacent profiles author the same junction datum, and each pairwise seam
+    # eases into it before the corner so the complete terrain mesh remains
+    # watertight while retaining its distinctive pass grade away from the hub.
+    var junctions:Array=[]
+    if seam.has("junction_along"):
+        junctions.append({
+            "along":seam.get("junction_along",global_along),
+            "height":seam.get("junction_height",seam_height),
+            "blend":seam.get("junction_blend",620.0),
+        })
+    junctions.append_array(seam.get("junctions",[]))
+    for junction_value in junctions:
+        if not junction_value is Dictionary:continue
+        var junction:Dictionary=junction_value
+        var junction_along:=float(junction.get("along",global_along))
+        var junction_blend:=maxf(80.0,float(junction.get("blend",620.0)))
+        var junction_weight:=1.0-_smoothstep(0.0,junction_blend,absf(global_along-junction_along))
+        seam_height=lerpf(seam_height,float(junction.get("height",seam_height)),junction_weight)
+    return seam_height
+
+
+func _streaming_river_endpoint_influence(point:Vector2,edge:String,profile:Dictionary)->bool:
+    var world_size:float=float(profile.get("world_size",7200.0))
+    var boundary:=world_size*.5 if edge in ["north","east"] else -world_size*.5
+    for river_value in profile.get("river_corridors",[]):
+        if not river_value is Dictionary:continue
+        var river:Dictionary=river_value
+        var points:Array=river.get("points",[])
+        if points.is_empty():continue
+        for endpoint_value in [points[0],points[-1]]:
+            var endpoint:Vector2=endpoint_value
+            var width:=float(river.get("width",44.0))
+            if edge in ["north","south"]:
+                if absf(endpoint.y-boundary)>.5:continue
+                if absf(point.x-endpoint.x)<=width*.95:return true
+            else:
+                if absf(endpoint.x-boundary)>.5:continue
+                if absf(point.y-endpoint.y)<=width*.95:return true
+    return false
+
+
 func _prepare_engineered_route_cache(profile:Dictionary)->void:
     _engineered_route_buckets.clear()
     var grid_step:float=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",256)))
@@ -596,7 +1039,8 @@ func _prepare_engineered_route_cache(profile:Dictionary)->void:
         var points:Array=corridor.get("points",[])
         if points.size()<2:continue
         var route_class:=str(corridor.get("route_class","local"))
-        var grade_limit:=.14 if route_class=="major" else (.18 if route_class=="secondary" else .24)
+        var default_grade_limit:=.14 if route_class=="major" else (.18 if route_class=="secondary" else .24)
+        var grade_limit:=clampf(float(corridor.get("grade_limit",default_grade_limit)),.035,.30)
         var sample_spacing:=maxf(16.0,grid_step*.78)
         var sampled_points:Array=[]
         for index in range(points.size()-1):
@@ -616,7 +1060,7 @@ func _prepare_engineered_route_cache(profile:Dictionary)->void:
             if index==0 or index==sampled_points.size()-1:
                 target=_route_endpoint_height(point,target,profile)
             var bridge_target:={"height":target,"fixed":false}
-            if not settlement_target.fixed:bridge_target=_bridge_route_target(point,target)
+            if not settlement_target.fixed:bridge_target=_bridge_route_target(point,target,profile)
             target=float(bridge_target.height)
             if index==0 or index==sampled_points.size()-1 or settlement_target.fixed or bridge_target.fixed:
                 fixed_heights[index]=target
@@ -625,7 +1069,11 @@ func _prepare_engineered_route_cache(profile:Dictionary)->void:
         # Include one heightfield sample beyond either shoulder so the coarse
         # terrain triangles cannot poke through the road ribbon.
         var inner:=grid_step*1.38+float(corridor.get("width",7.0))*.5
-        var outer:=inner+18.0
+        # The authored terrain_width describes the full engineered shoulder,
+        # not just the broad natural valley relief. Honour half of it here so
+        # a raised bridge approach feathers into neighbouring land instead of
+        # becoming a narrow embankment with a near-vertical side wall.
+        var outer:=maxf(inner+18.0,float(corridor.get("terrain_width",0.0))*.5)
         for index in range(sampled_points.size()-1):
             _bucket_engineered_route_segment({
                 "a":sampled_points[index],"b":sampled_points[index+1],
@@ -655,14 +1103,19 @@ func _route_endpoint_height(point:Vector2,fallback:float,profile:Dictionary)->fl
     return fallback
 
 
-func _bridge_route_target(point:Vector2,fallback:float)->Dictionary:
+func _bridge_route_target(point:Vector2,fallback:float,profile:Dictionary)->Dictionary:
     for site in _bridge_sites_cache:
         var center:Vector2=site.get("position",Vector2.ZERO)
-        # Hold the route at deck height through the entire coarse-grid bridge
-        # support zone. The graded route then resumes beyond the bank instead
-        # of dropping once between the final plank and the first road sample.
-        if point.distance_to(center)<=float(site.get("radius",62.0))*1.55:
-            return {"height":_river_grade(center.x)+.62,"fixed":true}
+        var road_width:=float(site.get("road_width",14.0))
+        var river_width:=float(site.get("river_width",52.0))
+        var deck_half:=maxf(river_width+10.0,road_width*2.15)*.5
+        # Hold only the physical deck and its short engineered landing at deck
+        # grade.  The old radius*1.55 rule flattened as much as 96 m around a
+        # 30 m bridge, creating a blind crest before both approaches.  The
+        # bounded road-grade solver now owns the longer, visible transition.
+        var fixed_run:=deck_half+maxf(12.0,road_width*.82)
+        if point.distance_to(center)<=fixed_run:
+            return {"height":_river_centerline_grade(center,profile)+.62,"fixed":true}
     return {"height":fallback,"fixed":false}
 
 
@@ -711,8 +1164,11 @@ func _prepare_river_segment_cache(profile:Dictionary)->void:
     _river_segment_buckets.clear()
     _river_walkable_buckets.clear()
     _river_junctions.clear()
+    _waterfall_grade_breaks.clear()
     var grid_step:=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",256)))
-    for corridor in profile.get("river_corridors",[]):
+    var profile_rivers:Array=profile.get("river_corridors",[])
+    for corridor_index in range(profile_rivers.size()):
+        var corridor:Dictionary=profile_rivers[corridor_index]
         var points:Array=corridor.get("points",[])
         var maximum_width:=maxf(
             float(corridor.get("source_width",corridor.get("width",84.0))),
@@ -740,7 +1196,11 @@ func _prepare_river_segment_cache(profile:Dictionary)->void:
                 floori((maxf(a.x,b.x)+influence)/RIVER_BUCKET_SIZE),
                 floori((maxf(a.y,b.y)+influence)/RIVER_BUCKET_SIZE)
             )
-            var segment_data:={"a":a,"b":b,"width_a":width_a,"width_b":width_b}
+            var segment_data:={
+                "a":a,"b":b,"width_a":width_a,"width_b":width_b,
+                "corridor_index":corridor_index,
+                "start_progress":start_progress,"end_progress":end_progress,
+            }
             for bucket_x in range(min_bucket.x,max_bucket.x+1):
                 for bucket_y in range(min_bucket.y,max_bucket.y+1):
                     var key:=Vector2i(bucket_x,bucket_y)
@@ -760,7 +1220,7 @@ func _prepare_river_segment_cache(profile:Dictionary)->void:
                     var key:=Vector2i(bucket_x,bucket_y)
                     if not _river_walkable_buckets.has(key):_river_walkable_buckets[key]=[]
                     _river_walkable_buckets[key].append(segment_data)
-    var rivers:Array=profile.get("river_corridors",[])
+    var rivers:Array=profile_rivers
     for river_index in range(rivers.size()):
         var points:Array=rivers[river_index].get("points",[])
         if points.is_empty():continue
@@ -771,6 +1231,34 @@ func _prepare_river_segment_cache(profile:Dictionary)->void:
                 if _distance_to_polyline(endpoint,other.get("points",[]))<float(other.get("width",48.0))*.72:
                     _river_junctions.append(endpoint)
                     break
+    # Bind each authored fall to its nearest river progress once. Height
+    # queries can then preserve a level cross-section and apply the full drop
+    # upstream without rescanning every spline segment.
+    for site_value in profile.get("waterfall_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var site_point:Vector2=site.get("position",Vector2.ZERO)
+        var best_distance:=INF
+        var best_corridor:=-1
+        var best_progress:=0.0
+        for corridor_index in range(rivers.size()):
+            var points:Array=rivers[corridor_index].get("points",[])
+            for segment_index in range(points.size()-1):
+                var a:Vector2=points[segment_index];var b:Vector2=points[segment_index+1]
+                var segment:=b-a
+                if segment.length_squared()<=.0001:continue
+                var t:=clampf((site_point-a).dot(segment)/segment.length_squared(),0.0,1.0)
+                var distance:=site_point.distance_to(a+segment*t)
+                if distance>=best_distance:continue
+                best_distance=distance
+                best_corridor=corridor_index
+                best_progress=(float(segment_index)+t)/maxf(1.0,float(points.size()-1))
+        if best_corridor>=0:
+            _waterfall_grade_breaks.append({
+                "corridor_index":best_corridor,
+                "progress":best_progress,
+                "drop":maxf(0.0,float(site.get("drop",0.0))),
+            })
 
 
 func _nearest_cached_river_segment(point:Vector2,profile:Dictionary)->Dictionary:
@@ -855,7 +1343,7 @@ func _surface_route_offset(point:Vector2)->float:
         var entry:Dictionary=entry_value
         if entry.kind=="junction":
             if point.distance_squared_to(entry.point)<=float(entry.half_width)*float(entry.half_width):
-                best_offset=maxf(best_offset,.14)
+                best_offset=maxf(best_offset,.18)
             continue
         var a:Vector2=entry.a
         var b:Vector2=entry.b
@@ -864,7 +1352,7 @@ func _surface_route_offset(point:Vector2)->float:
         var distance:=point.distance_to(a+segment*t)
         var half_width:float=entry.half_width
         if distance<=half_width:
-            best_offset=maxf(best_offset,lerpf(.14,.08,clampf(distance/half_width,0.0,1.0)))
+            best_offset=maxf(best_offset,lerpf(.18,.12,clampf(distance/half_width,0.0,1.0)))
     return best_offset
 
 
@@ -970,12 +1458,32 @@ func _river_grade(x: float) -> float:
     return grade
 
 
+func _river_grade_for_corridor(grade_x:float,corridor_index:int,progress:float,profile:Dictionary)->float:
+    var grade:=_river_grade(grade_x)
+    var rivers:Array=profile.get("river_corridors",[])
+    if corridor_index<0 or corridor_index>=rivers.size():return grade
+    var corridor:Dictionary=rivers[corridor_index]
+    if corridor.has("source_height") and corridor.has("mouth_height"):
+        grade=lerpf(
+            float(corridor.get("source_height",grade)),
+            float(corridor.get("mouth_height",grade)),
+            clampf(progress,0.0,1.0)
+        )
+    grade+=float(corridor.get("base_lift",0.0))
+    for grade_break in _waterfall_grade_breaks:
+        if int(grade_break.get("corridor_index",-1))==corridor_index and progress<=float(grade_break.get("progress",0.0))+.0001:
+            grade+=float(grade_break.get("drop",0.0))
+    return grade
+
+
 func _river_centerline_grade(point:Vector2,profile:Dictionary)->float:
     # Water elevation is constant across each river cross-section. Sampling
     # world X directly tilted north-south rivers sideways and made one bank sit
     # below the liquid near waterfall grade breaks.
     var best_distance:=INF
     var grade_x:=point.x
+    var best_corridor_index:=-1
+    var best_progress:=0.0
     var nearby_segments:Array=_river_segment_buckets.get(
         Vector2i(floori(point.x/RIVER_BUCKET_SIZE),floori(point.y/RIVER_BUCKET_SIZE)),[]
     )
@@ -989,10 +1497,12 @@ func _river_centerline_grade(point:Vector2,profile:Dictionary)->float:
         if distance<best_distance:
             best_distance=distance
             grade_x=closest.x
+            best_corridor_index=int(segment_data.get("corridor_index",-1))
+            best_progress=lerpf(float(segment_data.get("start_progress",0.0)),float(segment_data.get("end_progress",1.0)),segment_t)
     if nearby_segments.is_empty():
         var nearest:=_nearest_road_segment(point,profile.get("river_corridors",[]))
         if not nearest.is_empty():grade_x=Vector2(nearest.get("closest_point",point)).x
-    return _river_grade(grade_x)
+    return _river_grade_for_corridor(grade_x,best_corridor_index,best_progress,profile)
 
 
 func _cave_cliff_raise(point: Vector2) -> float:
@@ -1152,7 +1662,7 @@ func _bridge_deck_info(point: Vector2, profile: Dictionary) -> Dictionary:
             var terrain_blend := 0.0
             if along > deck_half:
                 terrain_blend = _smoothstep(deck_half, deck_half + approach_run, along)
-            var deck_height := _river_grade(center.x) + 0.62
+            var deck_height := _river_centerline_grade(center,profile) + 0.62
             return {
                 "height": deck_height,
                 "terrain_blend": terrain_blend,
@@ -1178,13 +1688,13 @@ func _road_surface_offset(point: Vector2, profile: Dictionary, road_junctions: A
         # A modest raised crown that tapers almost back to terrain at both
         # shoulders. This mirrors the road mesh cross-section exactly.
         var across := clampf(distance / half_width, 0.0, 1.0)
-        best_offset = maxf(best_offset, lerpf(0.14, 0.08, across))
+        best_offset = maxf(best_offset, lerpf(0.18, 0.12, across))
 
     # The preview builder caps shared road nodes with a small junction disk.
     # Include those caps in the movement surface as well.
     for junction in road_junctions:
         if point.distance_to(junction) <= 7.5:
-            return maxf(best_offset, 0.14)
+            return maxf(best_offset, 0.18)
     return best_offset
 
 
@@ -1194,7 +1704,7 @@ func _trail_surface_offset(point: Vector2, profile: Dictionary) -> float:
         var distance := _distance_to_polyline(point, trail.get("points", []))
         if distance <= visual_width * 0.5:
             var across := clampf(distance / (visual_width * 0.5), 0.0, 1.0)
-            return lerpf(0.14, 0.08, across)
+            return lerpf(0.18, 0.12, across)
     return 0.0
 
 
@@ -1486,7 +1996,7 @@ func _terrain_color(height: float, point: Vector2, profile: Dictionary, water_le
     return grass
 
 
-func _make_terrain_material() -> ShaderMaterial:
+func _make_terrain_material(profile:Dictionary={}) -> ShaderMaterial:
     var material := ShaderMaterial.new()
     var shader := Shader.new()
     shader.code = """
@@ -1496,6 +2006,13 @@ render_mode cull_disabled;
 uniform sampler2D grass_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
 uniform sampler2D soil_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
 uniform sampler2D stone_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform float snow_line = 10000.0;
+uniform float snow_strength = 0.0;
+uniform vec2 region_origin = vec2(0.0);
+uniform float glacial_biome = 0.0;
+uniform vec2 glacier_center = vec2(0.0);
+uniform float glacier_radius = 1.0;
+uniform float marcher_biome = 0.0;
 
 varying vec3 world_position;
 
@@ -1519,13 +2036,25 @@ void vertex() {
 
 void fragment() {
     vec2 p = world_position.xz;
+    vec2 local_p = p - region_origin;
     // Four shared fields replace thirteen near-duplicate value-noise calls.
     // Their rotated inputs retain irregular boundaries without making the
     // full-screen terrain shader the dominant cost while moving.
-    float broad = value_noise(p * 0.014);
+    // Broad colour variation must not expose the square cells of value noise.
+    // Blend a small rotated-noise contribution into two long, crossing waves;
+    // the result stays organic but has no visible cell boundary from a hill or
+    // bridge approach.
+    float broad_cell = value_noise(vec2(p.x * 0.021 + p.y * 0.008, -p.x * 0.008 + p.y * 0.021) + vec2(11.0, 23.0));
+    float broad = clamp(0.50
+        + sin(p.x * 0.0107 + p.y * 0.0061) * 0.19
+        + sin(-p.x * 0.0068 + p.y * 0.0093 + 1.73) * 0.14
+        + (broad_cell - 0.5) * 0.22, 0.0, 1.0);
     float clumps = value_noise(vec2(p.x * 0.052 + p.y * 0.019, -p.x * 0.019 + p.y * 0.052) + vec2(19.0, 7.0));
     float grit = value_noise(p * 0.24 + vec2(3.0, 31.0));
-    float macro_field = value_noise(vec2(p.x * 0.0038 + p.y * 0.0014, -p.x * 0.0014 + p.y * 0.0038) + vec2(37.0, 19.0));
+    float macro_field = clamp(0.50
+        + sin(p.x * 0.0024 + p.y * 0.0011 + 0.41) * 0.20
+        + sin(-p.x * 0.00135 + p.y * 0.00205 + 2.07) * 0.15
+        + (broad - 0.5) * 0.18, 0.0, 1.0);
     vec3 base = COLOR.rgb;
     float camera_distance = distance(world_position, CAMERA_POSITION_WORLD);
     float detail_fade = 1.0 - smoothstep(95.0, 420.0, camera_distance);
@@ -1562,22 +2091,93 @@ void fragment() {
     float stone_weight = clamp(max(slope * 0.62, highland), 0.0, 0.82);
     vec3 textured_ground = mix(grass_albedo, soil_albedo, soil_marker * 0.72);
     float dry_patch = smoothstep(0.56, 0.82, macro_field * 0.64 + broad * 0.36);
-    textured_ground = mix(textured_ground, vec3(0.33, 0.29, 0.16), dry_patch * (1.0 - stone_weight) * 0.30);
+    textured_ground = mix(textured_ground, vec3(0.33, 0.29, 0.16), dry_patch * (1.0 - stone_weight) * 0.20);
     float meadow_patch = smoothstep(0.61, 0.87, clumps * 0.62 + (1.0 - macro_field) * 0.38);
     textured_ground = mix(textured_ground, vec3(0.13, 0.235, 0.095), meadow_patch * (1.0 - dry_patch) * (1.0 - stone_weight) * 0.24);
     textured_ground = mix(textured_ground, stone_albedo, stone_weight);
+    // Alpine profiles opt into a continuous altitude-driven snow cap. Noise
+    // softens the snow line and exposed steep faces retain some stone, so the
+    // mountain reads as accumulated snow rather than a white painted band.
+    float snow_noise = broad * 0.58 + clumps * 0.42;
+    float snow_altitude = smoothstep(snow_line - 24.0 + (snow_noise - 0.5) * 28.0, snow_line + 44.0 + (snow_noise - 0.5) * 28.0, world_position.y);
+    float snow_slope_hold = mix(0.28, 1.0, smoothstep(0.34, 0.91, abs(NORMAL.y)));
+    float snow_weight = clamp(snow_altitude * snow_slope_hold * snow_strength, 0.0, 0.90);
+    vec3 packed_snow = mix(stone_albedo * vec3(0.92, 0.98, 1.03), vec3(0.82, 0.855, 0.86), clumps * 0.72 + broad * 0.18);
+    vec3 snow_color = packed_snow * mix(0.92, 1.035, grit * detail_fade);
+    textured_ground = mix(textured_ground, snow_color, snow_weight);
+    // Continuous regional tint replaces coarse authored vertex patches. The
+    // four broad blends keep western heath, northern moss, eastern grassland
+    // and southern dry ground distinct without exposing triangle boundaries.
+    float east_region = smoothstep(620.0, 2750.0, p.x + (macro_field - 0.5) * 310.0);
+    float west_region = 1.0 - smoothstep(-2700.0, -620.0, p.x + (broad - 0.5) * 280.0);
+    float north_region = smoothstep(760.0, 2860.0, p.y + (clumps - 0.5) * 260.0);
+    float south_region = 1.0 - smoothstep(-2780.0, -720.0, p.y + (macro_field - 0.5) * 300.0);
+    vec3 regional_tint = vec3(0.17, 0.275, 0.115);
+    regional_tint = mix(regional_tint, vec3(0.29, 0.285, 0.145), east_region * 0.72);
+    regional_tint = mix(regional_tint, vec3(0.115, 0.235, 0.115), west_region * 0.58);
+    regional_tint = mix(regional_tint, vec3(0.12, 0.25, 0.17), north_region * 0.42);
+    regional_tint = mix(regional_tint, vec3(0.34, 0.265, 0.12), south_region * 0.46);
+    textured_ground = mix(textured_ground, regional_tint, (1.0 - stone_weight) * 0.18);
+    // Resolve photographic micro-detail into stable regional colour before it
+    // becomes sub-pixel noise. This complements mipmapping and removes the
+    // glitter/crawl seen across distant slopes while the camera is moving.
+    float distance_simplify = smoothstep(170.0, 760.0, camera_distance);
+    vec3 stable_distance_ground = mix(regional_tint, stone, stone_weight);
+    stable_distance_ground = mix(stable_distance_ground, vec3(0.72, 0.77, 0.78), snow_weight);
+    textured_ground = mix(textured_ground, stable_distance_ground, distance_simplify * 0.76);
     // Preserve enough authored vertex colour for Westmere heath, Northwood
     // moss and Southbank ochre to remain distinct beneath the shared detail.
     // The near field keeps tactile surface detail. At distance it resolves to
     // authored biome colour plus macro variation, preventing the crawling
     // speckle and eye-strain that was visible while walking.
-    color = mix(color, textured_ground, mix(0.48, 0.74, detail_fade));
+    // Coarse per-vertex biome colour must not reveal the heightfield's large
+    // diagonal triangles. Retain it as a regional tint beneath continuous
+    // world-space texture instead of letting it define visible patch edges.
+    // The heightfield's biome COLOR is sampled only at coarse mesh vertices.
+    // Even a two-percent contribution was enough to reveal long triangle edges
+    // while moving. Regional identity is already reproduced continuously above,
+    // so use the world-space result outright and eliminate those hard facets.
+    color = textured_ground;
     // Strong, overlapping earth and meadow fields stay visible at walking
     // distance. Rotated coordinates prevent these patches reading as a grid.
-    color = mix(color, vec3(0.34, 0.29, 0.16), smoothstep(0.58, 0.80, broad) * (1.0 - stone_weight) * 0.24);
-    color = mix(color, vec3(0.15, 0.30, 0.115), smoothstep(0.66, 0.88, clumps) * (1.0 - dry_patch) * (1.0 - stone_weight) * 0.16);
-    color = mix(color, color * vec3(0.88, 0.82, 0.70), (1.0 - smoothstep(0.22, 0.48, macro_field)) * (1.0 - stone_weight) * 0.15);
-    color = mix(color, color * vec3(0.92, 1.04, 0.82), smoothstep(0.61, 0.86, macro_field) * (1.0 - stone_weight) * 0.12);
+    color = mix(color, vec3(0.34, 0.29, 0.16), smoothstep(0.55, 0.84, broad) * (1.0 - stone_weight) * 0.15);
+    color = mix(color, vec3(0.15, 0.30, 0.115), smoothstep(0.61, 0.91, clumps) * (1.0 - dry_patch) * (1.0 - stone_weight) * 0.11);
+    color = mix(color, color * vec3(0.90, 0.86, 0.76), (1.0 - smoothstep(0.16, 0.52, macro_field)) * (1.0 - stone_weight) * 0.09);
+    color = mix(color, color * vec3(0.94, 1.025, 0.88), smoothstep(0.56, 0.90, macro_field) * (1.0 - stone_weight) * 0.075);
+    // Streamed alpine regions need their regional identity evaluated in local
+    // coordinates. Previously global Z made the entire range inherit the
+    // starter map's far-south grass tint, even directly beneath the glacier.
+    if (glacial_biome > 0.5) {
+        float north_cold = 1.0 - smoothstep(-2500.0, 1500.0, local_p.y);
+        vec3 tundra_ground = mix(vec3(0.205, 0.255, 0.205), vec3(0.35, 0.355, 0.315), broad * 0.62 + clumps * 0.38);
+        tundra_ground = mix(tundra_ground, stone_albedo * vec3(0.93, 0.99, 1.03), stone_weight * 0.72);
+        color = mix(color, tundra_ground, 0.24 + north_cold * 0.34);
+        float glacier_distance = distance(local_p, glacier_center);
+        float forefield = 1.0 - smoothstep(glacier_radius * 0.48, glacier_radius, glacier_distance);
+        // Moraine stone dominates the low forefield; packed snow gathers in
+        // softer islands. Pure white across the coarse valley mesh exposed
+        // every terrain triangle as a hard patch while moving.
+        vec3 ice_moraine = mix(stone_albedo * vec3(0.92, 1.01, 1.05), packed_snow, 0.18 + clumps * 0.16);
+        color = mix(color, ice_moraine, forefield * 0.62);
+    }
+    if (marcher_biome > 0.5) {
+        // Continuous local-coordinate masks distinguish the Marches' loess,
+        // alluvium, chalk and basalt without exposing coarse mesh triangles.
+        vec2 march_p = local_p + vec2((broad - 0.5) * 210.0, (clumps - 0.5) * 180.0);
+        float west_loess = 1.0 - smoothstep(-1650.0, -150.0, march_p.x);
+        float amber_plain = 1.0 - smoothstep(-420.0, 1050.0, abs(march_p.x + 650.0));
+        vec2 vale_normal = vec2(0.659, 0.752);
+        float vale_distance = abs(dot(march_p - vec2(120.0, 260.0), vale_normal));
+        float ember_alluvium = 1.0 - smoothstep(280.0, 930.0, vale_distance);
+        float cinder_upland = smoothstep(920.0, 2400.0, march_p.x) * (1.0 - smoothstep(150.0, 1550.0, march_p.y));
+        float glass_chalk = smoothstep(900.0, 2250.0, march_p.x) * smoothstep(1250.0, 2680.0, march_p.y);
+        vec3 march_color = mix(color, vec3(0.31, 0.29, 0.13), west_loess * 0.38);
+        march_color = mix(march_color, vec3(0.32, 0.30, 0.12), amber_plain * 0.28);
+        march_color = mix(march_color, vec3(0.20, 0.27, 0.12), ember_alluvium * 0.34);
+        march_color = mix(march_color, vec3(0.25, 0.23, 0.21), cinder_upland * 0.56);
+        march_color = mix(march_color, vec3(0.34, 0.35, 0.23), glass_chalk * 0.48);
+        color = mix(color, march_color, 0.60);
+    }
     // World-scale biome colour is already authored per vertex with warped
     // borders. Avoid large thresholded value-noise patches here: those reveal
     // the noise lattice as square or triangular fields from a distance.
@@ -1593,6 +2193,22 @@ void fragment() {
     material.set_shader_parameter("grass_texture", load("res://assets/terrain/meadow_soil_realistic_v3.png"))
     material.set_shader_parameter("soil_texture", load("res://assets/terrain/woodland_soil_v1.png"))
     material.set_shader_parameter("stone_texture", load("res://assets/terrain/highland_stone_v1.png"))
+    material.set_shader_parameter("snow_line",float(profile.get("snow_line",10000.0)))
+    material.set_shader_parameter("snow_strength",float(profile.get("snow_strength",0.0)))
+    material.set_shader_parameter("region_origin",profile.get("region_origin",Vector2.ZERO))
+    var glacial_biome:=str(profile.get("biome_id",""))=="glacial_alpine"
+    material.set_shader_parameter("glacial_biome",1.0 if glacial_biome else 0.0)
+    material.set_shader_parameter("marcher_biome",1.0 if str(profile.get("biome_id",""))=="continental_marches" else 0.0)
+    var glacier_center:=Vector2.ZERO
+    var glacier_radius:=1.0
+    if glacial_biome:
+        for site in profile.get("map_sites",[]):
+            if str(site.get("kind",""))=="glacier":
+                glacier_center=site.get("position",Vector2.ZERO)
+                glacier_radius=maxf(520.0,float(site.get("radius",170.0))*4.25)
+                break
+    material.set_shader_parameter("glacier_center",glacier_center)
+    material.set_shader_parameter("glacier_radius",glacier_radius)
     return material
 
 

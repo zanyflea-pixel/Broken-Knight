@@ -8,9 +8,12 @@ func _init()->void:
 func _run()->void:
     var failures:Array[String]=[]
     var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.auto_boot_enabled=false
     root.add_child(main)
-    await process_frame
-    await process_frame
+    # World population is deliberately staged across frames. Await the actual
+    # boot contract instead of racing two arbitrary frames and testing an empty
+    # PropsRoot while the build is still in progress.
+    await main.boot_world(Callable(),false,true)
     await physics_frame
     var hero:Node=main.get_node("Player")
     var director:Node=main.get_node("GameplayDirector")
@@ -20,7 +23,9 @@ func _run()->void:
     # The three local paths that previously began near roads now share exact
     # authored junctions with those roads.
     var expected_connections:={
-        "Riverwatch Trail":Vector2(-420,70),
+        # The trail now branches at the authored Westmere Road bend instead
+        # of competing with every major route at Riverwatch's central junction.
+        "Riverwatch Trail":Vector2(-650,210),
         "North Meadow Trail":Vector2(-435,150),
         "South Heath Trail":Vector2(650,-460),
     }

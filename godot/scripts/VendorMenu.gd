@@ -165,15 +165,15 @@ func _refresh_detail() -> void:
     detail_type.text = kind.to_upper()
     detail_name.text = str(item.get("name", "Item"))
     detail_description.text = str(item.get("description", ""))
-    var is_armor: bool = str(item.get("kind", "")) == "armor"
-    quantity.editable = not is_armor
-    quantity.max_value = 1 if is_armor else 20
-    if is_armor:
+    var is_unique:bool=str(item.get("kind", "")) in ["armor","repair"]
+    quantity.editable = not is_unique
+    quantity.max_value = 1 if is_unique else 20
+    if is_unique:
         quantity.value = 1
     var total := int(item.get("price", 0)) * int(quantity.value)
     price_label.text = "%d gold each\nTotal: %d gold" % [item.get("price", 0), total]
     buy_button.text = "BUY %d  -  %d GOLD" % [int(quantity.value), total]
-    buy_button.disabled = player.hero_gold < total or (is_armor and player.bag_slots.size() >= 80)
+    buy_button.disabled = player.hero_gold < total or (str(item.get("kind",""))=="armor" and player.bag_slots.size() >= 80)
 
 
 func _buy_selected() -> void:

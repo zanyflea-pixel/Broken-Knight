@@ -9,7 +9,13 @@ The original formatted reference remains at
 do not edit both copies independently. Story changes should be made in the
 Markdown file first so they remain searchable and easy to connect to gameplay.
 
-Runtime quest definitions currently live near the top of
-`../../godot/scripts/GameplayDirector.gd`. When implementing story content,
-use the Markdown guide as the narrative authority and treat those definitions
-as the current playable subset.
+Runtime counter-quest definitions currently live near the top of
+`../../godot/scripts/GameplayDirector.gd`. Authored playable campaigns live in
+`../../godot/scripts/gameplay/`:
+
+- `GraveboundCampaign.gd` — *The Bell Beneath Barrowfen*
+- `OathboundCampaign.gd` — *The Oaths We Keep*, a world-spanning introduction
+  to Crownstone, Greywatch, and the Five Civic Oaths
+
+When implementing story content, use the Markdown guide as the narrative
+authority and treat these scripts as the current playable subset.

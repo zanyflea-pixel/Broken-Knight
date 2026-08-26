@@ -79,6 +79,9 @@ var _fishing_pole_tip:Node3D
 var _shield_root: Node3D
 var _shield_attachment: BoneAttachment3D
 var _warrior_equipped := false
+var _ring_effect_root:Node3D
+var _ring_effect_material:StandardMaterial3D
+var _ring_effect_kind:=""
 var _imported_animation_player: AnimationPlayer
 var _imported_skeleton: Skeleton3D
 var _leg_scale_bones := PackedInt32Array()
@@ -152,6 +155,7 @@ func _process(delta: float) -> void:
 	_update_hand_torch_transform()
 	_update_torch_effects()
 	_update_staff_effects()
+	_update_magic_ring_effect()
 	_update_warrior_weapon_action()
 
 
@@ -204,12 +208,14 @@ func set_equipment_pieces(slots:Dictionary)->void:
 			_current_imported_animation = &""
 			_update_imported_animation(true)
 	var staff_visible:bool=slots.get("mainhand",{}).get("id","")=="royal_vanguard_staff"
-	var sword_visible:bool=slots.get("mainhand",{}).get("id","")=="royal_vanguard_sword"
+	var mainhand_text:=(str(slots.get("mainhand",{}).get("visual",""))+" "+str(slots.get("mainhand",{}).get("id",""))+" "+str(slots.get("mainhand",{}).get("name",""))).to_lower()
+	var offhand_text:=(str(slots.get("offhand",{}).get("visual",""))+" "+str(slots.get("offhand",{}).get("id",""))+" "+str(slots.get("offhand",{}).get("name",""))).to_lower()
+	var sword_visible:bool="sword" in mainhand_text or "cleaver" in mainhand_text
 	var axe_visible:bool="axe" in str(slots.get("mainhand",{}).get("id","")).to_lower()
 	var pickaxe_visible:bool="pickaxe" in str(slots.get("mainhand",{}).get("id","")).to_lower()
 	axe_visible=axe_visible and not pickaxe_visible
 	var fishing_visible:bool=slots.get("mainhand",{}).get("id","")=="starter_fishing_pole"
-	var shield_visible:bool=slots.get("offhand",{}).get("id","")=="royal_vanguard_shield"
+	var shield_visible:bool="shield" in offhand_text or "buckler" in offhand_text
 	if is_instance_valid(_sword_root):_sword_root.visible=sword_visible
 	if is_instance_valid(_axe_root):_axe_root.visible=axe_visible
 	if is_instance_valid(_pickaxe_root):_pickaxe_root.visible=pickaxe_visible
@@ -223,6 +229,36 @@ func set_equipment_pieces(slots:Dictionary)->void:
 		if is_instance_valid(_staff_focus_marker):_staff_focus_marker.visible=staff_visible
 		_current_imported_animation=&""
 		_update_imported_animation(true)
+	var ring_effect:=""
+	for ring_slot in ["ring_left","ring_right"]:
+		var ring:Dictionary=slots.get(ring_slot,{})
+		if not ring.is_empty() and float(ring.get("durability",1.0))>0.0:
+			ring_effect=str(ring.get("effect","windstep"))
+			break
+	_set_magic_ring_effect(ring_effect)
+
+
+func _set_magic_ring_effect(effect:String)->void:
+	_ring_effect_kind=effect
+	if effect.is_empty():
+		if is_instance_valid(_ring_effect_root):_ring_effect_root.visible=false
+		return
+	if not is_instance_valid(_ring_effect_root):
+		_ring_effect_root=Node3D.new();_ring_effect_root.name="EquippedMagicRingAura";add_child(_ring_effect_root)
+		for ring_index in range(2):
+			var mesh:=MeshInstance3D.new();var torus:=TorusMesh.new();torus.inner_radius=.93+float(ring_index)*.13;torus.outer_radius=1.0+float(ring_index)*.13;torus.rings=40;torus.ring_segments=8;mesh.mesh=torus;mesh.position.y=.10+float(ring_index)*.035;mesh.scale=Vector3(1.0,.38,1.0);mesh.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;_ring_effect_root.add_child(mesh)
+	_ring_effect_root.visible=true
+	var color:=Color(.42,.80,1.0) if effect=="frostward" else (Color(1.0,.25,.045) if effect=="emberpulse" else Color(.44,1.0,.68))
+	_ring_effect_material=StandardMaterial3D.new();_ring_effect_material.albedo_color=Color(color.r,color.g,color.b,.18);_ring_effect_material.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA;_ring_effect_material.emission_enabled=true;_ring_effect_material.emission=color;_ring_effect_material.emission_energy_multiplier=1.45;_ring_effect_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	for child in _ring_effect_root.get_children():
+		if child is MeshInstance3D:child.material_override=_ring_effect_material
+
+
+func _update_magic_ring_effect()->void:
+	if not is_instance_valid(_ring_effect_root) or not _ring_effect_root.visible:return
+	_ring_effect_root.rotation.y=fmod(_time*(.72 if _ring_effect_kind=="frostward" else 1.08),TAU)
+	var pulse:=1.0+sin(_time*(2.2 if _ring_effect_kind=="windstep" else 3.0))*.035
+	_ring_effect_root.scale=Vector3.ONE*pulse
 
 
 func toggle_armored() -> void:
@@ -268,6 +304,20 @@ func set_mounted(enabled:bool)->void:
 	_action_kind=""
 	_action_time=0.0
 	_current_imported_animation=&""
+	_update_imported_animation(true)
+
+
+func reset_traversal_animation()->void:
+	# Surface teleports and test repositioning can interrupt a jump/action before
+	# its completion callback. Clear those transient locks explicitly so normal
+	# Idle/Walk selection resumes on the very next frame.
+	_air_animation_state=&""
+	_action_animation_state=&""
+	_action_kind=""
+	_action_time=0.0
+	_current_imported_animation=&""
+	_move_blend=0.0
+	_movement_speed=0.0
 	_update_imported_animation(true)
 
 
@@ -1060,7 +1110,7 @@ func _apply_animation() -> void:
 	# Mounted characters need their whole visual root seated above the saddle.
 	# HeroController's node offset cannot own this because this animation pass
 	# deliberately resets the imported root every frame.
-	position.y = .92 if _mounted else (0.0 if is_instance_valid(_imported_hero) else bob)
+	position.y = .98 if _mounted else (0.0 if is_instance_valid(_imported_hero) else bob)
 
 	if is_instance_valid(_left_arm):
 		_left_arm.rotation.x = swing

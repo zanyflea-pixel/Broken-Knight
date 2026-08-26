@@ -2,6 +2,8 @@ extends Control
 
 signal teleport_requested(world_point: Vector2)
 
+const DynamicOverlay:=preload("res://scripts/WorldMapDynamicOverlay.gd")
+
 var _profile: Dictionary = {}
 var _player: Node3D
 var _director: Node
@@ -12,16 +14,25 @@ var _terrain_build_image:Image
 var _terrain_sample_row:=-1
 var _terrain_color_row:=-1
 const TERRAIN_RESOLUTION:=512
+const BUNDLED_TERRAIN_PATH:="res://assets/world/generated/world_atlas_terrain_v1.png"
 var _parchment: Texture2D
 var _teleport_mode := false
 var _teleport_button: Button
 var _full_detail:=true
+enum MapScale { LOCAL, REGION, WORLD }
+var _map_scale_mode:MapScale=MapScale.REGION
+var _map_scale_buttons:Array[Button]=[]
 var _map_label_rects:Array[Rect2]=[]
 var _map_features:Array[Dictionary]=[]
 var _map_cache_path:=""
 var _map_cache_enabled:=true
-var _last_draw_player_position:=Vector2(INF,INF)
-var _last_draw_player_heading:=INF
+var _draw_mapping_active:=false
+var _draw_mapping_center:=Vector2.ZERO
+var _draw_mapping_extent:=Vector2.ONE
+var _dynamic_overlay:Control
+var _static_draw_valid:=false
+var _static_projection_key:=""
+var _static_profile_signature:=0
 
 
 func _ready() -> void:
@@ -40,16 +51,55 @@ func _ready() -> void:
     _teleport_button.add_theme_color_override("font_pressed_color",Color(.72,.12,.045))
     _teleport_button.pressed.connect(_toggle_teleport_mode)
     add_child(_teleport_button)
+    var scale_row:=HBoxContainer.new()
+    scale_row.name="MapScaleControls"
+    scale_row.set_anchors_preset(Control.PRESET_CENTER_TOP)
+    scale_row.position=Vector2(-151,16)
+    scale_row.size=Vector2(302,32)
+    scale_row.add_theme_constant_override("separation",5)
+    for entry in [
+        {"label":"LOCAL","mode":MapScale.LOCAL,"hint":"Detailed area around the player"},
+        {"label":"REGION","mode":MapScale.REGION,"hint":"The current streamed region"},
+        {"label":"WORLD","mode":MapScale.WORLD,"hint":"All authored regions"},
+    ]:
+        var button:=Button.new()
+        button.text=str(entry.label)
+        button.tooltip_text=str(entry.hint)
+        button.custom_minimum_size=Vector2(96,32)
+        button.toggle_mode=true
+        button.flat=true
+        button.add_theme_color_override("font_color",Color(.15,.10,.035))
+        button.add_theme_color_override("font_hover_color",Color(.62,.18,.045))
+        button.add_theme_color_override("font_pressed_color",Color(.82,.20,.045))
+        button.pressed.connect(_set_map_scale.bind(int(entry.mode)))
+        scale_row.add_child(button)
+        _map_scale_buttons.append(button)
+    add_child(scale_row)
+    _dynamic_overlay=DynamicOverlay.new()
+    _dynamic_overlay.name="DynamicOverlay"
+    add_child(_dynamic_overlay)
+    _sync_map_scale_buttons()
     visibility_changed.connect(_on_visibility_changed)
 
 
 func configure(profile: Dictionary, player: Node3D, director: Node = null, height_sampler: Callable = Callable()) -> void:
+    var next_signature:=var_to_str([
+        profile.get("map_center",Vector2.ZERO),profile.get("map_extent",Vector2.ZERO),
+        profile.get("landform_regions",[]),profile.get("mountain_chains",[]),profile.get("forest_regions",[]),
+        profile.get("river_corridors",[]),profile.get("road_corridors",[]),profile.get("trail_corridors",[]),
+        profile.get("town_sites",[]),profile.get("pond_sites",[]),profile.get("ford_sites",[]),profile.get("map_sites",[]),
+    ]).hash()
+    var structure_changed:=next_signature!=_static_profile_signature
+    _static_profile_signature=next_signature
     _profile = profile
     _player = player
     _director = director
-    if height_sampler.is_valid():
+    if height_sampler.is_valid() and (_terrain_texture==null or structure_changed):
         _begin_terrain_texture_build(height_sampler)
-    queue_redraw()
+    if structure_changed:
+        _static_draw_valid=false
+        queue_redraw()
+    if is_instance_valid(_dynamic_overlay):_dynamic_overlay.call("refresh")
 
 
 func _process(delta: float) -> void:
@@ -60,24 +110,16 @@ func _process(delta: float) -> void:
     if not visible:
         return
     if _terrain_sample_row>=0:
-        _advance_terrain_samples(4)
+        _advance_terrain_samples(8)
     elif _terrain_color_row>=0:
-        _advance_terrain_colors(8)
-    if is_instance_valid(_player):
-        var player_position:=Vector2(_player.global_position.x,_player.global_position.z)
-        var heading:=_player_map_heading()
-        if player_position.distance_squared_to(_last_draw_player_position)>.25 or absf(angle_difference(heading,_last_draw_player_heading))>.012:
-            _last_draw_player_position=player_position
-            _last_draw_player_heading=heading
-            queue_redraw()
+        _advance_terrain_colors(16)
 
 
 func _on_visibility_changed()->void:
     if visible:
         set_process(true)
-        _last_draw_player_position=Vector2(INF,INF)
-        _last_draw_player_heading=INF
-        queue_redraw()
+        if not _static_draw_valid or _static_projection_key!=_current_projection_key():queue_redraw()
+        if is_instance_valid(_dynamic_overlay):_dynamic_overlay.call("refresh")
     else:
         set_process(false)
 
@@ -86,17 +128,30 @@ func _begin_terrain_texture_build(height_sampler:Callable)->void:
     _terrain_height_sampler=height_sampler
     set_process(visible)
     _map_cache_enabled=OS.get_environment("BROKEN_KNIGHT_DISABLE_MAP_CACHE")!="1"
+    var force_rebuild:=OS.get_environment("BROKEN_KNIGHT_REBUILD_MAP_TERRAIN")=="1"
     var signature:=var_to_str([
         TERRAIN_RESOLUTION,_profile.get("world_size",7200.0),
+        _atlas_center(),_atlas_extent(),
         _profile.get("landform_regions",[]),_profile.get("mountain_chains",[]),
         _profile.get("terrain_palette_regions",[]),_profile.get("river_corridors",[]),
         _profile.get("forest_regions",[]),
     ]).hash()
     _map_cache_path="user://illustrated_world_v8_%s.png"%str(signature)
-    if _map_cache_enabled and FileAccess.file_exists(_map_cache_path):
+    if not force_rebuild and _map_cache_enabled and FileAccess.file_exists(_map_cache_path):
         var cached:=Image.new()
         if cached.load(_map_cache_path)==OK and cached.get_width()==TERRAIN_RESOLUTION:
             _terrain_texture=ImageTexture.create_from_image(cached)
+            _terrain_sample_row=-1
+            _terrain_color_row=-1
+            return
+    # The terrain relief is a static cartographic layer; rivers, roads, towns,
+    # services, discoveries and the hero are still drawn live above it. Shipping
+    # this bake avoids tens of thousands of height queries when M opens and also
+    # prevents map redraw work from multiplying streamed-region load time.
+    if not force_rebuild and ResourceLoader.exists(BUNDLED_TERRAIN_PATH):
+        var bundled:=load(BUNDLED_TERRAIN_PATH) as Texture2D
+        if bundled and bundled.get_width()==TERRAIN_RESOLUTION:
+            _terrain_texture=ImageTexture.create_from_image(bundled.get_image())
             _terrain_sample_row=-1
             _terrain_color_row=-1
             return
@@ -106,13 +161,18 @@ func _begin_terrain_texture_build(height_sampler:Callable)->void:
 
 
 func _advance_terrain_samples(rows:int)->void:
-    var world_size: float = _profile.get("world_size", 7200.0)
+    var extent:=_atlas_extent()
+    var center:=_atlas_center()
     var last_row:=mini(TERRAIN_RESOLUTION,_terrain_sample_row+rows)
     for y in range(_terrain_sample_row,last_row):
         for x in range(TERRAIN_RESOLUTION):
-            var world_x:=(float(x)/float(TERRAIN_RESOLUTION-1)-.5)*world_size
-            var world_z:=(float(y)/float(TERRAIN_RESOLUTION-1)-.5)*world_size
-            _terrain_heights[y*TERRAIN_RESOLUTION+x]=_terrain_height_sampler.call(world_x,world_z).y
+            var world_x:=(float(x)/float(TERRAIN_RESOLUTION-1)-.5)*extent.x+center.x
+            var world_z:=(float(y)/float(TERRAIN_RESOLUTION-1)-.5)*extent.y+center.y
+            var world_point:=Vector2(world_x,world_z)
+            var sampled_height:float=_terrain_height_sampler.call(world_x,world_z).y
+            if not _survey_region_loaded(world_point):
+                sampled_height=_authored_survey_height(world_point,sampled_height)
+            _terrain_heights[y*TERRAIN_RESOLUTION+x]=sampled_height
     _terrain_sample_row=last_row
     if _terrain_sample_row>=TERRAIN_RESOLUTION:
         _terrain_sample_row=-1
@@ -121,7 +181,8 @@ func _advance_terrain_samples(rows:int)->void:
 
 
 func _advance_terrain_colors(rows:int)->void:
-    var world_size:float=_profile.get("world_size",7200.0)
+    var extent:=_atlas_extent()
+    var center:=_atlas_center()
     var last_row:=mini(TERRAIN_RESOLUTION,_terrain_color_row+rows)
     for y in range(_terrain_color_row,last_row):
         for x in range(TERRAIN_RESOLUTION):
@@ -137,9 +198,9 @@ func _advance_terrain_colors(rows:int)->void:
             var slope_strength:=minf(1.0,(absf(left-right)+absf(up-down))*.055)
             var shade:=clampf(.98+slope_light-slope_strength*.08,.62,1.23)
             var world_point := Vector2(
-                (float(x) / float(TERRAIN_RESOLUTION - 1) - 0.5) * world_size,
-                (float(y) / float(TERRAIN_RESOLUTION - 1) - 0.5) * world_size
-            )
+                (float(x) / float(TERRAIN_RESOLUTION - 1) - 0.5) * extent.x,
+                (float(y) / float(TERRAIN_RESOLUTION - 1) - 0.5) * extent.y
+            )+center
             var color := _survey_color(h, world_point)
             var contour_step := 20.0 if h < 70.0 else 32.0
             if floorf(h / contour_step) != floorf(right / contour_step) or floorf(h / contour_step) != floorf(down / contour_step):
@@ -155,19 +216,23 @@ func _advance_terrain_colors(rows:int)->void:
 
 
 func _survey_color(height: float, world_point: Vector2) -> Color:
+    if _point_inside_ocean(world_point):
+        var sea_variation:=sin(world_point.x*.0037+world_point.y*.0029)*.018
+        return Color(.16+sea_variation,.38+sea_variation,.52+sea_variation*.7)
     # Mirror the broad biome rules used by TerrainBuilder so the map describes
     # the ground the player actually sees instead of recoloring everything as
     # the same green elevation band.
     var world_size: float = _profile.get("world_size", 7200.0)
+    var local_point:=world_point-_nearest_region_origin_for_point(world_point)
     var fine:=sin(world_point.x*.021)*sin(world_point.y*.017)
     var broad:=sin(world_point.x*.0031+world_point.y*.0022)*sin(world_point.y*.0043-world_point.x*.0015)
     var variation:=fine*.012+broad*.020
     var color:=Color(.36,.48,.25)
     var warp:=sin(world_point.x*.0027+world_point.y*.0019)*world_size*.038+sin(world_point.y*.0041-world_point.x*.0013)*world_size*.021
-    var east:=smoothstep(world_size*.07+warp,world_size*.27+warp,world_point.x)
-    var west:=1.0-smoothstep(-world_size*.31+warp,-world_size*.11+warp,world_point.x)
-    var north:=smoothstep(world_size*.08-warp,world_size*.29-warp,world_point.y)
-    var south:=1.0-smoothstep(-world_size*.29-warp,-world_size*.09-warp,world_point.y)
+    var east:=smoothstep(world_size*.07+warp,world_size*.27+warp,local_point.x)
+    var west:=1.0-smoothstep(-world_size*.31+warp,-world_size*.11+warp,local_point.x)
+    var north:=smoothstep(world_size*.08-warp,world_size*.29-warp,local_point.y)
+    var south:=1.0-smoothstep(-world_size*.29-warp,-world_size*.09-warp,local_point.y)
     color=color.lerp(Color(.56,.48,.24),east*.72)
     color=color.lerp(Color(.25,.40,.25),west*.66)
     color=color.lerp(Color(.27,.43,.38),north*.30)
@@ -187,7 +252,107 @@ func _survey_color(height: float, world_point: Vector2) -> Color:
         color=color.lerp(Color(.39,.38,.34),clampf((height-82.0)/70.0,0.0,.68))
     if height>145.0:
         color=color.lerp(Color(.62,.61,.56),clampf((height-145.0)/55.0,0.0,.55))
+    var snow_weight:=_survey_snow_weight(world_point,height)
+    if snow_weight>0.0:
+        color=color.lerp(Color(.87,.90,.88),snow_weight)
     return Color(color.r + variation, color.g + variation, color.b + variation)
+
+
+func _point_inside_ocean(world_point:Vector2)->bool:
+    for basin_value in _profile.get("ocean_basins",[]):
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast" or str(basin.get("edge","west"))!="west":continue
+        var points:Array=basin.get("coast_points",[])
+        if points.size()<2:continue
+        if not _corridor_overlaps_map(points,420.0):continue
+        if world_point.x<=_coastline_x_at_z(world_point.y,points):return true
+    return false
+
+
+func _coastline_x_at_z(z:float,points:Array)->float:
+    if points.is_empty():return -INF
+    var first:=Vector2(points[0])
+    if z<=first.y:return first.x
+    for index in range(points.size()-1):
+        var a:=Vector2(points[index]);var b:=Vector2(points[index+1])
+        if z>=minf(a.y,b.y) and z<=maxf(a.y,b.y):
+            var span:=b.y-a.y
+            return lerpf(a.x,b.x,0.0 if absf(span)<.001 else clampf((z-a.y)/span,0.0,1.0))
+    return Vector2(points[-1]).x
+
+
+func _nearest_region_origin_for_point(world_point:Vector2)->Vector2:
+    var nearest:=Vector2.ZERO
+    var best:=INF
+    for summary_value in _profile.get("region_summaries",[]):
+        if not summary_value is Dictionary:continue
+        var origin:Vector2=summary_value.get("origin",Vector2.ZERO)
+        var distance:=world_point.distance_squared_to(origin)
+        if distance<best:best=distance;nearest=origin
+    return nearest
+
+
+func _survey_region_loaded(world_point:Vector2)->bool:
+    var nearest_id:="starting_realm"
+    var best:=INF
+    for summary_value in _profile.get("region_summaries",[]):
+        if not summary_value is Dictionary:continue
+        var summary:Dictionary=summary_value
+        var distance:=world_point.distance_squared_to(Vector2(summary.get("origin",Vector2.ZERO)))
+        if distance<best:best=distance;nearest_id=str(summary.get("zone_id","starting_realm"))
+    var revision:=int(_profile.get("stream_revision",0))
+    if nearest_id=="north_frontier":return (revision&1)!=0
+    if nearest_id=="glacial_range":return (revision&2)!=0
+    if nearest_id=="western_reaches":return (revision&4)!=0
+    if nearest_id=="stormbreak_highlands":return (revision&8)!=0
+    if nearest_id=="skeld_coast":return (revision&16)!=0
+    return true
+
+
+func _authored_survey_height(world_point:Vector2,fallback:float)->float:
+    # Unvisited regions are still drawn from their authored ridges, basins and
+    # settlement shelves. This is a lightweight cartographic estimate; the
+    # actual cached heightfield replaces it as soon as the region streams in.
+    var height:=maxf(12.0,fallback)
+    for chain_value in _profile.get("mountain_chains",[]):
+        if not chain_value is Dictionary:continue
+        var chain:Dictionary=chain_value
+        var center:Vector2=chain.get("center",Vector2.ZERO)
+        var local:Vector2=(world_point-center).rotated(-float(chain.get("angle",0.0)))
+        var half_length:=maxf(1.0,float(chain.get("length",1000.0))*.5)
+        var half_width:=maxf(1.0,float(chain.get("width",500.0))*.5)
+        var normalized:=Vector2(local.x/half_length,local.y/half_width).length()
+        if normalized<1.12:
+            var footprint:=1.0-smoothstep(.18,1.12,normalized)
+            height=maxf(height,18.0+float(chain.get("height",100.0))*footprint*footprint)
+    for site_value in _profile.get("town_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var radius:=float(site.get("radius",120.0))
+        if world_point.distance_to(Vector2(site.get("position",Vector2.ZERO)))<radius*.82:
+            height=float(site.get("ground_height",height))
+    var spawn:Dictionary=_profile.get("spawn_site",{})
+    if not spawn.is_empty() and world_point.distance_to(Vector2(spawn.get("position",Vector2.ZERO)))<float(spawn.get("radius",140.0))*.82:
+        height=float(spawn.get("ground_height",height))
+    return height
+
+
+func _survey_snow_weight(world_point:Vector2,height:float)->float:
+    var weight:=0.0
+    for chain_value in _profile.get("mountain_chains",[]):
+        if not chain_value is Dictionary:continue
+        var chain:Dictionary=chain_value
+        if not chain.has("snow_line"):continue
+        var center:Vector2=chain.get("center",Vector2.ZERO)
+        var angle:float=float(chain.get("angle",0.0))
+        var delta:Vector2=(world_point-center).rotated(-angle)
+        var half_length:=maxf(1.0,float(chain.get("length",1000.0))*.5)
+        var half_width:=maxf(1.0,float(chain.get("width",500.0))*.72)
+        var footprint:=1.0-smoothstep(.76,1.08,Vector2(delta.x/half_length,delta.y/half_width).length())
+        var altitude:=smoothstep(float(chain.get("snow_line",120.0))-8.0,float(chain.get("snow_line",120.0))+32.0,height)
+        weight=maxf(weight,footprint*altitude*.88)
+    return weight
 
 
 func _apply_survey_palette(base:Color,point:Vector2,height:float)->Color:
@@ -218,8 +383,18 @@ func _apply_survey_palette(base:Color,point:Vector2,height:float)->Color:
 func _draw() -> void:
     if _profile.is_empty():
         return
+    var profile_draw:=OS.get_environment("BROKEN_KNIGHT_PROFILE_MAP_DRAW")=="1"
+    var draw_started_usec:=Time.get_ticks_usec() if profile_draw else 0
+    var draw_mark_usec:=draw_started_usec
     var panel := _map_panel()
-    var world_size: float = _profile.get("world_size", 7200.0)
+    # Thousands of symbols share one projection. Resolving the nearest region
+    # origin for every individual point made one atlas redraw hundreds of ms.
+    # Freeze the projection once per draw without changing any map content.
+    _draw_mapping_active=false
+    _draw_mapping_center=_map_center()
+    _draw_mapping_extent=_map_extent()
+    _draw_mapping_active=true
+    var world_size:float=maxf(_draw_mapping_extent.x,_draw_mapping_extent.y)
     _map_label_rects=[
         Rect2(Vector2(8,6),Vector2(260,44)),
         Rect2(Vector2(panel.end.x-190,6),Vector2(182,48)),
@@ -230,20 +405,29 @@ func _draw() -> void:
     draw_rect(Rect2(Vector2.ZERO,size),Color(.10,.105,.10,1.0),true)
     draw_rect(panel,Color(.50,.46,.34),true)
     if _terrain_texture:
-        draw_texture_rect(_terrain_texture,panel,false,Color(1.03,1.01,.94))
+        _draw_terrain_texture_view(panel)
     else:
         draw_rect(panel,Color(.42,.50,.29),true)
+    _draw_ocean_basins(panel,world_size)
     _draw_ground_detail(panel,world_size)
+    if profile_draw:
+        print("WORLD_MAP_DRAW_STAGE|ground_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0]);draw_mark_usec=Time.get_ticks_usec()
     _draw_forests(panel, world_size)
     _draw_mountains(panel, world_size)
+    if profile_draw:
+        print("WORLD_MAP_DRAW_STAGE|landforms_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0]);draw_mark_usec=Time.get_ticks_usec()
     _draw_field_parcels(panel,world_size)
     _draw_settlement_footprints(panel, world_size)
     _draw_town_detail(panel,world_size)
+    if profile_draw:
+        print("WORLD_MAP_DRAW_STAGE|settlements_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0]);draw_mark_usec=Time.get_ticks_usec()
     _draw_corridors(_profile.get("river_corridors", []), panel, world_size, "river")
     _draw_corridors(_profile.get("road_corridors", []), panel, world_size, "road")
     _draw_corridors(_profile.get("trail_corridors", []), panel, world_size, "trail")
     _draw_field_boundaries(panel,world_size)
     _draw_corridor_names(panel, world_size)
+    if profile_draw:
+        print("WORLD_MAP_DRAW_STAGE|corridors_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0]);draw_mark_usec=Time.get_ticks_usec()
     _draw_bridges(panel, world_size)
     _draw_water_sites(panel, world_size)
     _draw_waterfalls(panel, world_size)
@@ -252,19 +436,31 @@ func _draw() -> void:
     _draw_story_markers(panel,world_size)
     if _full_detail:
         _draw_landmark_sites(panel,world_size)
-        _draw_special_map_sites(panel,world_size)
         _draw_services(panel,world_size)
+    # Major authored destinations and natural sources remain visible at world
+    # scale; only small local props and service clutter are suppressed.
+    _draw_special_map_sites(panel,world_size)
     _draw_crafting_sites(panel,world_size)
-    _draw_live_markers(panel, world_size)
+    if profile_draw:
+        print("WORLD_MAP_DRAW_STAGE|sites_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0]);draw_mark_usec=Time.get_ticks_usec()
     _draw_compass(panel)
     _draw_scale_bar(panel, world_size)
     draw_rect(panel,Color(.16,.12,.065,.76),false,2.0)
-    _label(str(_profile.get("zone_name","BROKEN KNIGHT")).to_upper(),Vector2(16,30),18,Color(.13,.11,.065))
-    _label("M / ESC CLOSE   |   HOVER FOR DETAILS",Vector2(16,panel.end.y-16),11,Color(.16,.11,.055))
-    _draw_feature_tooltip(panel)
-    if _teleport_mode:
-        _draw_teleport_cursor(panel, world_size)
-        _label("TELEPORT ACTIVE - CLICK MAP",Vector2(panel.end.x-260,72),13,Color(.68,.10,.035))
+    var view_title:=_map_view_title()
+    var view_title_size:=18
+    var title_width_limit:=maxf(260.0,panel.size.x*.5-180.0)
+    while view_title_size>12 and ThemeDB.fallback_font.get_string_size(view_title,HORIZONTAL_ALIGNMENT_LEFT,-1,view_title_size).x>title_width_limit:
+        view_title_size-=1
+    _label(view_title,Vector2(16,30),view_title_size,Color(.13,.11,.065))
+    _label("M / ESC CLOSE   |   WHEEL CHANGES SCALE   |   HOVER FOR DETAILS",Vector2(16,panel.end.y-16),11,Color(.16,.11,.055))
+    if profile_draw:
+        print("WORLD_MAP_DRAW_STAGE|chrome_dynamic_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0])
+        print("WORLD_MAP_DRAW_PROFILE|elapsed_ms=%.2f|features=%d|scale=%d"%[
+            float(Time.get_ticks_usec()-draw_started_usec)/1000.0,_map_features.size(),int(_map_scale_mode),
+        ])
+    _draw_mapping_active=false
+    _static_draw_valid=true
+    _static_projection_key=_current_projection_key()
 
 
 func _draw_crafting_sites(panel:Rect2,world_size:float)->void:
@@ -272,6 +468,7 @@ func _draw_crafting_sites(panel:Rect2,world_size:float)->void:
     for marker in _director.get_world_interaction_markers():
         if marker.get("action","")!="craft":continue
         var position:Vector3=marker.position
+        if not _point_inside_map(Vector2(position.x,position.z)):continue
         var p:=_map_point(Vector2(position.x,position.z),panel,world_size)
         draw_circle(p,6.2,Color(.22,.12,.035,.94))
         draw_rect(Rect2(p-Vector2(3.3,3.3),Vector2(6.6,6.6)),Color(.94,.58,.12),true)
@@ -283,7 +480,7 @@ func _draw_story_markers(panel:Rect2,world_size:float)->void:
     if not is_instance_valid(_director) or not _director.has_method("get_story_map_markers"):return
     for marker in _director.get_story_map_markers():
         var position:Vector3=marker.get("position",Vector3.ZERO)
-        if absf(position.x)>world_size*.55 or absf(position.z)>world_size*.55:continue
+        if not _point_inside_map(Vector2(position.x,position.z)):continue
         var p:=_map_point(Vector2(position.x,position.z),panel,world_size)
         var kind:=str(marker.get("kind","story_site"))
         var discovered:=bool(marker.get("discovered",false))
@@ -323,7 +520,7 @@ func _toggle_teleport_mode() -> void:
     _teleport_mode = not _teleport_mode
     _teleport_button.text = "TELEPORT: ON" if _teleport_mode else "TELEPORT: OFF"
     _teleport_button.button_pressed = _teleport_mode
-    queue_redraw()
+    if is_instance_valid(_dynamic_overlay):_dynamic_overlay.call("refresh")
 
 
 func set_teleport_mode(enabled: bool) -> void:
@@ -331,15 +528,41 @@ func set_teleport_mode(enabled: bool) -> void:
     if is_instance_valid(_teleport_button):
         _teleport_button.text = "TELEPORT: ON" if enabled else "TELEPORT: OFF"
         _teleport_button.button_pressed = enabled
+    if is_instance_valid(_dynamic_overlay):_dynamic_overlay.call("refresh")
+
+
+func _set_map_scale(mode:int)->void:
+    _map_scale_mode=clampi(mode,MapScale.LOCAL,MapScale.WORLD) as MapScale
+    _full_detail=_map_scale_mode!=MapScale.WORLD
+    _sync_map_scale_buttons()
+    _static_draw_valid=false
     queue_redraw()
+
+
+func _sync_map_scale_buttons()->void:
+    for i in range(_map_scale_buttons.size()):
+        var button:=_map_scale_buttons[i]
+        button.button_pressed=i==int(_map_scale_mode)
+        button.modulate=Color(1.0,.77,.43) if button.button_pressed else Color(1,1,1,.88)
+
+
+func _change_map_scale(direction:int)->void:
+    _set_map_scale(clampi(int(_map_scale_mode)+direction,MapScale.LOCAL,MapScale.WORLD))
 
 
 func _gui_input(event: InputEvent) -> void:
     if event is InputEventMouseMotion:
-        # Tooltips and the teleport crosshair follow the pointer on demand;
-        # the entire illustrated map no longer redraws five times per second.
-        queue_redraw()
+        if is_instance_valid(_dynamic_overlay):_dynamic_overlay.queue_redraw()
         return
+    if event is InputEventMouseButton and event.pressed:
+        if event.button_index==MOUSE_BUTTON_WHEEL_UP:
+            _change_map_scale(-1)
+            accept_event()
+            return
+        if event.button_index==MOUSE_BUTTON_WHEEL_DOWN:
+            _change_map_scale(1)
+            accept_event()
+            return
     if not _teleport_mode or not (event is InputEventMouseButton):
         return
     if event.button_index != MOUSE_BUTTON_LEFT or not event.pressed:
@@ -348,8 +571,7 @@ func _gui_input(event: InputEvent) -> void:
     if not panel.has_point(event.position):
         return
     var normalized: Vector2 = (event.position - panel.position) / panel.size
-    var world_size: float = _profile.get("world_size", 7200.0)
-    var destination: Vector2 = (normalized - Vector2(0.5, 0.5)) * world_size
+    var destination:Vector2=(normalized-Vector2(.5,.5))*_map_extent()+_map_center()
     set_teleport_mode(false)
     teleport_requested.emit(destination)
     accept_event()
@@ -357,6 +579,48 @@ func _gui_input(event: InputEvent) -> void:
 
 func _map_panel() -> Rect2:
     return Rect2(Vector2.ZERO,Vector2(maxf(1.0,size.x),maxf(1.0,size.y)))
+
+
+func _draw_ocean_basins(panel:Rect2,world_size:float)->void:
+    var atlas_extent:=_map_extent()
+    var atlas_center:=_map_center()
+    for basin_value in _profile.get("ocean_basins",[]):
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast" or str(basin.get("edge","west"))!="west":continue
+        var points:Array=basin.get("coast_points",[])
+        if points.size()<2:continue
+        var coast_min_x:=INF
+        for point_value in points:coast_min_x=minf(coast_min_x,Vector2(point_value).x)
+        # Keep the closing edge west of every authored coast point at every
+        # zoom level. Using only the current local-view left edge could place
+        # it inside the coast and create a self-intersecting polygon.
+        var offshore_x:=minf(coast_min_x-120.0,atlas_center.x-atlas_extent.x)
+        var polygon:=PackedVector2Array()
+        for point_value in points:polygon.append(_map_point(Vector2(point_value),panel,world_size))
+        var last:=Vector2(points[-1]);var first:=Vector2(points[0])
+        polygon.append(_map_point(Vector2(offshore_x,last.y),panel,world_size))
+        polygon.append(_map_point(Vector2(offshore_x,first.y),panel,world_size))
+        draw_colored_polygon(polygon,Color(.13,.35,.49,.92))
+        var coast_line:=PackedVector2Array()
+        for point_value in points:coast_line.append(_map_point(Vector2(point_value),panel,world_size))
+        draw_polyline(coast_line,Color(.73,.79,.68,.92),3.2,true)
+        draw_polyline(coast_line,Color(.18,.37,.42,.84),1.2,true)
+
+
+func _draw_terrain_texture_view(panel:Rect2)->void:
+    var atlas_extent:=_atlas_extent()
+    var atlas_center:=_atlas_center()
+    var view_extent:=_map_extent()
+    var view_center:=_map_center()
+    var texture_size:=Vector2(_terrain_texture.get_width(),_terrain_texture.get_height())
+    var normalized_min:=(view_center-view_extent*.5-(atlas_center-atlas_extent*.5))/atlas_extent
+    var normalized_size:=view_extent/atlas_extent
+    var source:=Rect2(normalized_min*texture_size,normalized_size*texture_size)
+    # All current region views live inside the atlas, including the overlap at
+    # seamless boundaries. Keeping the source rectangle exact prevents map
+    # symbols and terrain from drifting relative to each other while zooming.
+    draw_texture_rect_region(_terrain_texture,panel,source,Color(1.03,1.01,.94))
 
 
 func _left_sidebar(panel:Rect2)->Rect2:
@@ -412,13 +676,14 @@ func _draw_landform_regions(panel:Rect2,world_size:float)->void:
                 var knoll_angle:=angle+float(i)*2.399963
                 var knoll_center:=center_px+Vector2(cos(knoll_angle)*rx*.42,sin(knoll_angle)*ry*.42)
                 draw_arc(knoll_center,maxf(2.0,minf(rx,ry)*(.10+float(i%3)*.018)),0,TAU,20,Color(.33,.25,.15,.20),.8)
-        if _full_detail and region_index%2==0:
+        if _full_detail and region_index%2==0 and _point_inside_map(center,.96):
             _map_label(region.get("name","Landform"),center_px+Vector2(5,-4),9,Color(.24,.22,.18,.88),panel)
 
 
 func _draw_field_boundaries(panel:Rect2,world_size:float)->void:
     if not _full_detail:return
     for boundary in _profile.get("field_boundaries",[]):
+        if not _corridor_overlaps_map(boundary.get("points",[]),24.0):continue
         var points:=PackedVector2Array()
         for world_point in boundary.get("points",[]):points.append(_map_point(world_point,panel,world_size))
         if points.size()<2:continue
@@ -433,6 +698,7 @@ func _draw_field_parcels(panel:Rect2,world_size:float)->void:
         if site.get("capital",false):continue
         var center:Vector2=site.get("position",Vector2.ZERO)
         var radius:float=float(site.get("radius",140.0))
+        if not _world_circle_overlaps_map(center,radius*1.8):continue
         var road:=_nearest_corridor_segment(center,_profile.get("road_corridors",[]))
         if road.is_empty():continue
         var direction:Vector2=road.get("direction",Vector2(0,1)).normalized()
@@ -465,9 +731,11 @@ func _draw_field_parcels(panel:Rect2,world_size:float)->void:
 func _draw_town_detail(panel:Rect2,world_size:float)->void:
     if not _full_detail:return
     var spawn_site:Dictionary=_profile.get("spawn_site",{})
-    if spawn_site.get("starter",false):_draw_riverwatch_detail(spawn_site,panel,world_size)
+    if spawn_site.get("starter",false) and _world_circle_overlaps_map(spawn_site.get("position",Vector2.ZERO),float(spawn_site.get("radius",160.0))*1.5):
+        _draw_riverwatch_detail(spawn_site,panel,world_size)
     for site in _profile.get("town_sites",[]):
         var center:Vector2=site.get("position",Vector2.ZERO)
+        if not _world_circle_overlaps_map(center,float(site.get("radius",140.0))*1.5):continue
         if site.get("capital",false):
             _draw_crownspire_detail(center,panel,world_size)
         else:
@@ -597,6 +865,7 @@ func _draw_map_building(world_center:Vector2,world_size_2d:Vector2,yaw:float,pan
 func _draw_landmark_sites(panel:Rect2,world_size:float)->void:
     for site in _profile.get("landmark_sites",[]):
         var world_point:Vector2=site.get("position",Vector2.ZERO)
+        if not _point_inside_map(world_point,.98):continue
         var p:=_map_point(world_point,panel,world_size)
         var kind:=str(site.get("kind","landmark"))
         var radius:float=float(site.get("radius",20.0))/world_size*panel.size.x
@@ -626,6 +895,7 @@ func _draw_landmark_sites(panel:Rect2,world_size:float)->void:
 func _draw_special_map_sites(panel:Rect2,world_size:float)->void:
     for site in _profile.get("map_sites",[]):
         var world_point:Vector2=site.get("position",Vector2.ZERO)
+        if not _point_inside_map(world_point,.98):continue
         var p:=_map_point(world_point,panel,world_size)
         var kind:=str(site.get("kind","landmark"))
         match kind:
@@ -647,6 +917,36 @@ func _draw_special_map_sites(panel:Rect2,world_size:float)->void:
                 draw_rect(Rect2(p-Vector2(4.2,4.2),Vector2(8.4,8.4)),Color(.20,.12,.05,.96),false,1.2)
                 draw_colored_polygon(PackedVector2Array([p+Vector2(0,-8),p+Vector2(-6,-3),p+Vector2(6,-3)]),Color(.62,.18,.07,.98))
                 draw_circle(p+Vector2(0,-8),2.2,Color(1.0,.49,.10,.92))
+            "headwater":
+                # Three converging snowmelt strokes distinguish a real river
+                # source from a pond or another unexplained blue endpoint.
+                draw_colored_polygon(PackedVector2Array([p+Vector2(0,-9),p+Vector2(-7,1),p+Vector2(7,1)]),Color(.84,.88,.86,.96))
+                draw_line(p+Vector2(-6,-1),p+Vector2(0,7),Color(.23,.62,.72),1.8,true)
+                draw_line(p+Vector2(0,-5),p+Vector2(0,7),Color(.23,.62,.72),2.2,true)
+                draw_line(p+Vector2(6,-1),p+Vector2(0,7),Color(.23,.62,.72),1.8,true)
+            "glacier":
+                var ice:=PackedVector2Array([
+                    p+Vector2(-10,7),p+Vector2(-7,-2),p+Vector2(-3,-9),
+                    p+Vector2(1,-4),p+Vector2(5,-10),p+Vector2(10,7),
+                ])
+                draw_colored_polygon(ice,Color(.78,.90,.92,.98))
+                draw_polyline(ice,Color(.25,.50,.57,.98),1.8,true)
+                draw_line(p+Vector2(-5,1),p+Vector2(0,7),Color(.32,.68,.76),1.6,true)
+                draw_line(p+Vector2(3,-1),p+Vector2(0,7),Color(.32,.68,.76),1.6,true)
+            "crevasse":
+                var crack:=PackedVector2Array([
+                    p+Vector2(-2,-10),p+Vector2(3,-5),p+Vector2(-2,0),
+                    p+Vector2(4,4),p+Vector2(-1,10),
+                ])
+                draw_polyline(crack,Color(.08,.25,.34,.98),4.6,true)
+                draw_polyline(crack,Color(.42,.80,.88,.98),1.5,true)
+            "lair":
+                for index in range(7):
+                    var angle:=TAU*float(index)/7.0+.18
+                    draw_circle(p+Vector2(cos(angle),sin(angle))*7.0,2.4,Color(.20,.25,.25,.98))
+                for offset in [Vector2(-2,1),Vector2(2,0),Vector2(0,3.5)]:
+                    draw_circle(p+offset,1.8,Color(.30,.72,.77,.98))
+                draw_arc(p,9.5,.20,TAU-.55,22,Color(.10,.18,.20,.88),1.2,true)
             "castle":
                 pass # Crownspire's complete footprint is drawn by _draw_crownspire_detail.
         _register_map_feature(p,10.0,str(site.get("name","Landmark")),kind.capitalize(),world_point)
@@ -656,7 +956,7 @@ func _draw_services(panel:Rect2,world_size:float)->void:
     if not is_instance_valid(_director) or not _director.has_method("get_map_service_markers"):return
     for marker in _director.get_map_service_markers():
         var position:Vector3=marker.get("position",Vector3.ZERO)
-        if absf(position.x)>world_size*.55 or absf(position.z)>world_size*.55:continue
+        if not _point_inside_map(Vector2(position.x,position.z)):continue
         var world_point:=Vector2(position.x,position.z)
         var p:=_map_point(world_point,panel,world_size)
         var kind:=str(marker.get("kind","service"))
@@ -684,6 +984,7 @@ func _draw_corridors(corridors: Array, panel: Rect2, world_size: float, kind: St
     if kind=="river":
         var river_segments:Array[Dictionary]=[]
         for corridor in corridors:
+            if not _corridor_overlaps_map(corridor.get("points",[]),float(corridor.get("mouth_width",corridor.get("width",48.0)))):continue
             var river_points:=PackedVector2Array()
             for point in corridor.get("points",[]):river_points.append(_map_point(point,panel,world_size))
             if river_points.size()<2:continue
@@ -709,6 +1010,7 @@ func _draw_corridors(corridors: Array, panel: Rect2, world_size: float, kind: St
             var road_lines:Array[Dictionary]=[]
             for corridor in corridors:
                 if str(corridor.get("route_class","secondary"))!=route_class:continue
+                if not _corridor_overlaps_map(corridor.get("points",[]),float(corridor.get("width",14.0))*2.0):continue
                 var road_points:=PackedVector2Array()
                 for point in corridor.get("points",[]):road_points.append(_map_point(point,panel,world_size))
                 if road_points.size()<2:continue
@@ -723,6 +1025,7 @@ func _draw_corridors(corridors: Array, panel: Rect2, world_size: float, kind: St
                 for line in road_lines:draw_polyline(line.points,Color(.98,.80,.44,.56),maxf(1.0,float(line.width)*.22),true)
         return
     for corridor in corridors:
+        if not _corridor_overlaps_map(corridor.get("points",[]),float(corridor.get("width",12.0))*2.0):continue
         var points := PackedVector2Array()
         for point in corridor.get("points", []):
             points.append(_map_point(point, panel, world_size))
@@ -770,7 +1073,9 @@ func _draw_corridor_names(panel: Rect2, world_size: float) -> void:
             continue
         var points: Array = corridor.get("points", [])
         if points.size() > 2:
-            var p := _map_point(points[points.size() / 2], panel, world_size)
+            var label_point:Vector2=points[points.size()/2]
+            if not _point_inside_map(label_point,.96):continue
+            var p := _map_point(label_point, panel, world_size)
             _map_label(river_name, p + Vector2(10, -8), 11, Color(0.07, 0.22, 0.27),panel)
 
 
@@ -790,7 +1095,7 @@ func _draw_ground_detail(panel:Rect2,world_size:float)->void:
                 fposmod(sin(float(index)*17.19+8.41)*31627.73,1.0)
             )
             var p:=panel.position+(Vector2(column,row)+jitter)*cell
-            var world_point:=(p-panel.position)/panel.size*world_size-Vector2.ONE*world_size*.5
+            var world_point:=((p-panel.position)/panel.size-Vector2(.5,.5))*_map_extent()+_map_center()
             var forested:=false
             for forest in _profile.get("forest_regions",[]):
                 if world_point.distance_to(forest.get("center",Vector2.ZERO))<float(forest.get("radius",300.0))*.92:
@@ -829,6 +1134,7 @@ func _draw_forests(panel: Rect2, world_size: float) -> void:
         var region:Dictionary=_profile.get("forest_regions",[])[region_index]
         var center: Vector2 = region.get("center", Vector2.ZERO)
         var radius: float = region.get("radius", 300.0)
+        if not _world_circle_overlaps_map(center,radius*1.08):continue
         var density: float = region.get("density", .65)
         var center_px := _map_point(center, panel, world_size)
         var radius_px := radius / world_size * panel.size.x
@@ -860,6 +1166,7 @@ func _draw_mountains(panel: Rect2, world_size: float) -> void:
         var angle: float = chain.get("angle", 0.0)
         var length: float = chain.get("length", 500.0)
         var chain_width: float = chain.get("width", 300.0)
+        if not _world_circle_overlaps_map(center,maxf(length,chain_width)*.58):continue
         var center_px := _map_point(center, panel, world_size)
         var footprint_size := Vector2(length, chain_width) / world_size * panel.size.x
         var tangent:=Vector2(cos(angle),sin(angle))
@@ -891,7 +1198,9 @@ func _draw_settlement_footprints(panel: Rect2, world_size: float) -> void:
             continue
         if site.get("capital",false):
             continue
-        var center := _map_point(site.get("position", Vector2.ZERO), panel, world_size)
+        var site_position:Vector2=site.get("position",Vector2.ZERO)
+        if not _world_circle_overlaps_map(site_position,float(site.get("radius",80.0))*1.12):continue
+        var center := _map_point(site_position, panel, world_size)
         var radius_px := maxf(5.0, float(site.get("radius", 80.0)) / world_size * panel.size.x)
         var tint := Color(0.73, 0.55, 0.30, .19)
         var footprint:=PackedVector2Array()
@@ -907,7 +1216,9 @@ func _draw_sites(panel: Rect2, world_size: float) -> void:
     var sites: Array = [_profile.get("spawn_site", {})]
     sites.append_array(_profile.get("town_sites", []))
     for site in sites:
-        var p := _map_point(site.get("position", Vector2.ZERO), panel, world_size)
+        var site_point:Vector2=site.get("position",Vector2.ZERO)
+        if not _point_inside_map(site_point,.98):continue
+        var p := _map_point(site_point, panel, world_size)
         if site.get("capital", false):
             _map_label(site.get("name","Crownspire"),p+Vector2(39,-24),14,Color(.18,.09,.025),panel)
         else:
@@ -917,7 +1228,9 @@ func _draw_sites(panel: Rect2, world_size: float) -> void:
             _map_label(site.get("name", "Settlement"), p + label_offset, 14, Color(0.18, 0.09, 0.025),panel)
         _register_map_feature(p,12.0,str(site.get("name","Settlement")),"Royal capital" if site.get("capital",false) else "Settlement",site.get("position",Vector2.ZERO))
     for camp in _profile.get("camp_sites", []):
-        var p := _map_point(camp.get("position", Vector2.ZERO), panel, world_size)
+        var camp_point:Vector2=camp.get("position",Vector2.ZERO)
+        if not _point_inside_map(camp_point,.98):continue
+        var p := _map_point(camp_point, panel, world_size)
         draw_colored_polygon(PackedVector2Array([p + Vector2(0, -6), p + Vector2(-5, 5), p + Vector2(5, 5)]), Color(0.88, 0.39, 0.10))
         draw_circle(p+Vector2(0,7),2.0,Color(.92,.67,.17,.96))
         _register_map_feature(p,7.0,str(camp.get("name","Camp")),"Camp",camp.get("position",Vector2.ZERO))
@@ -926,8 +1239,9 @@ func _draw_sites(panel: Rect2, world_size: float) -> void:
 func _draw_water_sites(panel: Rect2, world_size: float) -> void:
     for pond in _profile.get("pond_sites", []):
         var center: Vector2 = pond.get("position", Vector2.ZERO)
-        var p := _map_point(center, panel, world_size)
         var base_radius := float(pond.get("radius", 70.0)) * 1.18
+        if not _world_circle_overlaps_map(center,base_radius):continue
+        var p := _map_point(center, panel, world_size)
         var radius_px := maxf(5.0, base_radius / world_size * panel.size.x)
         var outline := PackedVector2Array()
         for i in range(32):
@@ -947,8 +1261,12 @@ func _draw_waterfalls(panel: Rect2, world_size: float) -> void:
         var direction: Vector2 = river_segment.get("direction", Vector2(1,0))
         var screen_direction := Vector2(direction.x * panel.size.x, direction.y * panel.size.y).normalized()
         var normal := Vector2(-screen_direction.y, screen_direction.x)
-        draw_line(p - normal * 7.0, p + normal * 7.0, Color(0.90, 0.95, 0.87), 3.0)
-        draw_line(p - normal * 7.0 + screen_direction * 3.0, p + normal * 7.0 + screen_direction * 3.0, Color(0.08, 0.30, 0.35), 1.5)
+        # Flow-facing chevrons read as falling water. The old pair of solid
+        # cross-river bars looked like mapped land or a wall interrupting it.
+        for offset in [-3.0,0.0,3.0]:
+            var tip:=p+screen_direction*(float(offset)+2.0)
+            draw_line(p+screen_direction*float(offset)-normal*3.2,tip,Color(.78,.93,.94),1.6,true)
+            draw_line(p+screen_direction*float(offset)+normal*3.2,tip,Color(.15,.48,.57),1.6,true)
         _register_map_feature(p,8.0,str(waterfall.get("name","Falls")),"Waterfall",world_point)
 
 
@@ -999,6 +1317,7 @@ func _nearest_corridor_segment(point: Vector2, corridors: Array) -> Dictionary:
 
 func _draw_caves(panel: Rect2, world_size: float) -> void:
     for entry in [{"p": Vector2(-2700, 1700), "n": "West Cavern"}, {"p": Vector2(2620, -1800), "n": "East Cavern"}]:
+        if not _point_inside_map(entry.p,.98):continue
         var p := _map_point(entry.p, panel, world_size)
         draw_arc(p, 7, PI, TAU, 16, Color(0.13, 0.09, 0.04), 3.0)
         _map_label(entry.n, p + Vector2(9, 4), 11, Color(0.20, 0.11, 0.04),panel)
@@ -1129,14 +1448,15 @@ func _draw_feature_tooltip(panel:Rect2)->void:
 
 
 func _draw_scale_bar(panel: Rect2, world_size: float) -> void:
-    var scale_world := 1000.0
+    var scale_world:=250.0 if _map_scale_mode==MapScale.LOCAL else (1000.0 if _map_scale_mode==MapScale.REGION else 2000.0)
     var length := scale_world / world_size * panel.size.x
     var start := panel.end - Vector2(length + 34.0, 48.0)
     var finish := start + Vector2(length, 0)
     draw_line(start, finish, Color(0.16, 0.09, 0.025), 3.0)
     draw_line(start - Vector2(0,5), start + Vector2(0,5), Color(0.16, 0.09, 0.025), 2.0)
     draw_line(finish - Vector2(0,5), finish + Vector2(0,5), Color(0.16, 0.09, 0.025), 2.0)
-    _label("1 km", start + Vector2(length * .5 - 15.0, -8.0), 11, Color(0.18, 0.10, 0.03))
+    var scale_label:="250 m" if scale_world<1000.0 else "%d km"%roundi(scale_world/1000.0)
+    _label(scale_label, start + Vector2(length * .5 - 15.0, -8.0), 11, Color(0.18, 0.10, 0.03))
 
 
 func _draw_teleport_cursor(panel: Rect2, world_size: float) -> void:
@@ -1147,7 +1467,7 @@ func _draw_teleport_cursor(panel: Rect2, world_size: float) -> void:
     draw_line(cursor - Vector2(0,13), cursor + Vector2(0,13), Color(1.0,.82,.26,.95), 2.0)
     draw_circle(cursor, 6.0, Color(.22,.08,.02,.9), false, 2.0)
     var normalized := (cursor - panel.position) / panel.size
-    var world_point := (normalized - Vector2(.5,.5)) * world_size
+    var world_point := (normalized - Vector2(.5,.5)) * _map_extent()+_map_center()
     var readout := "X %d   Z %d" % [roundi(world_point.x),roundi(world_point.y)]
     var box := Rect2(cursor + Vector2(15,-26), Vector2(124,24))
     if box.end.x > panel.end.x:
@@ -1190,4 +1510,95 @@ func _map_label(text_value:Variant,desired:Vector2,font_size:int,color:Color,pan
 
 
 func _map_point(point: Vector2, panel: Rect2, world_size: float) -> Vector2:
-    return panel.position + (point / world_size + Vector2(0.5, 0.5)) * panel.size
+    return panel.position+((point-_map_center())/_map_extent()+Vector2(.5,.5))*panel.size
+
+
+func _map_center()->Vector2:
+    if _draw_mapping_active:return _draw_mapping_center
+    if _map_scale_mode==MapScale.LOCAL and is_instance_valid(_player):
+        return Vector2(_player.global_position.x,_player.global_position.z)
+    if _map_scale_mode==MapScale.REGION:
+        return _nearest_region_origin()
+    return _atlas_center()
+
+
+func _map_extent()->Vector2:
+    if _draw_mapping_active:return _draw_mapping_extent
+    var fallback:=float(_profile.get("world_size",7200.0))
+    var extent:=_atlas_extent()
+    if _map_scale_mode==MapScale.LOCAL:
+        extent=Vector2(2400.0,2400.0)
+    elif _map_scale_mode==MapScale.REGION:
+        extent=Vector2(fallback,fallback)
+    return Vector2(maxf(1.0,extent.x),maxf(1.0,extent.y))
+
+
+func _current_projection_key()->String:
+    return "%d|%s|%s|%s"%[int(_map_scale_mode),str(_map_center()),str(_map_extent()),str(size)]
+
+
+func _atlas_center()->Vector2:
+    return _profile.get("map_center",Vector2.ZERO)
+
+
+func _atlas_extent()->Vector2:
+    var fallback:=float(_profile.get("world_size",7200.0))
+    var extent:Vector2=_profile.get("map_extent",Vector2(fallback,fallback))
+    return Vector2(maxf(1.0,extent.x),maxf(1.0,extent.y))
+
+
+func _nearest_region_origin()->Vector2:
+    if not is_instance_valid(_player):return _atlas_center()
+    var player_point:=Vector2(_player.global_position.x,_player.global_position.z)
+    var origins:Array=_profile.get("region_origins",[])
+    if origins.is_empty():return _profile.get("region_origin",Vector2.ZERO)
+    var nearest:Vector2=origins[0]
+    var best:=player_point.distance_squared_to(nearest)
+    for origin_value in origins:
+        var origin:Vector2=origin_value
+        var distance:=player_point.distance_squared_to(origin)
+        if distance<best:
+            nearest=origin
+            best=distance
+    return nearest
+
+
+func _map_view_title()->String:
+    if _map_scale_mode==MapScale.WORLD:
+        return "%s  —  WORLD ATLAS"%str(_profile.get("zone_name","BROKEN KNIGHT")).to_upper()
+    var region_name:=str(_profile.get("zone_name","BROKEN KNIGHT"))
+    var nearest_origin:=_nearest_region_origin()
+    for summary_value in _profile.get("region_summaries",[]):
+        if not summary_value is Dictionary:continue
+        var summary:Dictionary=summary_value
+        var summary_origin:Vector2=summary.get("origin",Vector2.ZERO)
+        if summary_origin.is_equal_approx(nearest_origin):
+            region_name=str(summary.get("name",region_name))
+            break
+    return "%s  —  %s"%[region_name.to_upper(),"LOCAL SURVEY" if _map_scale_mode==MapScale.LOCAL else "REGIONAL SURVEY"]
+
+
+func _point_inside_map(world_point:Vector2,margin_scale:float=1.1)->bool:
+    var half_extent:=_map_extent()*.5*margin_scale
+    var local:=world_point-_map_center()
+    return absf(local.x)<=half_extent.x and absf(local.y)<=half_extent.y
+
+
+func _world_circle_overlaps_map(world_center:Vector2,radius:float)->bool:
+    var half_extent:=_map_extent()*.5
+    var local:Vector2=world_center-_map_center()
+    return absf(local.x)<=half_extent.x+radius and absf(local.y)<=half_extent.y+radius
+
+
+func _corridor_overlaps_map(points:Variant,padding:float=0.0)->bool:
+    if not points is Array or points.is_empty():return false
+    var minimum:=Vector2(INF,INF)
+    var maximum:=Vector2(-INF,-INF)
+    for point_value in points:
+        var point:=Vector2(point_value)
+        minimum.x=minf(minimum.x,point.x);minimum.y=minf(minimum.y,point.y)
+        maximum.x=maxf(maximum.x,point.x);maximum.y=maxf(maximum.y,point.y)
+    var half_extent:=_map_extent()*.5
+    var view_min:=_map_center()-half_extent-Vector2.ONE*padding
+    var view_max:=_map_center()+half_extent+Vector2.ONE*padding
+    return maximum.x>=view_min.x and minimum.x<=view_max.x and maximum.y>=view_min.y and minimum.y<=view_max.y

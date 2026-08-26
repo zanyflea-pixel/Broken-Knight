@@ -1,13 +1,16 @@
 extends SceneTree
 
 
-func _initialize()->void:
+func _init()->void:
+	call_deferred("_run")
+
+
+func _run()->void:
 	var main_scene:=load("res://scenes/Main.tscn") as PackedScene
 	var main:=main_scene.instantiate()
+	main.set("auto_boot_enabled",false)
 	root.add_child(main)
-	for frame in range(720):
-		await process_frame
-		if get_nodes_in_group("rideable_horse").size()>=3:break
+	await main.boot_world(Callable(),false,true)
 	var horses:=get_nodes_in_group("rideable_horse")
 	var player:=root.find_child("Player",true,false)
 	if horses.is_empty() or player==null:

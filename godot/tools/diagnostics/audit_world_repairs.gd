@@ -7,10 +7,11 @@ func _init() -> void:
 
 func _run() -> void:
     var main := (load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
     root.add_child(main)
-    await process_frame
-    await process_frame
+    await main.boot_world(Callable(),false,true)
     var profile: Dictionary = main._active_profile
+    var world_half:float=float(profile.get("world_size",7200.0))*.495
     var raw: Callable = main._world_result.terrain_height_sampler
     var river: Callable = main._world_result.river_height_sampler
     for corridor in profile.get("river_corridors", []):
@@ -19,6 +20,7 @@ func _run() -> void:
         var exposed := 0
         var samples := 0
         var worst_clearance := INF
+        var worst_point:=Vector2.ZERO
         for i in range(points.size() - 1):
             var a: Vector2 = points[i]
             var b: Vector2 = points[i + 1]
@@ -30,14 +32,17 @@ func _run() -> void:
                 var p := a.lerp(b, float(step) / float(steps))
                 for fraction in [-.82, -.45, 0.0, .45, .82]:
                     var q := p + normal * half_water * float(fraction)
-                    var water_y:float=river.call(q.x,q.y).y+float(main._profile.get("river_water_lift",1.35))
+                    if absf(q.x)>world_half or absf(q.y)>world_half:continue
+                    var water_y:float=river.call(q.x,q.y).y+float(profile.get("river_water_lift",1.35))
                     var terrain_y: float = raw.call(q.x, q.y).y
                     var clearance := water_y - terrain_y
-                    worst_clearance = minf(worst_clearance, clearance)
+                    if clearance<worst_clearance:
+                        worst_clearance=clearance
+                        worst_point=q
                     if clearance < .025:
                         exposed += 1
                     samples += 1
-        print("RIVER_AUDIT|%s|samples=%d|exposed=%d|worst_clearance=%.3f" % [corridor.get("name", "River"), samples, exposed, worst_clearance])
+        print("RIVER_AUDIT|%s|samples=%d|exposed=%d|worst_clearance=%.3f|worst_at=%.1f,%.1f" % [corridor.get("name", "River"), samples, exposed, worst_clearance,worst_point.x,worst_point.y])
 
     for corridor in profile.get("trail_corridors", []):
         var points: Array = corridor.get("points", [])

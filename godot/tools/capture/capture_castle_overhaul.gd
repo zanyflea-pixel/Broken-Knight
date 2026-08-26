@@ -7,7 +7,7 @@ func _save(path:String)->void:
     var image:=root.get_viewport().get_texture().get_image();image.save_png(ProjectSettings.globalize_path(path));print("CASTLE_CAPTURE|%s"%path)
 
 func _run()->void:
-    var main:=(load("res://scenes/Main.tscn") as PackedScene).instantiate();root.add_child(main);await process_frame;await process_frame
+    var main:=(load("res://scenes/Main.tscn") as PackedScene).instantiate();main.set("auto_boot_enabled",false);root.add_child(main);await main.boot_world(Callable(),false,true)
     main.get_node("UI").visible=false
     var capital:Dictionary={}
     for site in main._active_profile.get("town_sites",[]):

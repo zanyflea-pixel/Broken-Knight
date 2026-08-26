@@ -137,18 +137,22 @@ func _finish_terrain_refresh()->void:
 
 
 func _terrain_color(height: float, world_point: Vector2) -> Color:
+    if _point_inside_ocean(world_point):
+        var sea_variation:=sin(world_point.x*.0041+world_point.y*.0033)*.018
+        return Color(.12+sea_variation,.34+sea_variation,.48+sea_variation*.7)
     var world_size: float = _profile.get("world_size",7200.0)
+    var local_point:=world_point-_nearest_region_origin_for_point(world_point)
     var fine:=sin(world_point.x*.021)*sin(world_point.y*.017)
     var broad:=sin(world_point.x*.0031+world_point.y*.0022)*sin(world_point.y*.0043-world_point.x*.0015)
     var variation:=fine*.012+broad*.020
     var color:=Color(.36,.48,.25)
-    if world_point.x > world_size*.16:
+    if local_point.x > world_size*.16:
         color=Color(.56,.48,.24)
-    elif world_point.x < -world_size*.20:
+    elif local_point.x < -world_size*.20:
         color=Color(.25,.40,.25)
-    if world_point.y > world_size*.18:
+    if local_point.y > world_size*.18:
         color=color.lerp(Color(.27,.43,.38),.30)
-    elif world_point.y < -world_size*.18:
+    elif local_point.y < -world_size*.18:
         color=color.lerp(Color(.58,.39,.21),.34)
     var forest_influence:=0.0
     for forest in _profile.get("forest_regions",[]):
@@ -158,7 +162,59 @@ func _terrain_color(height: float, world_point: Vector2) -> Color:
     color=color.lerp(Color(.105,.275,.17),forest_influence*.52)
     if height>34.0:color=color.lerp(Color(.43,.39,.29),clampf((height-34.0)/92.0,0.0,.68))
     if height>82.0:color=color.lerp(Color(.39,.38,.34),clampf((height-82.0)/70.0,0.0,.68))
+    var snow_weight:=_snow_weight(world_point,height)
+    if snow_weight>0.0:color=color.lerp(Color(.87,.91,.90),snow_weight)
     return Color(color.r+variation,color.g+variation,color.b+variation)
+
+
+func _point_inside_ocean(world_point:Vector2)->bool:
+    for basin_value in _profile.get("ocean_basins",[]):
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast" or str(basin.get("edge","west"))!="west":continue
+        var points:Array=basin.get("coast_points",[])
+        if points.size()<2:continue
+        if world_point.x<=_coastline_x_at_z(world_point.y,points):return true
+    return false
+
+
+func _coastline_x_at_z(z:float,points:Array)->float:
+    if points.is_empty():return -INF
+    var first:=Vector2(points[0])
+    if z<=first.y:return first.x
+    for index in range(points.size()-1):
+        var a:=Vector2(points[index]);var b:=Vector2(points[index+1])
+        if z>=minf(a.y,b.y) and z<=maxf(a.y,b.y):
+            var span:=b.y-a.y
+            return lerpf(a.x,b.x,0.0 if absf(span)<.001 else clampf((z-a.y)/span,0.0,1.0))
+    return Vector2(points[-1]).x
+
+
+func _nearest_region_origin_for_point(world_point:Vector2)->Vector2:
+    var nearest:=Vector2.ZERO
+    var best:=INF
+    for summary_value in _profile.get("region_summaries",[]):
+        if not summary_value is Dictionary:continue
+        var origin:Vector2=summary_value.get("origin",Vector2.ZERO)
+        var distance:=world_point.distance_squared_to(origin)
+        if distance<best:best=distance;nearest=origin
+    return nearest
+
+
+func _snow_weight(world_point:Vector2,height:float)->float:
+    var weight:=0.0
+    for chain_value in _profile.get("mountain_chains",[]):
+        if not chain_value is Dictionary:continue
+        var chain:Dictionary=chain_value
+        if not chain.has("snow_line"):continue
+        var center:Vector2=chain.get("center",Vector2.ZERO)
+        var delta:Vector2=(world_point-center).rotated(-float(chain.get("angle",0.0)))
+        var half_length:=maxf(1.0,float(chain.get("length",1000.0))*.5)
+        var half_width:=maxf(1.0,float(chain.get("width",500.0))*.72)
+        var footprint:=1.0-smoothstep(.76,1.08,Vector2(delta.x/half_length,delta.y/half_width).length())
+        var altitude:=smoothstep(float(chain.get("snow_line",120.0))-8.0,float(chain.get("snow_line",120.0))+32.0,height)
+        weight=maxf(weight,footprint*altitude*.88)
+    return weight
 
 
 func _draw() -> void:
@@ -435,8 +491,10 @@ func _draw_waterfalls(center:Vector2,radius:float)->void:
         var segment:=_nearest_corridor_segment(world_point,_profile.get("river_corridors",[]))
         var tangent:Vector2=segment.get("direction",Vector2(1,0))
         var normal:=Vector2(-tangent.y,tangent.x)
-        draw_line(p-normal*5.0,p+normal*5.0,Color(.91,.96,.88),2.4)
-        draw_line(p-normal*5.0+tangent*2.5,p+normal*5.0+tangent*2.5,Color(.07,.27,.32),1.2)
+        for offset in [-2.4,0.0,2.4]:
+            var tip:=p+tangent*(float(offset)+1.7)
+            draw_line(p+tangent*float(offset)-normal*2.5,tip,Color(.78,.93,.94),1.35,true)
+            draw_line(p+tangent*float(offset)+normal*2.5,tip,Color(.12,.42,.52),1.35,true)
 
 
 func _draw_caves_and_camps(center:Vector2,radius:float)->void:
@@ -534,7 +592,7 @@ func _draw_starter_map_sites(center:Vector2,radius:float)->void:
         if not site_value is Dictionary:continue
         var site:Dictionary=site_value
         var kind:=str(site.get("kind",""))
-        if kind!="waystation" and kind!="watchtower":continue
+        if kind not in ["waystation","watchtower","glacier","crevasse","ruin","lair"]:continue
         var world_point:Vector2=site.get("position",Vector2.ZERO)
         var p:=_local_point(world_point,center,radius)
         if p.distance_to(center)>=radius-8.0:continue
@@ -544,10 +602,22 @@ func _draw_starter_map_sites(center:Vector2,radius:float)->void:
             draw_line(p+Vector2(5,-6),p+Vector2(5,5),Color(.28,.16,.05,.96),1.4)
             draw_colored_polygon(PackedVector2Array([p+Vector2(5,-6),p+Vector2(10,-4),p+Vector2(5,-1)]),Color(.75,.22,.07,.98))
             if p.distance_to(center)>28.0:_small_label(str(site.get("name","Waystation")),p+Vector2(10,10))
-        else:
+        elif kind=="watchtower":
             draw_rect(Rect2(p-Vector2(3,3),Vector2(6,6)),Color(.43,.35,.23,.98),true)
             draw_colored_polygon(PackedVector2Array([p+Vector2(0,-7),p+Vector2(-5,-2),p+Vector2(5,-2)]),Color(.61,.17,.06,.98))
             draw_circle(p+Vector2(0,-7),1.7,Color(1.0,.48,.08,.96))
+        elif kind=="glacier":
+            draw_colored_polygon(PackedVector2Array([p+Vector2(-6,5),p+Vector2(-3,-6),p,p+Vector2(3,-7),p+Vector2(7,5)]),Color(.76,.91,.94,.98))
+            draw_line(p+Vector2(-3,0),p+Vector2(0,6),Color(.23,.62,.72),1.4,true)
+        elif kind=="crevasse":
+            draw_polyline(PackedVector2Array([p+Vector2(-1,-7),p+Vector2(3,-3),p+Vector2(-2,1),p+Vector2(3,6)]),Color(.10,.37,.48,.98),2.8,true)
+        elif kind=="lair":
+            for index in range(6):
+                var angle:=TAU*float(index)/6.0+.20
+                draw_circle(p+Vector2(cos(angle),sin(angle))*4.3,1.55,Color(.17,.23,.23,.98))
+            draw_circle(p,2.0,Color(.31,.72,.77,.98))
+        else:
+            draw_polyline(PackedVector2Array([p+Vector2(-5,-4),p+Vector2(5,-4),p+Vector2(4,5),p+Vector2(-5,5)]),Color(.30,.27,.23,.98),1.8,true)
 
 
 func _draw_local_crownspire(capital_center:Vector2,center:Vector2,radius:float)->void:

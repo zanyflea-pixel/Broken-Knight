@@ -10,7 +10,9 @@ func _run()->void:
     var director:=Node3D.new();director.set_script(load("res://scripts/GameplayDirector.gd"));root.add_child(director);director.player=hero;director.height_sampler=func(x:float,z:float):return Vector3(x,0,z);director.walkable_sampler=func(_x:float,_z:float):return true
     var menu:=Control.new();menu.set_script(load("res://scripts/HeroMenu.gd"));root.add_child(menu);await process_frame;menu.configure(hero,director);await process_frame
     var bag_ok:bool=menu.bag_root.get_child_count()==80 and menu.bag_root.columns==4
-    var equipment_ok:bool=menu.slots_root.get_child_count()==8 and not menu.slots_root.get_parent() is ScrollContainer
+    # Eight armor/weapon slots plus two ring slots must all remain visible
+    # without turning the equipment column into a scrolling list.
+    var equipment_ok:bool=menu.slots_root.get_child_count()==10 and not menu.slots_root.get_parent() is ScrollContainer
     var no_crafting:bool=not FileAccess.get_file_as_string("res://scripts/HeroMenu.gd").contains("Field Supplies")
     var rotation_before:float=menu.portrait_model.rotation.y
     var press:=InputEventMouseButton.new();press.button_index=MOUSE_BUTTON_LEFT;press.pressed=true;menu._portrait_input(press)

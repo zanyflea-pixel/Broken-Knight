@@ -15,10 +15,27 @@ const WOODLAND_FLOWER_SCENE:PackedScene=preload("res://assets/vegetation/woodlan
 const HIGHLAND_OUTCROP_SCENE:PackedScene=preload("res://assets/vegetation/highland_outcrop_v1.glb")
 const ROADSIDE_VERGE_SCENE:PackedScene=preload("res://assets/vegetation/roadside_verge_cluster_v1.glb")
 const ARCHITECTURE_DETAIL_KIT_SCENE:PackedScene=preload("res://assets/architecture/architecture_detail_kit_v2.glb")
+const GLACIAL_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/glacial_environment_kit_v1.glb")
+const WESTERN_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/western_environment_kit_v1.glb")
+const STORMBREAK_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/stormbreak_environment_kit_v1.glb")
+const SKELD_COAST_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/skeld_coast_environment_kit_v1.glb")
+const EASTERN_MARCHES_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/eastern_marches_environment_kit_v1.glb")
 const RIVERWATCH_STABLE_SCENE:PackedScene=preload("res://assets/architecture/riverwatch_stable.glb")
 const RIVERWATCH_HORSE_SCENE:PackedScene=preload("res://assets/animals/riverwatch_horse.glb")
 const RIDEABLE_HORSE_SCRIPT:Script=preload("res://scripts/world/RideableHorse.gd")
-const MEADOW_CACHE_VERSION:=3
+const MEADOW_CACHE_VERSION:=7
+const STARTING_VISUAL_BAKE_PATH := "res://assets/world/generated/starting_realm_visuals_v1.scn"
+const STARTING_VISUAL_BAKE_VERSION := 1
+const STREAMED_VISUAL_BAKE_VERSION := 1
+const STREAMED_VISUAL_BAKE_ZONES := [
+    "north_frontier","glacial_range","western_reaches",
+    "stormbreak_highlands","skeld_coast","east_marches",
+]
+const STARTING_VISUAL_BAKE_SOURCES := [
+    "res://scripts/world/WorldProfile.gd",
+    "res://scripts/world/TerrainBuilder.gd",
+    "res://scripts/world/WorldPreviewBuilder.gd",
+]
 
 var _architecture_textures: Dictionary = {}
 var _shared_materials:Dictionary={}
@@ -30,8 +47,46 @@ var _shrub_branch_mesh:ArrayMesh
 var _realistic_tree_meshes:Dictionary={}
 var _tree_species_mesh_cache:Dictionary={}
 var _architecture_detail_mesh_cache:Dictionary={}
+var _glacial_environment_mesh_cache:Dictionary={}
+var _western_environment_mesh_cache:Dictionary={}
+var _stormbreak_environment_mesh_cache:Dictionary={}
+var _skeld_coast_environment_mesh_cache:Dictionary={}
+var _eastern_marches_environment_mesh_cache:Dictionary={}
 var _corridor_segment_buckets:Dictionary={}
+var _farm_plot_regions:Array[Dictionary]=[]
 const CORRIDOR_BUCKET_SIZE:=192.0
+const STREAMED_MEADOW_CHUNK_COUNT:=12
+const STREAMED_MEADOW_SAMPLES_PER_CHUNK:=200
+var _streamed_meadow_states:Dictionary={}
+var _streamed_town_states:Dictionary={}
+var _active_ocean_basins:Array=[]
+
+
+static func starting_visual_bake_signature() -> String:
+    # These three files define every generated transform in the starter world.
+    # Imported meshes and textures remain external scene resources, so asset
+    # reimports update normally without forcing a multi-megabyte bake rebuild.
+    var hashing := HashingContext.new()
+    hashing.start(HashingContext.HASH_SHA256)
+    hashing.update(("bake-version:%d\n" % STARTING_VISUAL_BAKE_VERSION).to_utf8_buffer())
+    for source_path in STARTING_VISUAL_BAKE_SOURCES:
+        hashing.update((source_path + "\n").to_utf8_buffer())
+        hashing.update(FileAccess.get_file_as_bytes(source_path))
+    return hashing.finish().hex_encode()
+
+
+static func streamed_visual_bake_path(zone_id:String)->String:
+    return "res://assets/world/generated/%s_visuals_v1.scn"%zone_id
+
+
+static func streamed_visual_bake_signature(zone_id:String)->String:
+    var hashing:=HashingContext.new()
+    hashing.start(HashingContext.HASH_SHA256)
+    hashing.update(("streamed-bake-version:%d\nzone:%s\n"%[STREAMED_VISUAL_BAKE_VERSION,zone_id]).to_utf8_buffer())
+    for source_path in STARTING_VISUAL_BAKE_SOURCES:
+        hashing.update((source_path+"\n").to_utf8_buffer())
+        hashing.update(FileAccess.get_file_as_bytes(source_path))
+    return hashing.finish().hex_encode()
 const POPULATE_STAGE_LABELS:=[
     "Water, roads, and bridges",
     "Forests and biome vegetation",
@@ -51,7 +106,9 @@ func populate(world_root: Node3D, profile: Dictionary, terrain_result: Dictionar
 
 
 func begin_population(world_root: Node3D, profile: Dictionary) -> void:
+    _active_ocean_basins=profile.get("ocean_basins",[])
     _prepare_corridor_spatial_cache(profile)
+    _prepare_farm_plot_cache(profile)
     var river_root: Node3D = world_root.get_node("RiverRoot")
     var road_root: Node3D = world_root.get_node("RoadRoot")
     var bridge_root: Node3D = world_root.get_node("BridgeRoot")
@@ -72,6 +129,38 @@ func get_population_stage_count() -> int:
     return POPULATE_STAGE_LABELS.size()
 
 
+func get_population_stage_job_count(stage_idx:int,profile:Dictionary={})->int:
+    var counts:Array[int]=[8,2,3,4,5,8,6,2]
+    if stage_idx<0 or stage_idx>=counts.size():return 0
+    if stage_idx==0 and profile.get("streamed_population",false):
+        return _streamed_transport_job_specs(profile).size()
+    if stage_idx==6 and not profile.is_empty():
+        return _enterable_town_job_count(profile)+5
+    if stage_idx==3 and profile.get("streamed_population",false):
+        return STREAMED_MEADOW_CHUNK_COUNT+3
+    if stage_idx==1 and profile.get("streamed_population",false):
+        return profile.get("forest_regions",[]).size()+1
+    if stage_idx==5 and profile.get("streamed_population",false):
+        return profile.get("forest_regions",[]).size()+10
+    if stage_idx==7 and profile.get("streamed_population",false):
+        return 16
+    return counts[stage_idx]
+
+
+func _streamed_transport_job_specs(profile:Dictionary)->Array:
+    var specs:Array=[]
+    for corridor in profile.get("river_corridors",[]):specs.append({"kind":"river","entry":corridor})
+    for pond in profile.get("pond_sites",[]):specs.append({"kind":"pond","entry":pond})
+    for waterfall in profile.get("waterfall_sites",[]):
+        for phase in range(7):specs.append({"kind":"waterfall_phase","entry":waterfall,"phase":phase})
+    for corridor in profile.get("road_corridors",[]):specs.append({"kind":"road","entry":corridor})
+    for corridor in profile.get("trail_corridors",[]):specs.append({"kind":"trail","entry":corridor})
+    specs.append({"kind":"junctions"})
+    specs.append({"kind":"wayfinding"})
+    specs.append({"kind":"bridges"})
+    return specs
+
+
 func get_population_stage_label(stage_idx: int) -> String:
     if stage_idx < 0 or stage_idx >= POPULATE_STAGE_LABELS.size():
         return "World details"
@@ -79,6 +168,13 @@ func get_population_stage_label(stage_idx: int) -> String:
 
 
 func run_population_stage(stage_idx: int, world_root: Node3D, profile: Dictionary, terrain_result: Dictionary, profile_start_usec: int = 0) -> void:
+    for job_idx in range(get_population_stage_job_count(stage_idx,profile)):
+        run_population_stage_job(stage_idx,job_idx,world_root,profile,terrain_result)
+    if stage_idx>=0 and stage_idx<POPULATE_STAGE_LABELS.size():
+        _profile_preview_step(get_population_stage_label(stage_idx),profile_start_usec)
+
+
+func run_population_stage_job(stage_idx:int,job_idx:int,world_root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
     var river_root: Node3D = world_root.get_node("RiverRoot")
     var road_root: Node3D = world_root.get_node("RoadRoot")
     var bridge_root: Node3D = world_root.get_node("BridgeRoot")
@@ -86,59 +182,108 @@ func run_population_stage(stage_idx: int, world_root: Node3D, profile: Dictionar
     var props_root: Node3D = world_root.get_node("PropsRoot")
     match stage_idx:
         0:
-            _build_river_ribbons(river_root, profile.get("river_corridors", []), terrain_result, profile)
-            _build_ponds(river_root, profile.get("pond_sites", []), terrain_result)
-            _build_waterfalls(river_root,profile.get("waterfall_sites",[]),terrain_result,profile)
-            _build_road_ribbons(road_root, profile.get("road_corridors", []), terrain_result, profile)
-            _build_trail_ribbons(road_root, profile.get("trail_corridors", []), terrain_result)
-            _build_road_junctions(road_root, profile.get("road_corridors", []), terrain_result)
-            _build_wayfinding_landmarks(road_root, profile, terrain_result)
-            _build_bridges(bridge_root, profile, terrain_result)
-            _profile_preview_step("water_roads_bridges",profile_start_usec)
+            if profile.get("streamed_population",false):
+                var specs:=_streamed_transport_job_specs(profile)
+                if job_idx>=0 and job_idx<specs.size():
+                    var spec:Dictionary=specs[job_idx]
+                    match str(spec.get("kind","")):
+                        "river":_build_river_ribbons(river_root,[spec.get("entry",{})],terrain_result,profile)
+                        "pond":_build_ponds(river_root,[spec.get("entry",{})],terrain_result,profile)
+                        "waterfall_phase":_build_waterfall_phase(river_root,spec.get("entry",{}),terrain_result,profile,int(spec.get("phase",0)))
+                        "road":_build_road_ribbons(road_root,[spec.get("entry",{})],terrain_result,profile)
+                        "trail":_build_trail_ribbons(road_root,[spec.get("entry",{})],terrain_result)
+                        "junctions":_build_road_junctions(road_root,profile.get("road_corridors",[]),terrain_result)
+                        "wayfinding":_build_wayfinding_landmarks(road_root,profile,terrain_result)
+                        "bridges":_build_bridges(bridge_root,profile,terrain_result)
+            else:
+                match job_idx:
+                    0:_build_river_ribbons(river_root,profile.get("river_corridors",[]),terrain_result,profile)
+                    1:_build_ponds(river_root,profile.get("pond_sites",[]),terrain_result,profile)
+                    2:_build_waterfalls(river_root,profile.get("waterfall_sites",[]),terrain_result,profile)
+                    3:_build_road_ribbons(road_root,profile.get("road_corridors",[]),terrain_result,profile)
+                    4:_build_trail_ribbons(road_root,profile.get("trail_corridors",[]),terrain_result)
+                    5:_build_road_junctions(road_root,profile.get("road_corridors",[]),terrain_result)
+                    6:_build_wayfinding_landmarks(road_root,profile,terrain_result)
+                    7:_build_bridges(bridge_root,profile,terrain_result)
         1:
-            _build_forests(props_root, profile, terrain_result)
-            _build_biome_vegetation(props_root, profile, terrain_result)
-            _profile_preview_step("forests_biomes",profile_start_usec)
+            if profile.get("streamed_population",false):
+                var forest_job_count:int=profile.get("forest_regions",[]).size()
+                if job_idx<forest_job_count:_build_forests(props_root,profile,terrain_result,job_idx,1)
+                else:_build_biome_vegetation(props_root,profile,terrain_result)
+            else:
+                match job_idx:
+                    0:_build_forests(props_root,profile,terrain_result)
+                    1:_build_biome_vegetation(props_root,profile,terrain_result)
         2:
-            _build_rocks(props_root, profile, terrain_result)
-            _build_grass(props_root, profile, terrain_result)
-            _build_regional_ground_cover(props_root,profile,terrain_result)
-            _profile_preview_step("rocks_grass",profile_start_usec)
+            match job_idx:
+                0:_build_rocks(props_root,profile,terrain_result)
+                1:_build_grass(props_root,profile,terrain_result)
+                2:_build_regional_ground_cover(props_root,profile,terrain_result)
         3:
-            _build_traversal_ground_cover(props_root, profile, terrain_result)
-            _build_roadside_verge_clusters(props_root,profile,terrain_result)
-            _build_meadow_floor_detail(props_root,profile,terrain_result)
-            _build_forest_leaf_litter(props_root,terrain_result)
-            _profile_preview_step("traversal_meadow",profile_start_usec)
+            if profile.get("streamed_population",false):
+                if job_idx==0:_build_traversal_ground_cover(props_root,profile,terrain_result)
+                elif job_idx==1:_build_roadside_verge_clusters(props_root,profile,terrain_result)
+                elif job_idx<STREAMED_MEADOW_CHUNK_COUNT+2:
+                    _build_streamed_meadow_floor_chunk(props_root,profile,terrain_result,job_idx-2)
+                else:
+                    pass # Authored forest composition supplies frontier litter.
+            else:
+                match job_idx:
+                    0:_build_traversal_ground_cover(props_root,profile,terrain_result)
+                    1:_build_roadside_verge_clusters(props_root,profile,terrain_result)
+                    2:_build_meadow_floor_detail(props_root,profile,terrain_result)
+                    3:_build_forest_leaf_litter(props_root,terrain_result)
         4:
-            _build_bushes(props_root, profile, terrain_result)
-            _build_authored_ecology(props_root,profile,terrain_result)
-            _build_wetland_vegetation(props_root,profile,terrain_result)
-            _build_riverbank_ground_detail(props_root,profile,terrain_result)
-            _build_field_boundaries(props_root,profile,terrain_result)
-            _profile_preview_step("ecology_detail",profile_start_usec)
+            match job_idx:
+                0:_build_bushes(props_root,profile,terrain_result)
+                1:_build_authored_ecology(props_root,profile,terrain_result)
+                2:_build_wetland_vegetation(props_root,profile,terrain_result)
+                3:_build_riverbank_ground_detail(props_root,profile,terrain_result)
+                4:_build_field_boundaries(props_root,profile,terrain_result)
         5:
-            _build_forest_composition(props_root,profile,terrain_result)
-            _build_ground_stones(props_root, profile, terrain_result)
-            _build_rock_formations(props_root, profile, terrain_result)
-            _build_highland_outcrop_clusters(props_root,profile,terrain_result)
-            _build_flower_meadows(props_root, profile, terrain_result)
-            _build_flowering_shrubs(props_root,profile,terrain_result)
-            _build_stone_landmarks(props_root, profile, terrain_result)
-            _build_authored_landmark_sites(props_root,profile,terrain_result)
-            _profile_preview_step("landmarks",profile_start_usec)
+            if profile.get("streamed_population",false):
+                var composition_job_count:int=profile.get("forest_regions",[]).size()
+                if job_idx<composition_job_count:
+                    _build_forest_composition(props_root,profile,terrain_result,job_idx,1)
+                elif job_idx<composition_job_count+4:
+                    _build_ground_stones(props_root,profile,terrain_result,job_idx-composition_job_count,4)
+                else:
+                    match job_idx-composition_job_count-4:
+                        0:_build_rock_formations(props_root,profile,terrain_result)
+                        1:_build_highland_outcrop_clusters(props_root,profile,terrain_result)
+                        2:_build_flower_meadows(props_root,profile,terrain_result)
+                        3:_build_flowering_shrubs(props_root,profile,terrain_result)
+                        4:_build_stone_landmarks(props_root,profile,terrain_result)
+                        5:_build_authored_landmark_sites(props_root,profile,terrain_result)
+            else:
+                match job_idx:
+                    0:_build_forest_composition(props_root,profile,terrain_result)
+                    1:_build_ground_stones(props_root,profile,terrain_result)
+                    2:_build_rock_formations(props_root,profile,terrain_result)
+                    3:_build_highland_outcrop_clusters(props_root,profile,terrain_result)
+                    4:_build_flower_meadows(props_root,profile,terrain_result)
+                    5:_build_flowering_shrubs(props_root,profile,terrain_result)
+                    6:_build_stone_landmarks(props_root,profile,terrain_result)
+                    7:_build_authored_landmark_sites(props_root,profile,terrain_result)
         6:
-            _build_enterable_towns(town_root, profile, terrain_result)
-            _build_town_outskirts(town_root, profile, terrain_result)
-            _build_settlement_greenery(town_root,profile,terrain_result)
-            _build_camps(town_root,profile,terrain_result)
-            _build_world_landmarks(town_root,terrain_result)
-            _build_starter_region_destination(town_root,profile,terrain_result)
-            _profile_preview_step("towns",profile_start_usec)
+            var town_job_count:int=_enterable_town_job_count(profile)
+            if job_idx<town_job_count:
+                _build_enterable_town_job(town_root,profile,terrain_result,job_idx)
+            else:
+                match job_idx-town_job_count:
+                    0:_build_town_outskirts(town_root,profile,terrain_result)
+                    1:_build_settlement_greenery(town_root,profile,terrain_result)
+                    2:_build_camps(town_root,profile,terrain_result)
+                    3:_build_world_landmarks(town_root,terrain_result)
+                    4:_build_starter_region_destination(town_root,profile,terrain_result)
         7:
-            _solidify_static_town_details(town_root)
-            _batch_static_town_boxes(town_root)
-            _profile_preview_step("batching",profile_start_usec)
+            if profile.get("streamed_population",false):
+                if job_idx<8:_solidify_static_town_details(town_root,job_idx,8)
+                else:_batch_static_town_boxes(town_root,job_idx-8,8)
+            else:
+                match job_idx:
+                    0:_solidify_static_town_details(town_root)
+                    1:_batch_static_town_boxes(town_root)
 
 
 func _profile_preview_step(label:String,start_usec:int)->void:
@@ -149,7 +294,15 @@ func _profile_preview_step(label:String,start_usec:int)->void:
     ])
 
 
-func _batch_static_town_boxes(town_root:Node3D)->void:
+func _population_scale(profile:Dictionary)->float:
+    return clampf(float(profile.get("population_scale",1.0)),.20,1.0)
+
+
+func _scaled_population_count(profile:Dictionary,base_count:int,minimum_count:int=0)->int:
+    return maxi(minimum_count,roundi(float(base_count)*_population_scale(profile)))
+
+
+func _batch_static_town_boxes(town_root:Node3D,partition_index:int=-1,partition_count:int=1)->void:
     # Buildings and the castle are assembled from many box pieces so their
     # collision remains precise, but drawing every piece separately created
     # thousands of draw calls near Crownspire. Replace only their static visual
@@ -159,6 +312,11 @@ func _batch_static_town_boxes(town_root:Node3D)->void:
     var shadow_modes:Dictionary={}
     var candidates:Array[MeshInstance3D]=[]
     var stack:Array[Node]=[town_root]
+    if partition_index>=0:
+        stack.clear()
+        var root_children:Array[Node]=[];root_children.assign(town_root.get_children())
+        for child_index in range(root_children.size()):
+            if child_index%partition_count==partition_index:stack.append(root_children[child_index])
     while not stack.is_empty():
         var node:Node=stack.pop_back()
         for child in node.get_children():stack.append(child)
@@ -208,12 +366,18 @@ func _batch_static_town_boxes(town_root:Node3D)->void:
         _add_material_multimesh(town_root,unit_box,transforms,materials[key],casts_shadows,1250.0,800.0)
 
 
-func _solidify_static_town_details(town_root:Node3D)->void:
+func _solidify_static_town_details(town_root:Node3D,partition_index:int=-1,partition_count:int=1)->void:
     var body:=StaticBody3D.new()
     body.name="TownDetailCollision"
     body.collision_layer=1
     town_root.add_child(body)
     var stack:Array[Node]=[town_root]
+    if partition_index>=0:
+        stack.clear()
+        var root_children:Array[Node]=[];root_children.assign(town_root.get_children())
+        for child_index in range(root_children.size()):
+            if child_index%partition_count==partition_index and root_children[child_index]!=body:
+                stack.append(root_children[child_index])
     var added:=0
     while not stack.is_empty():
         var node:Node=stack.pop_back()
@@ -251,20 +415,279 @@ func _solidify_static_town_details(town_root:Node3D)->void:
 
 
 func _build_enterable_towns(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+    for job_index in range(_enterable_town_job_count(profile)):
+        _build_enterable_town_job(root,profile,terrain_result,job_index)
+
+
+func _enterable_town_job_count(profile:Dictionary)->int:
+    var base_count:int=_streamed_regional_settlement_sites(profile).size() if profile.get("streamed_population",false) else profile.get("town_sites",[]).size()+(1 if profile.get("spawn_site",{}).get("starter",false) else 0)
+    return base_count*5 if profile.get("streamed_population",false) else base_count
+
+
+func _streamed_regional_settlement_sites(profile:Dictionary)->Array:
+    var sites:Array=[]
     var spawn_site:Dictionary=profile.get("spawn_site",{})
+    # Every streamed region has an authored arrival settlement. The old town
+    # loop only consumed town_sites, so Pinewatch and Icewatch existed in map
+    # data and gameplay services but had no physical architecture.
+    if not spawn_site.is_empty() and not spawn_site.get("starter",false):
+        sites.append(spawn_site)
+    for town in profile.get("town_sites",[]):
+        sites.append(town)
+    return sites
+
+
+func _build_enterable_town_job(root:Node3D,profile:Dictionary,terrain_result:Dictionary,job_index:int)->void:
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if profile.get("streamed_population",false) and not spawn_site.get("starter",false):
+        _build_streamed_regional_town_phase(root,profile,terrain_result,job_index/5,job_index%5)
+        return
     if spawn_site.get("starter",false):
-        var starter_hub:=Node3D.new()
-        starter_hub.name=str(spawn_site.get("name","Riverwatch"))
-        root.add_child(starter_hub)
-        _build_starter_town(starter_hub,spawn_site,terrain_result,profile.get("road_corridors",[]))
-    for site in profile.get("town_sites", []):
-        var hub := Node3D.new()
-        hub.name = str(site.get("name", "Town"))
-        root.add_child(hub)
-        if site.get("capital", false):
-            _build_capital_city(hub, site, terrain_result,profile.get("road_corridors",[]))
-        else:
-            _build_regional_town(hub, site, terrain_result,profile.get("road_corridors",[]))
+        if job_index==0:
+            var starter_hub:=Node3D.new()
+            starter_hub.name=str(spawn_site.get("name","Riverwatch"))
+            root.add_child(starter_hub)
+            _build_starter_town(starter_hub,spawn_site,terrain_result,profile.get("road_corridors",[]))
+            return
+        job_index-=1
+    var towns:Array=profile.get("town_sites",[])
+    if job_index<0 or job_index>=towns.size():return
+    var site:Dictionary=towns[job_index]
+    var hub:=Node3D.new()
+    hub.name=str(site.get("name","Town"))
+    root.add_child(hub)
+    if site.get("capital",false):
+        _build_capital_city(hub,site,terrain_result,profile.get("road_corridors",[]))
+    else:
+        _build_regional_town(hub,site,terrain_result,profile.get("road_corridors",[]))
+
+
+func _build_streamed_regional_town_phase(root:Node3D,profile:Dictionary,terrain_result:Dictionary,site_index:int,phase:int)->void:
+    var towns:Array=_streamed_regional_settlement_sites(profile)
+    if site_index<0 or site_index>=towns.size():return
+    var site:Dictionary=towns[site_index]
+    var state_key:="%d:%d"%[root.get_instance_id(),site_index]
+    if phase==0:
+        var hub:=Node3D.new();hub.name=str(site.get("name","Town"));root.add_child(hub)
+        if site.get("capital",false):
+            _build_capital_city(hub,site,terrain_result,profile.get("road_corridors",[]))
+            return
+        _add_market_square(hub,site.get("position",Vector2.ZERO),terrain_result,1.15,true,str(site.get("architecture_set","")))
+        _streamed_town_states[state_key]={"hub":hub,"occupied":[]}
+    if not _streamed_town_states.has(state_key):return
+    var state:Dictionary=_streamed_town_states[state_key]
+    var hub:Node3D=state.get("hub") as Node3D
+    var occupied:Array[Dictionary]=[];occupied.assign(state.get("occupied",[]))
+    if phase==0:
+        _build_regional_town_house_range(hub,site,terrain_result,profile.get("road_corridors",[]),0,4,occupied)
+    elif phase==1:
+        _build_regional_town_house_range(hub,site,terrain_result,profile.get("road_corridors",[]),4,8,occupied)
+    elif phase==2:
+        _build_regional_town_house_range(hub,site,terrain_result,profile.get("road_corridors",[]),8,12,occupied)
+    elif phase==3:
+        _build_regional_town_house_range(hub,site,terrain_result,profile.get("road_corridors",[]),12,14,occupied)
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var inn_point:=center+Vector2(float(site.get("radius",135.0))*.18,float(site.get("radius",135.0))*.28)
+        inn_point=_clear_house_from_roads(inn_point,10.0,profile.get("road_corridors",[]))
+        inn_point=_separate_house_plot(inn_point,10.0,occupied,center)
+        _add_enterable_house(hub,terrain_result.height_sampler.call(inn_point.x,inn_point.y),PI,18.0,12.0,8.4,20,str(site.get("architecture_set","")))
+    else:
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var radius:float=float(site.get("radius",135.0))
+        _add_town_well(hub,center+Vector2(-34.0,4.0),terrain_result)
+        _add_town_boundary(hub,center,radius*.78,terrain_result,str(site.get("architecture_set","")))
+        _add_regional_settlement_identity(hub,site,profile,terrain_result)
+        _add_town_name_marker(hub,str(site.get("name","Town")),center+Vector2(0,radius*.70),terrain_result)
+        _streamed_town_states.erase(state_key)
+        return
+    state["occupied"]=occupied
+    _streamed_town_states[state_key]=state
+
+
+func _add_regional_settlement_identity(root:Node3D,site:Dictionary,profile:Dictionary,terrain_result:Dictionary)->void:
+    var architecture_set:=str(site.get("architecture_set",""))
+    if architecture_set not in ["icewatch_hold","rimegate_lodge","rainward_timber","rainward_stone","stormbreak_highland","skeld_coast","marcher_stone","marcher_timber"]:return
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.43,.47,.47),1.0,2.8)
+    var dark_stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.27,.31,.32),1.0,2.6)
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.31,.25,.20),1.0,2.0)
+    if architecture_set=="icewatch_hold":
+        var tower_point:=center+Vector2(-92.0,-48.0)
+        for map_site in profile.get("map_sites",[]):
+            if str(map_site.get("name",""))=="Icewatch Signal Tower":
+                tower_point=map_site.get("position",tower_point)
+                break
+        var ground:Vector3=sampler.call(tower_point.x,tower_point.y)
+        var tower:=Node3D.new();tower.name="Icewatch Signal Tower";tower.set_meta("batch_static_collision",true);root.add_child(tower)
+        # Tapered masonry base, enclosed watch room and a supported beacon.
+        _solid_box(tower,Vector3(9.4,7.4,9.4),ground+Vector3.UP*3.7,stone)
+        _solid_box(tower,Vector3(7.6,6.0,7.6),ground+Vector3.UP*10.4,dark_stone)
+        for side in [-1.0,1.0]:
+            _visual_box(tower,Vector3(1.0,3.0,.18),ground+Vector3(2.2*side,10.7,3.84),timber)
+        _solid_box(tower,Vector3(10.4,.70,10.4),ground+Vector3.UP*13.72,stone)
+        for corner in [Vector2(-4.4,-4.4),Vector2(4.4,-4.4),Vector2(-4.4,4.4),Vector2(4.4,4.4)]:
+            _solid_box(tower,Vector3(1.35,1.7,1.35),ground+Vector3(corner.x,14.55,corner.y),stone)
+        var beacon:=OmniLight3D.new();beacon.position=ground+Vector3.UP*15.7;beacon.light_color=Color(1.0,.47,.18);beacon.light_energy=0.0;beacon.omni_range=28.0;beacon.visible=false;beacon.add_to_group("town_torches");tower.add_child(beacon)
+        _visual_box(tower,Vector3(2.6,.32,2.6),ground+Vector3.UP*14.25,_make_lit_window_material(Color(.96,.38,.10)))
+        # Heavy gate shoulders identify the pass entrance without blocking the road.
+        var gate_z:=center.y+float(site.get("radius",176.0))*.78
+        for side in [-1.0,1.0]:
+            var gate_point:=Vector2(center.x+9.5*side,gate_z)
+            var gate_ground:Vector3=sampler.call(gate_point.x,gate_point.y)
+            _solid_box(root,Vector3(4.2,8.2,4.2),gate_ground+Vector3.UP*4.1,dark_stone)
+    elif architecture_set=="rimegate_lodge":
+        # Rimegate's ore hoist and graded stock yard make its mining purpose
+        # visible before the player reaches a vendor sign.
+        var yard_point:=center+Vector2(-30.0,48.0)
+        var ground:Vector3=sampler.call(yard_point.x,yard_point.y)
+        var hoist:=Node3D.new();hoist.name="Rimegate Ore Hoist";hoist.position=ground;hoist.set_meta("batch_static_collision",true);root.add_child(hoist)
+        for side in [-1.0,1.0]:
+            _solid_box_euler(hoist,Vector3(.55,8.8,.55),Vector3(3.0*side,4.35,0),Vector3(0,0,.16*side),timber)
+        _solid_box(hoist,Vector3(7.4,.60,.60),Vector3(0,8.45,0),timber)
+        _visual_box(hoist,Vector3(.16,4.2,.16),Vector3(0,6.3,0),_make_material(Color(.12,.13,.13),.72))
+        _solid_box(hoist,Vector3(2.7,1.25,2.4),Vector3(0,2.1,0),dark_stone)
+        for bin_index in range(3):
+            var bin_point:=center+Vector2(15.0+float(bin_index)*6.0,46.0+float(bin_index%2)*3.0)
+            var bin_ground:Vector3=sampler.call(bin_point.x,bin_point.y)
+            _solid_box(root,Vector3(4.2,1.25,3.6),bin_ground+Vector3.UP*.63,stone)
+    elif architecture_set in ["rainward_timber","rainward_stone"]:
+        _add_rainward_settlement_identity(root,site,terrain_result)
+    elif architecture_set=="stormbreak_highland":
+        _add_stormbreak_settlement_identity(root,site,terrain_result)
+    elif architecture_set in ["marcher_stone","marcher_timber"]:
+        _add_marcher_settlement_identity(root,site,terrain_result)
+    else:
+        _add_skeld_settlement_identity(root,site,terrain_result)
+
+
+func _add_marcher_settlement_identity(root:Node3D,site:Dictionary,terrain_result:Dictionary)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var site_name:=str(site.get("name",""))
+    var point:=center
+    var mesh_name:=""
+    var yaw:=0.0
+    var scale_value:=1.0
+    if site_name=="Dawnford":
+        point=center+Vector2(0,-106)
+        mesh_name="DawnfordCaravanserai"
+        yaw=.10
+        scale_value=1.02
+    elif site_name=="Amberfield":
+        point=center+Vector2(-100,92)
+        mesh_name="AmberfieldWindmill"
+        yaw=-.18
+        scale_value=.96
+    elif site_name=="March Keep":
+        # The fort sits behind its gate rather than on top of the realmroad.
+        # Rotating the open gate toward the town center lets the final road
+        # segment arrive at the threshold cleanly.
+        point=center+Vector2(60,-70)
+        mesh_name="MarchKeepFortification"
+        yaw=2.43
+        scale_value=1.18
+    elif site_name=="Saltwatch":
+        point=center+Vector2(-88,82)
+        mesh_name="SaltwatchGranary"
+        yaw=-.12
+        scale_value=.94
+    if mesh_name.is_empty():return
+    var ground:Vector3=sampler.call(point.x,point.y)
+    _add_eastern_environment_piece(root,mesh_name,ground,yaw,scale_value,true,1750.0 if site_name=="March Keep" else 1050.0,site_name+" Identity")
+
+
+func _add_skeld_settlement_identity(root:Node3D,site:Dictionary,terrain_result:Dictionary)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.66,.73,.71),1.0,3.0)
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.38,.28,.21),1.0,2.2)
+    var iron:=_make_material(Color(.12,.15,.16),.76)
+    var yard_point:=center+Vector2(-58.0,-10.0)
+    var ground:Vector3=sampler.call(yard_point.x,yard_point.y)
+    var yard:=Node3D.new();yard.name="%s Fish and Net Yard"%str(site.get("name","Skeld"));yard.position=ground;yard.set_meta("batch_static_collision",true);root.add_child(yard)
+    # A working drying rack, smokehouse and grounded fish boxes communicate
+    # the town's coastal economy without adding another duplicate house.
+    for side in [-1.0,1.0]:
+        _solid_box(yard,Vector3(.48,4.6,.48),Vector3(4.8*side,2.3,-2.6),timber)
+        _solid_box(yard,Vector3(.48,4.6,.48),Vector3(4.8*side,2.3,2.6),timber)
+    for rack_y in [1.6,2.8,4.0]:_solid_box(yard,Vector3(10.2,.24,.24),Vector3(0,rack_y,0),timber)
+    for hook_index in range(5):
+        _visual_box(yard,Vector3(.10,.9,.10),Vector3(-3.6+float(hook_index)*1.8,2.25,0),iron)
+    _solid_box(yard,Vector3(5.8,3.6,4.8),Vector3(-8.6,1.8,0),stone)
+    _solid_box_euler(yard,Vector3(6.5,.34,3.3),Vector3(-8.6,4.4,-1.25),Vector3(.28,0,0),timber)
+    _solid_box_euler(yard,Vector3(6.5,.34,3.3),Vector3(-8.6,4.4,1.25),Vector3(-.28,0,0),timber)
+    for crate_index in range(3):
+        _solid_box(yard,Vector3(2.4,1.15,1.8),Vector3(6.8+float(crate_index%2)*2.7,.58,-2.0+float(crate_index)*2.0),timber)
+
+
+func _add_stormbreak_settlement_identity(root:Node3D,site:Dictionary,terrain_result:Dictionary)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var town_name:=str(site.get("name","Stormbreak"))
+    var slate:=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.36,.42,.41),1.0,2.8)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.61,.63,.57),1.0,3.0)
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.42,.30,.18),1.0,2.2)
+    var yard_point:=center+Vector2(-62.0,12.0)
+    var ground:Vector3=sampler.call(yard_point.x,yard_point.y)
+    var shelter:=Node3D.new();shelter.name="%s Drovers Shelter"%town_name;shelter.position=ground;shelter.set_meta("batch_static_collision",true);root.add_child(shelter)
+    # Heavy stone feet, close-set oak posts and a low slate cap make a useful
+    # wind shelter instead of another sealed house copied into the square.
+    for x in [-4.8,4.8]:
+        for z in [-3.0,3.0]:
+            _solid_box(shelter,Vector3(1.05,1.0,1.05),Vector3(x,.5,z),stone)
+            _solid_box(shelter,Vector3(.48,4.6,.48),Vector3(x,3.2,z),timber)
+    _solid_box_euler(shelter,Vector3(11.2,.32,4.1),Vector3(0,6.0,-1.55),Vector3(.20,0,0),slate)
+    _solid_box_euler(shelter,Vector3(11.2,.32,4.1),Vector3(0,6.0,1.55),Vector3(-.20,0,0),slate)
+    _solid_box(shelter,Vector3(8.8,.42,1.0),Vector3(0,.75,2.1),timber)
+    for stack_index in range(3):
+        _solid_box(shelter,Vector3(2.6,.55,2.0),Vector3(-3.0+float(stack_index)*3.0,.28,-1.8),stone)
+
+
+func _add_rainward_settlement_identity(root:Node3D,site:Dictionary,terrain_result:Dictionary)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var architecture_set:=str(site.get("architecture_set","rainward_timber"))
+    var town_name:=str(site.get("name","Rainward"))
+    var timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.54,.39,.23),1.0,2.0)
+    var pale_timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.73,.56,.34),1.0,2.2)
+    var slate:=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.44,.52,.47),1.0,2.6)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.68,.70,.62),1.0,2.8)
+    if architecture_set=="rainward_timber":
+        var yard_point:=center+Vector2(-66.0,6.0)
+        var ground:Vector3=sampler.call(yard_point.x,yard_point.y)
+        var yard:=Node3D.new();yard.name="%s Timber Yard"%town_name;yard.position=ground;yard.set_meta("batch_static_collision",true);root.add_child(yard)
+        # An open-sided rain shelter and sawing frame make the local timber
+        # trade legible without filling the street with another closed house.
+        for x in [-4.4,4.4]:
+            for z in [-2.8,2.8]:_solid_box(yard,Vector3(.42,4.8,.42),Vector3(x,2.4,z),timber)
+        _solid_box_euler(yard,Vector3(10.2,.30,4.2),Vector3(0,5.20,-1.45),Vector3(.18,0,0),slate)
+        _solid_box_euler(yard,Vector3(10.2,.30,4.2),Vector3(0,5.20,1.45),Vector3(-.18,0,0),slate)
+        for stack_index in range(4):
+            _solid_box(yard,Vector3(6.8,.48,.64),Vector3(0,.30+float(stack_index)*.48,-1.15+float(stack_index%2)*.36),pale_timber)
+        _solid_box(yard,Vector3(.28,3.4,.28),Vector3(-2.2,1.7,1.65),timber)
+        _solid_box(yard,Vector3(.28,3.4,.28),Vector3(2.2,1.7,1.65),timber)
+        _solid_box(yard,Vector3(4.8,.30,.30),Vector3(0,3.25,1.65),timber)
+        if town_name=="Rainhaven":
+            # River-port cargo is gathered beneath the shelter rather than
+            # scattered as arbitrary boxes across the settlement green.
+            for crate_index in range(3):
+                _solid_box(yard,Vector3(1.5,1.25,1.4),Vector3(-2.5+float(crate_index)*2.0,.63,1.8),pale_timber)
+    else:
+        var quarry_point:=center+Vector2(72.0,4.0)
+        var ground:Vector3=sampler.call(quarry_point.x,quarry_point.y)
+        var yard:=Node3D.new();yard.name="Stonecross Quarry Derrick";yard.position=ground;yard.set_meta("batch_static_collision",true);root.add_child(yard)
+        # A low A-frame derrick and sorted masonry piles distinguish the quarry
+        # town from the two timber settlements at silhouette distance.
+        for side in [-1.0,1.0]:
+            _solid_box_euler(yard,Vector3(.55,7.8,.55),Vector3(3.2*side,3.7,0),Vector3(0,0,.28*side),timber)
+        _solid_box(yard,Vector3(7.6,.62,.62),Vector3(0,7.25,0),timber)
+        _visual_box(yard,Vector3(.15,4.8,.15),Vector3(0,4.85,0),_make_material(Color(.14,.14,.12),.72))
+        _solid_box(yard,Vector3(2.8,1.5,2.4),Vector3(0,.75,0),stone)
+        for block_index in range(5):
+            var row:=block_index/3
+            var column:=block_index%3
+            _solid_box(yard,Vector3(2.3,1.05,1.8),Vector3(-5.0+float(column)*2.7,.53,3.2+float(row)*2.0),stone)
 
 
 func _build_starter_town(root:Node3D,site:Dictionary,terrain_result:Dictionary,roads:Array)->void:
@@ -355,81 +778,20 @@ func _add_riverwatch_stable(root:Node3D,center:Vector2,sampler:Callable)->void:
         horse.set_meta("mounted",false)
         horse.set_meta("stable_home_position",horse_ground)
         horse.set_meta("stable_parent",root)
+        # Attach the imported model before the scripted horse enters the tree.
+        # RideableHorse._ready() can then find and initialize its AnimationPlayer.
+        var model:=RIVERWATCH_HORSE_SCENE.instantiate() as Node3D
+        model.name="Riverwatch Horse Model"
+        horse.add_child(model)
         root.add_child(horse)
         horse.global_position=horse_ground
         horse.rotation.y=PI+float(index-1)*.055
-        horse.scale=Vector3.ONE*(.96+float(index)*.025)
-        var model:=_instantiate_riverwatch_horse_model()
-        model.name="Riverwatch Horse Model"
-        horse.add_child(model)
+        # The authored courser is deliberately substantial, but the former
+        # near-1.0 runtime scale made it read as an oversized draft horse beside
+        # the hero and left the rider buried in the saddle. Keep three subtle
+        # size variants around a believable riding-horse scale.
+        horse.scale=Vector3.ONE*(.86+float(index)*.018)
         _mark_dynamic_geometry(model,true,300.0)
-
-
-func _instantiate_riverwatch_horse_model()->Node3D:
-    var awesome_path:="res://assets/animals/riverwatch_horse_awesome.bkglb"
-
-    if FileAccess.file_exists(awesome_path):
-        var horse_bytes:=FileAccess.get_file_as_bytes(awesome_path)
-
-        if not horse_bytes.is_empty():
-            var document:=GLTFDocument.new()
-            var state:=GLTFState.new()
-
-            var load_error:=document.append_from_buffer(
-                horse_bytes,
-                awesome_path.get_base_dir(),
-                state
-            )
-
-            if load_error==OK:
-                var generated:=document.generate_scene(
-                    state,
-                    30.0,
-                    false,
-                    true
-                )
-
-                if generated is Node3D:
-                    var model:=generated as Node3D
-
-                    model.name="Riverwatch Horse Model AWESOME"
-
-                    model.set_meta(
-                        "broken_knight_runtime_horse",
-                        "awesome_v2"
-                    )
-
-                    return model
-
-            push_warning(
-                "Awesome Riverwatch horse failed direct GLTF load. Error=%s"
-                % [load_error]
-            )
-
-    var fallback:=RIVERWATCH_HORSE_SCENE.instantiate()
-
-    if fallback is Node3D:
-        var fallback_model:=fallback as Node3D
-
-        fallback_model.name="Riverwatch Horse Model FALLBACK"
-
-        fallback_model.set_meta(
-            "broken_knight_runtime_horse",
-            "working_fallback"
-        )
-
-        return fallback_model
-
-    var empty_fallback:=Node3D.new()
-
-    empty_fallback.name="Riverwatch Horse Empty Fallback"
-
-    empty_fallback.set_meta(
-        "broken_knight_runtime_horse",
-        "empty_fallback"
-    )
-
-    return empty_fallback
 
 func _mark_dynamic_geometry(node:Node,skip_static_collision:bool,range_end:float)->void:
     if node is GeometryInstance3D:
@@ -530,10 +892,13 @@ func _build_town_outskirts(root:Node3D,profile:Dictionary,terrain_result:Diction
     var crop_mesh:=_make_ground_cover_mesh()
     var green_crops:Array[Transform3D]=[];var gold_crops:Array[Transform3D]=[]
     var fence_posts:Array[Transform3D]=[];var fence_rails:Array[Transform3D]=[]
+    var avenue_trees:Array=[]
     var post_mesh:=BoxMesh.new();post_mesh.size=Vector3(.24,1.45,.24)
     var rail_mesh:=BoxMesh.new();rail_mesh.size=Vector3.ONE
     var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
     var world_size:float=profile.get("world_size",7200.0)
+    var field_soil:=_make_texture_material("res://assets/terrain/woodland_soil_v1.png",Color(.49,.36,.19),1.0,4.2)
+    var furrow_soil:=_make_texture_material("res://assets/terrain/woodland_soil_v1.png",Color(.27,.19,.10),1.0,2.6)
     for site in profile.get("town_sites",[]):
         var center:Vector2=site.get("position",Vector2.ZERO)
         var radius:float=site.get("radius",140.0)
@@ -551,19 +916,25 @@ func _build_town_outskirts(root:Node3D,profile:Dictionary,terrain_result:Diction
                 var along:float=-radius*.72+float(avenue_step)*radius*.13
                 for side in [-1.0,1.0]:
                     var tree_point:=center+direction*along+normal*float(side)*(road_width*.72+8.0)
-                    _add_tree(root,tree_point,terrain_result,.66+float(avenue_step%2)*.08)
+                    avenue_trees.append({
+                        "position":tree_point,
+                        "scale":.66+float(avenue_step%2)*.08,
+                        "species":"oak" if (avenue_step+int(side>0.0))%3 else "maple",
+                        "yaw":float(avenue_step)*1.17+float(side)*.31,
+                    })
 
         if site.get("capital",false):continue
         var field_length:=46.0;var field_width:=30.0
         for side in [-1.0,1.0]:
             var field_center:=center-direction*radius*.86+normal*float(side)*radius*.60
+            _add_cultivated_field_surface(root,field_center,direction,normal,field_length,field_width,sampler,field_soil,furrow_soil,str(site.get("name","Town")))
             for row in range(6):
                 for column in range(13):
                     var point:=field_center+normal*(float(row)-2.5)*4.0+direction*(float(column)-6.0)*3.45
                     var ground:Vector3=sampler.call(point.x,point.y)
                     var scale_factor:=.72+float((row*5+column)%4)*.09
                     var basis:=Basis(Vector3.UP,float(row+column)*.37).scaled(Vector3(scale_factor*1.05,scale_factor*.85,scale_factor))
-                    var transform:=Transform3D(basis,ground+Vector3.UP*.025)
+                    var transform:=Transform3D(basis,ground+Vector3.UP*.075)
                     if dry or (row+column)%4==0:gold_crops.append(transform)
                     else:green_crops.append(transform)
 
@@ -610,10 +981,90 @@ func _build_town_outskirts(root:Node3D,profile:Dictionary,terrain_result:Diction
                         (rail_a_ground+rail_b_ground)*.5+Vector3.UP*.69,
                         Vector3(0,collision_yaw,0)
                     )
+    # One species-aware batch replaces dozens of separately materialized avenue
+    # trees. They remain individually registered/choppable, but no longer cause
+    # a half-second streaming job when a settlement's outskirts are prepared.
+    _add_forest_batch(root,avenue_trees,terrain_result)
     _add_ground_cover_batch(root,crop_mesh,green_crops,Color(.28,.43,.13,1))
     _add_ground_cover_batch(root,crop_mesh,gold_crops,Color(.54,.43,.13,1))
     _add_multimesh_batch(root,post_mesh,fence_posts,Color(.38,.25,.12,1),false)
     _add_multimesh_batch(root,rail_mesh,fence_rails,Color(.34,.21,.10,1),false)
+
+
+func _add_cultivated_field_surface(
+    root:Node3D,
+    center:Vector2,
+    direction:Vector2,
+    normal:Vector2,
+    length:float,
+    width:float,
+    sampler:Callable,
+    soil:Material,
+    furrow:Material,
+    town_name:String
+)->void:
+    # Follow the actual heightfield instead of laying a flat rectangle over it.
+    # Each fenced plot now reads as cultivated earth even where the terrain has
+    # a gentle grade, and its irregular outer row avoids a pasted-on square.
+    var st:=SurfaceTool.new()
+    st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    var along_steps:=10
+    var across_steps:=6
+    var vertices:Array[Vector3]=[]
+    for across_index in range(across_steps+1):
+        var across_t:=float(across_index)/float(across_steps)
+        for along_index in range(along_steps+1):
+            var along_t:=float(along_index)/float(along_steps)
+            var edge_warp:=sin(float(along_index)*1.71+float(across_index)*.63)*.28
+            var along:=(along_t-.5)*length+edge_warp
+            var across:=(across_t-.5)*width+sin(float(along_index)*.84+float(across_index)*1.39)*.20
+            var point:=center+direction*along+normal*across
+            var ground:Vector3=sampler.call(point.x,point.y)
+            vertices.append(ground+Vector3.UP*.052)
+    for across_index in range(across_steps):
+        for along_index in range(along_steps):
+            var row:=along_steps+1
+            var a:Vector3=vertices[across_index*row+along_index]
+            var b:Vector3=vertices[across_index*row+along_index+1]
+            var c:Vector3=vertices[(across_index+1)*row+along_index]
+            var d:Vector3=vertices[(across_index+1)*row+along_index+1]
+            st.set_uv(Vector2(float(along_index)/3.0,float(across_index)/2.0));st.add_vertex(a)
+            st.set_uv(Vector2(float(along_index+1)/3.0,float(across_index)/2.0));st.add_vertex(b)
+            st.set_uv(Vector2(float(along_index)/3.0,float(across_index+1)/2.0));st.add_vertex(c)
+            st.set_uv(Vector2(float(along_index+1)/3.0,float(across_index)/2.0));st.add_vertex(b)
+            st.set_uv(Vector2(float(along_index+1)/3.0,float(across_index+1)/2.0));st.add_vertex(d)
+            st.set_uv(Vector2(float(along_index)/3.0,float(across_index+1)/2.0));st.add_vertex(c)
+    st.generate_normals()
+    var plot:=MeshInstance3D.new()
+    plot.name="%s Cultivated Field"%town_name
+    plot.mesh=st.commit()
+    plot.material_override=soil
+    plot.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    root.add_child(plot)
+
+    # One batched mesh of narrow, height-following furrows supplies readable
+    # planting rows without turning every row into another scene node.
+    var furrow_st:=SurfaceTool.new()
+    furrow_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    for row_index in range(6):
+        var across:=(float(row_index)-2.5)*4.0
+        for segment_index in range(10):
+            var t0:=float(segment_index)/10.0
+            var t1:=float(segment_index+1)/10.0
+            var p0:=center+normal*across+direction*((t0-.5)*length)
+            var p1:=center+normal*across+direction*((t1-.5)*length)
+            var g0:Vector3=sampler.call(p0.x,p0.y)+Vector3.UP*.076
+            var g1:Vector3=sampler.call(p1.x,p1.y)+Vector3.UP*.076
+            var half_normal:=Vector3(normal.x,0,normal.y)*.18
+            furrow_st.add_vertex(g0-half_normal);furrow_st.add_vertex(g1-half_normal);furrow_st.add_vertex(g0+half_normal)
+            furrow_st.add_vertex(g0+half_normal);furrow_st.add_vertex(g1-half_normal);furrow_st.add_vertex(g1+half_normal)
+    furrow_st.generate_normals()
+    var furrows:=MeshInstance3D.new()
+    furrows.name="%s Field Furrows"%town_name
+    furrows.mesh=furrow_st.commit()
+    furrows.material_override=furrow
+    furrows.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    root.add_child(furrows)
 
 
 func _build_settlement_greenery(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
@@ -734,6 +1185,83 @@ func _build_authored_landmark_sites(root:Node3D,profile:Dictionary,terrain_resul
                     root,Vector3(1.38,1.58,1.08)*scale_value,
                     ground+Vector3.UP*.79*scale_value,Vector3(0,rotation,0)
                 )
+            "ice_spire":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"IceSpire",ground,rotation,float(site.get("scale",1.0)),true,720.0)
+            "moraine_cluster":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"MoraineCluster",ground,rotation,float(site.get("scale",1.0)),true,620.0)
+            "frozen_deadfall":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"FrozenDeadfall",ground,rotation,float(site.get("scale",1.0)),true,330.0)
+            "glacier_terminus":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                var scale_value:=float(site.get("scale",1.0))
+                _add_glacial_environment_piece(root,"GlacierTerminus",ground,rotation,scale_value,true,1800.0)
+                _add_glacial_environment_piece(root,"GlacierTongue",ground,rotation,scale_value,false,1600.0)
+                _add_glacier_source_atmosphere(root,ground,rotation,scale_value)
+            "frostline_refuge":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"FrostlineRefuge",ground,rotation,float(site.get("scale",1.0)),true,980.0)
+            "survey_shelter":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"SurveyShelter",ground,rotation,float(site.get("scale",1.0)),true,720.0)
+            "frozen_observatory":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"FrozenObservatory",ground,rotation,float(site.get("scale",1.0)),true,1250.0)
+            "rimecrawler_nest":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_glacial_environment_piece(root,"RimecrawlerNest",ground,rotation,float(site.get("scale",1.0)),true,760.0)
+            "galehorn_watch":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_western_environment_piece(root,"GalehornWatch",ground,rotation,float(site.get("scale",1.0)),true,1500.0)
+            "rainward_waystation":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_western_environment_piece(root,"RainwardWaystation",ground,rotation,float(site.get("scale",1.0)),true,850.0)
+            "rainward_abbey":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_western_environment_piece(root,"OldRainwardAbbey",ground,rotation,float(site.get("scale",1.0)),true,1450.0)
+            "stormbreak_beacon":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_stormbreak_environment_piece(root,"StormbreakBeacon",ground,rotation,float(site.get("scale",1.0)),true,1700.0)
+            "stormbreak_shelter":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_stormbreak_environment_piece(root,"StormbreakShelter",ground,rotation,float(site.get("scale",1.0)),true,920.0)
+            "stormbreak_ruin":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_stormbreak_environment_piece(root,"ShatteredChoir",ground,rotation,float(site.get("scale",1.0)),true,1500.0)
+            "skeld_lighthouse":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_skeld_environment_piece(root,"CapeKeldLighthouse",ground,rotation,float(site.get("scale",1.0)),true,1900.0)
+            "skeld_dock":
+                var basin_height:=-.60
+                for basin in profile.get("ocean_basins",[]):
+                    if str(basin.get("kind",""))=="coast":basin_height=float(basin.get("water_height",basin_height));break
+                var ground:=Vector3(center.x,basin_height-4.05,center.y)
+                _add_skeld_environment_piece(root,"FrostharborDock",ground,rotation,float(site.get("scale",1.0)),true,1200.0)
+            "skeld_boat":
+                var boat_water_height:=-.60
+                for basin in profile.get("ocean_basins",[]):
+                    if str(basin.get("kind",""))=="coast":boat_water_height=float(basin.get("water_height",boat_water_height));break
+                var boat_ground:=Vector3(center.x,boat_water_height-.15,center.y)
+                _add_skeld_environment_piece(root,"SkeldFishingBoat",boat_ground,rotation,float(site.get("scale",1.0)),true,1100.0,str(site.get("name","Skeld Fishing Boat")))
+            "skeld_chapel":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_skeld_environment_piece(root,"WhaleboneChapel",ground,rotation,float(site.get("scale",1.0)),true,1450.0)
+            "skeld_longhouse":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_skeld_environment_piece(root,"SkeldLonghouse",ground,rotation,float(site.get("scale",1.0)),true,980.0,str(site.get("name","Skeld Longhouse")))
+            "cinderwatch_beacon":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_eastern_environment_piece(root,"CinderwatchBeacon",ground,rotation,float(site.get("scale",1.0)),true,1900.0,str(site.get("name","Cinderwatch Beacon")))
+            "cinderwatch_signal_yard":
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)
+                _add_eastern_environment_piece(root,"CinderwatchSignalYard",ground,rotation,float(site.get("scale",1.0)),true,920.0,str(site.get("name","Cinderwatch Signal Yard")))
+            "embercrag_crown":
+                # The crown spans a steep summit; sink its long column bases
+                # into the mountain so no outer spire can read as floating.
+                var ground:Vector3=terrain_sampler.call(center.x,center.y)-Vector3.UP*7.5
+                _add_eastern_environment_piece(root,"EmbercragBasaltCrown",ground,rotation,float(site.get("scale",1.0)),true,2200.0,str(site.get("name","Embercrag Basalt Crown")))
             _:
                 # Detailed authored outcrops are built and batched by
                 # _build_highland_outcrop_clusters. Do not stack the former
@@ -844,28 +1372,97 @@ func _add_roadside_shrine(root:Node3D,point:Vector2,yaw:float,terrain_result:Dic
 func _build_regional_town(root: Node3D, site: Dictionary, terrain_result: Dictionary,roads:Array) -> void:
     var center: Vector2 = site.get("position", Vector2.ZERO)
     var radius: float = site.get("radius", 135.0)
-    _add_market_square(root, center, terrain_result, 1.15)
-    var house_count := 14
+    var architecture_set:=str(site.get("architecture_set",""))
+    _add_market_square(root,center,terrain_result,1.15,true,architecture_set)
     var occupied:Array[Dictionary]=[]
-    for i in range(house_count):
-        var ring := radius * (0.37 if i < 7 else 0.62)
-        var angle := float(i % 7) * TAU / 7.0 + (0.18 if i < 7 else 0.55)
-        var point := center + Vector2(cos(angle), sin(angle)) * ring
+    _build_regional_town_house_range(root,site,terrain_result,roads,0,14,occupied)
+    # A larger inn anchors each settlement and breaks the repeated-house look.
+    var inn_point := center + Vector2(radius * 0.18, radius * 0.28)
+    inn_point=_clear_house_from_roads(inn_point,10.0,roads)
+    inn_point=_separate_house_plot(inn_point,10.0,occupied,center)
+    _add_enterable_house(root,terrain_result.height_sampler.call(inn_point.x,inn_point.y),PI,18.0,12.0,8.4,20,architecture_set)
+    _add_town_well(root, center + Vector2(-34.0, 4.0), terrain_result)
+    _add_town_boundary(root,center,radius*.78,terrain_result,architecture_set)
+    _add_town_name_marker(root, str(site.get("name", "Town")), center + Vector2(0, radius * 0.70), terrain_result)
+
+
+func _build_regional_town_house_range(root:Node3D,site:Dictionary,terrain_result:Dictionary,roads:Array,start_index:int,end_index:int,occupied:Array[Dictionary])->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var radius:float=float(site.get("radius",135.0))
+    var architecture_set:=str(site.get("architecture_set",""))
+    for i in range(start_index,end_index):
+        var angle:=float(i%7)*TAU/7.0+(.18 if i<7 else .55)
+        var point:Vector2
+        var house_yaw:=angle+PI
+        if architecture_set=="icewatch_hold":
+            # Two close, offset rows form a defensible pass settlement and
+            # preserve a broad north/south street through the hold.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(side*(48.0+float(abs(row_index)%2)*9.0),float(row_index)*31.0+side*5.0)
+            house_yaw=-PI*.5*side
+        elif architecture_set=="rimegate_lodge":
+            # Rimegate follows the moraine terrace in staggered working rows,
+            # not the same ceremonial ring used by lowland market towns.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(side*(42.0+float((i*5)%3)*8.0),float(row_index)*34.0+sin(float(i)*1.7)*7.0)
+            house_yaw=-PI*.5*side+sin(float(i)*.91)*.08
+        elif architecture_set=="rainward_timber":
+            # Oakrest and Rainhaven use two irregular working-street rows,
+            # with doors facing the road rather than another lowland ring.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(float(row_index)*34.0+sin(float(i)*1.37)*6.0,side*(43.0+float((i*5)%3)*7.0))
+            house_yaw=0.0 if side<0.0 else PI
+        elif architecture_set=="rainward_stone":
+            # Stonecross follows a narrow quarry terrace in staggered inward-
+            # facing rows, leaving its centre open for carts and stone loads.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(side*(39.0+float(i%3)*7.0),float(row_index)*32.0+sin(float(i)*1.11)*5.0)
+            house_yaw=-PI*.5*side
+        elif architecture_set=="stormbreak_highland":
+            # Highland homes huddle in two offset crescents behind their
+            # windbreak, leaving one broad, visible street through each town.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(float(row_index)*35.0+sin(float(i)*1.29)*7.0,side*(44.0+float((i*3)%4)*5.5))
+            house_yaw=0.0 if side<0.0 else PI
+        elif architecture_set=="skeld_coast":
+            # Coastal houses form staggered lee-side rows. Their gables face
+            # the prevailing sea wind while a broad lane remains open between
+            # harbor, market and inland road.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(side*(46.0+float((i*7)%3)*7.0),float(row_index)*35.0+sin(float(i)*1.43)*6.0)
+            house_yaw=-PI*.5*side
+        elif architecture_set=="marcher_stone":
+            # Customs towns and fortified wards use staggered rows along one
+            # broad caravan street. The southern ward remains clear for each
+            # settlement's authored gatehouse/keep instead of being filled by
+            # a generic ring of copied houses.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(float(row_index)*36.0+sin(float(i)*1.31)*5.0,side*(48.0+float((i*5)%3)*6.0))
+            house_yaw=0.0 if side<0.0 else PI
+        elif architecture_set=="marcher_timber":
+            # Market and salt-meadow houses follow irregular working lanes,
+            # leaving the windmill/granary edge of town open and readable.
+            var side:=-1.0 if i%2==0 else 1.0
+            var row_index:=int(i/2)-3
+            point=center+Vector2(float(row_index)*34.0+sin(float(i)*1.57)*7.0,side*(45.0+float((i*3)%4)*5.0))
+            house_yaw=0.0 if side<0.0 else PI
+        else:
+            var ring:=radius*(.37 if i<7 else .62)
+            point=center+Vector2(cos(angle),sin(angle))*ring
         var house_width:=10.0+float(i%3)*1.8
         var house_depth:=8.5+float((i+1)%2)*2.0
         point=_clear_house_from_roads(point,maxf(house_width,house_depth)*.55,roads)
         point=_separate_house_plot(point,maxf(house_width,house_depth)*.62,occupied,center)
         occupied.append({"position":point,"radius":maxf(house_width,house_depth)*.62})
         var ground: Vector3 = terrain_result.height_sampler.call(point.x, point.y)
-        _add_enterable_house(root, ground, angle + PI,house_width,house_depth, 6.6 + float(i % 4) * 0.55, i)
-    # A larger inn anchors each settlement and breaks the repeated-house look.
-    var inn_point := center + Vector2(radius * 0.18, radius * 0.28)
-    inn_point=_clear_house_from_roads(inn_point,10.0,roads)
-    inn_point=_separate_house_plot(inn_point,10.0,occupied,center)
-    _add_enterable_house(root, terrain_result.height_sampler.call(inn_point.x, inn_point.y), PI, 18.0, 12.0, 8.4, 20)
-    _add_town_well(root, center + Vector2(-34.0, 4.0), terrain_result)
-    _add_town_boundary(root, center, radius * 0.78, terrain_result)
-    _add_town_name_marker(root, str(site.get("name", "Town")), center + Vector2(0, radius * 0.70), terrain_result)
+        _add_enterable_house(root,ground,house_yaw,house_width,house_depth,6.6+float(i%4)*.55,i,architecture_set)
 
 
 func _build_capital_city(root: Node3D, site: Dictionary, terrain_result: Dictionary,roads:Array) -> void:
@@ -995,11 +1592,15 @@ func _build_capital_street_furniture(root:Node3D,center:Vector2,terrain_result:D
     var gate_ground:Vector3=sampler.call(center.x,center.y+184.0)
     for side in [-1.0,1.0]:
         var x:=19.0*float(side)
-        _visual_box(root,Vector3(.28,8.5,.28),gate_ground+Vector3(x,4.25,0),iron)
+        # One continuous standard and a connected crossarm carry each banner.
+        # The former separate gold strip had no contact with the ground or arm
+        # and was the floating block visible just inside the capital gate.
+        _solid_box(root,Vector3(.34,8.5,.34),gate_ground+Vector3(x,4.25,0),iron)
+        _visual_box(root,Vector3(2.20,.24,.28),gate_ground+Vector3(x-1.05*float(side),8.12,0),iron)
         var banner_center:=gate_ground+Vector3(x-1.65*float(side),6.0,-.12)
         _visual_box(root,Vector3(3.2,4.6,.18),banner_center,royal)
         _add_broken_crown_crest(root,banner_center+Vector3(0,0,-.13),.86,gold)
-        _visual_box(root,Vector3(.22,4.9,.24),gate_ground+Vector3(x,6.0,-.18),gold)
+        _visual_box(root,Vector3(.18,.30,.30),gate_ground+Vector3(x-2.05*float(side),8.12,0),gold)
 
 
 func _add_broken_crown_crest(root:Node3D,center:Vector3,scale_factor:float,gold:Material)->void:
@@ -1038,8 +1639,25 @@ func _add_city_walls(root: Node3D, center: Vector2, half_extent: float, terrain_
         _add_battlements(root, center_ground + Vector3(corner.x, 15.3, corner.y), 13.0, 13.0, wall_mat)
 
 
-func _add_town_boundary(root: Node3D, center: Vector2, radius: float, terrain_result: Dictionary) -> void:
-    var timber := _make_texture_material("res://assets/architecture/dark_oak_v1.png", Color(0.68, 0.58, 0.46), 0.98, 2.0)
+func _add_town_boundary(root: Node3D, center: Vector2, radius: float, terrain_result: Dictionary, architecture_set:String="") -> void:
+    var stone_boundary:=architecture_set in ["icewatch_hold","rimegate_lodge","rainward_stone","stormbreak_highland","skeld_coast","marcher_stone"]
+    var boundary_tint:=Color(0.68,0.58,0.46)
+    if architecture_set in ["icewatch_hold","rimegate_lodge"]:boundary_tint=Color(.44,.47,.47)
+    elif architecture_set=="skeld_coast":boundary_tint=Color(.61,.68,.66)
+    elif architecture_set=="stormbreak_highland":boundary_tint=Color(.57,.60,.55)
+    elif architecture_set=="rainward_stone":boundary_tint=Color(.68,.72,.63)
+    elif architecture_set=="rainward_timber":boundary_tint=Color(.64,.48,.29)
+    elif architecture_set=="marcher_stone":boundary_tint=Color(.64,.55,.39)
+    elif architecture_set=="marcher_timber":boundary_tint=Color(.50,.32,.17)
+    var timber := _make_texture_material(
+        "res://assets/architecture/castle_stone_v1.png" if stone_boundary else "res://assets/architecture/dark_oak_v1.png",
+        boundary_tint,
+        1.0 if stone_boundary else .98,2.4
+    )
+    var boundary_root:=Node3D.new()
+    boundary_root.name="%s Town Boundary"%architecture_set.capitalize()
+    boundary_root.set_meta("batch_static_collision",true)
+    root.add_child(boundary_root)
     var segments:=48
     var segment_length:=TAU*radius/float(segments)
     for i in range(segments):
@@ -1050,11 +1668,37 @@ func _add_town_boundary(root: Node3D, center: Vector2, radius: float, terrain_re
         var angle := float(i) * TAU / float(segments)
         var p2 := center + Vector2(cos(angle), sin(angle)) * radius
         var p3: Vector3 = terrain_result.height_sampler.call(p2.x, p2.y)
-        _visual_box(root, Vector3(0.32, 2.2, segment_length+.45), p3 + Vector3(0, 1.1, 0), timber).rotation.y = -angle
+        if architecture_set in ["rainward_timber","marcher_timber"]:
+            # Rain-country settlements use an open split-rail fence.  The old
+            # continuous 2.2 m slab read as a black ribbon from every approach
+            # and made an otherwise open timber town feel walled off.
+            for rail_y in [.72,1.46]:
+                _solid_box_euler(
+                    boundary_root,Vector3(.22,.22,segment_length+.42),
+                    p3+Vector3(0,rail_y,0),Vector3(0,-angle,0),timber
+                )
+            _solid_box(boundary_root,Vector3(.42,2.05,.42),p3+Vector3(0,1.025,0),timber)
+        elif architecture_set in ["stormbreak_highland","skeld_coast","marcher_stone"]:
+            # Waist-high dry-stone walls define grazing yards without turning
+            # an upland or coastal settlement into a fortress.
+            _solid_box_euler(
+                boundary_root,Vector3(.76,1.28 if architecture_set=="skeld_coast" else (1.05 if architecture_set=="marcher_stone" else 1.18),segment_length+.55),
+                p3+Vector3(0,.64 if architecture_set=="skeld_coast" else (.525 if architecture_set=="marcher_stone" else .59),0),Vector3(0,-angle,0),timber
+            )
+        else:
+            _solid_box_euler(
+                boundary_root,Vector3(0.32,2.2,segment_length+.45),
+                p3+Vector3(0,1.1,0),Vector3(0,-angle,0),timber
+            )
 
 
-func _add_market_square(root: Node3D, center: Vector2, terrain_result: Dictionary, scale_factor: float = 1.0, draw_plaza:bool=true) -> void:
+func _add_market_square(root: Node3D, center: Vector2, terrain_result: Dictionary, scale_factor: float = 1.0, draw_plaza:bool=true, architecture_set:String="") -> void:
     var ground: Vector3 = terrain_result.height_sampler.call(center.x, center.y)
+    var cold_market:=architecture_set in ["icewatch_hold","rimegate_lodge"]
+    var rainward_market:=architecture_set in ["rainward_timber","rainward_stone"]
+    var stormbreak_market:=architecture_set=="stormbreak_highland"
+    var skeld_market:=architecture_set=="skeld_coast"
+    var marcher_market:=architecture_set in ["marcher_stone","marcher_timber"]
     var plaza_mesh := CylinderMesh.new()
     plaza_mesh.top_radius = 24.0 * scale_factor
     plaza_mesh.bottom_radius = 25.0 * scale_factor
@@ -1063,22 +1707,40 @@ func _add_market_square(root: Node3D, center: Vector2, terrain_result: Dictionar
         var plaza := MeshInstance3D.new()
         plaza.mesh = plaza_mesh
         plaza.position = ground + Vector3.UP * 0.08
-        plaza.material_override = _make_texture_material("res://assets/architecture/town_cobblestone_v1.png", Color(0.86, 0.82, 0.74), 1.0, 11.0)
+        var plaza_tint:=Color(0.86,0.82,0.74)
+        if skeld_market:plaza_tint=Color(.50,.57,.56)
+        elif cold_market:plaza_tint=Color(.55,.58,.57)
+        elif stormbreak_market:plaza_tint=Color(.47,.50,.47)
+        elif rainward_market:plaza_tint=Color(.51,.53,.45)
+        elif marcher_market:plaza_tint=Color(.64,.56,.40)
+        plaza.material_override = _make_texture_material("res://assets/architecture/town_cobblestone_v1.png",plaza_tint,1.0,11.0)
         root.add_child(plaza)
         plaza.create_trimesh_collision()
-    for i in range(6):
-        var angle := float(i) * TAU / 6.0
+    var stall_count:=5 if skeld_market or rainward_market or marcher_market else (4 if cold_market or stormbreak_market else 6)
+    for i in range(stall_count):
+        var angle := float(i) * TAU / float(stall_count)
         var local := Vector3(cos(angle) * 17.0 * scale_factor, 0, sin(angle) * 17.0 * scale_factor)
         var stall := Node3D.new()
         stall.set_meta("batch_static_collision",true)
         stall.position = ground + local
         stall.rotation.y = -angle
         root.add_child(stall)
-        var stall_wood := _make_texture_material("res://assets/architecture/dark_oak_v1.png", Color(0.78, 0.61, 0.43), 0.96, 2.0)
+        var stall_tint:=Color(.78,.61,.43)
+        if skeld_market:stall_tint=Color(.33,.25,.20)
+        elif cold_market:stall_tint=Color(.39,.31,.24)
+        elif stormbreak_market:stall_tint=Color(.38,.28,.18)
+        elif rainward_market:stall_tint=Color(.43,.32,.20)
+        elif marcher_market:stall_tint=Color(.38,.22,.10)
+        var stall_wood := _make_texture_material("res://assets/architecture/dark_oak_v1.png",stall_tint,.98,2.0)
         _solid_box(stall, Vector3(5.4, 0.20, 3.2), Vector3(0, 0.75, 0), stall_wood)
         for x in [-2.35, 2.35]:
             _solid_box(stall, Vector3(0.16, 2.7, 0.16), Vector3(x, 1.35, 0), stall_wood)
-        var canopy_color := Color(0.56, 0.12, 0.08) if i % 3 == 0 else (Color(0.10, 0.27, 0.50) if i % 3 == 1 else Color(0.52, 0.39, 0.09))
+        var canopy_color:=Color(0.56,0.12,0.08) if i%3==0 else (Color(0.10,0.27,0.50) if i%3==1 else Color(0.52,0.39,0.09))
+        if skeld_market:canopy_color=Color(.20,.34,.38) if i%2==0 else Color(.47,.42,.30)
+        elif cold_market:canopy_color=Color(.24,.31,.34) if i%2==0 else Color(.41,.34,.27)
+        elif stormbreak_market:canopy_color=Color(.29,.34,.32) if i%2==0 else Color(.42,.36,.25)
+        elif rainward_market:canopy_color=Color(.22,.34,.24) if i%2==0 else Color(.47,.37,.17)
+        elif marcher_market:canopy_color=Color(.64,.20,.08) if i%2==0 else Color(.82,.62,.22)
         _visual_box(stall, Vector3(5.8, 0.22, 3.6), Vector3(0, 2.65, 0), _make_material(canopy_color, 0.90))
     for i in range(4):
         var angle := float(i) * TAU / 4.0 + PI * 0.25
@@ -1170,7 +1832,7 @@ func _add_town_well(root: Node3D, center: Vector2, terrain_result: Dictionary) -
     _visual_box(root, Vector3(0.24, 0.24, 5.2), ground + Vector3(0, 3.35, 0), timber)
 
 
-func _add_enterable_house(root: Node3D, ground: Vector3, yaw: float, width: float, depth: float, height: float, style: int = 0) -> void:
+func _add_enterable_house(root: Node3D, ground: Vector3, yaw: float, width: float, depth: float, height: float, style: int = 0, architecture_set:String="") -> void:
     var house := Node3D.new()
     house.name="House_%02d_Family_%d"%[style,style%6]
     house.set_meta("batch_static_collision",true)
@@ -1185,16 +1847,47 @@ func _add_enterable_house(root: Node3D, ground: Vector3, yaw: float, width: floa
     house.set_meta("architecture_width",width)
     house.set_meta("architecture_depth",depth)
     house.set_meta("architecture_height",height)
+    house.set_meta("architecture_set",architecture_set)
     var plaster_colors := [
         Color(0.76,0.62,0.44),Color(0.60,0.52,0.43),Color(0.82,0.74,0.57),
         Color(0.57,0.49,0.43),Color(0.65,0.68,0.58),Color(0.72,0.52,0.43),
     ]
-    var wall_mat := _make_texture_material("res://assets/architecture/aged_plaster_v1.png", plaster_colors[style % plaster_colors.size()], 0.98, 2.5)
+    var wall_texture:="res://assets/architecture/aged_plaster_v1.png"
+    var wall_tint:Color=plaster_colors[style%plaster_colors.size()]
+    if architecture_set=="icewatch_hold":
+        wall_texture="res://assets/architecture/castle_stone_v1.png"
+        wall_tint=[Color(.47,.51,.51),Color(.38,.43,.44),Color(.55,.56,.53)][style%3]
+    elif architecture_set=="rimegate_lodge":
+        wall_tint=[Color(.52,.56,.54),Color(.43,.49,.49),Color(.60,.59,.53)][style%3]
+    elif architecture_set=="rainward_timber":
+        wall_tint=[Color(.82,.77,.59),Color(.70,.75,.61),Color(.88,.80,.58)][style%3]
+    elif architecture_set=="rainward_stone":
+        wall_texture="res://assets/architecture/castle_stone_v1.png"
+        wall_tint=[Color(.75,.78,.69),Color(.65,.70,.62),Color(.82,.78,.64)][style%3]
+    elif architecture_set=="stormbreak_highland":
+        wall_texture="res://assets/architecture/castle_stone_v1.png"
+        wall_tint=[Color(1.05,1.08,1.00),Color(.88,.96,.94),Color(1.12,1.07,.90)][style%3]
+    elif architecture_set=="skeld_coast":
+        wall_texture="res://assets/architecture/castle_stone_v1.png"
+        wall_tint=[Color(.76,.85,.83),Color(.67,.78,.78),Color(.88,.86,.72)][style%3]
+    elif architecture_set=="marcher_stone":
+        wall_texture="res://assets/architecture/castle_stone_v1.png"
+        wall_tint=[Color(.86,.74,.52),Color(.72,.64,.48),Color(.93,.80,.57)][style%3]
+    elif architecture_set=="marcher_timber":
+        wall_tint=[Color(.84,.67,.39),Color(.75,.56,.31),Color(.91,.74,.46)][style%3]
+    var wall_mat := _make_texture_material(wall_texture,wall_tint,.99,2.8 if architecture_set=="icewatch_hold" else 2.5)
     var beam_tints:=[Color(.58,.42,.28),Color(.45,.31,.20),Color(.67,.49,.30)]
-    var beam_mat := _make_texture_material("res://assets/architecture/dark_oak_v1.png",beam_tints[style%beam_tints.size()],1.0,2.0)
+    var beam_tint:Color=Color(.30,.26,.22) if architecture_set in ["icewatch_hold","rimegate_lodge"] else (Color(.34,.26,.21) if architecture_set=="skeld_coast" else (Color(.42,.30,.19) if architecture_set=="stormbreak_highland" else (Color(.51,.36,.21) if architecture_set in ["rainward_timber","rainward_stone"] else beam_tints[style%beam_tints.size()])))
+    if architecture_set in ["marcher_stone","marcher_timber"]:beam_tint=Color(.35,.20,.09)
+    var beam_mat := _make_texture_material("res://assets/architecture/dark_oak_v1.png",beam_tint,1.0,2.0)
     var roof_colors := [Color(.56,.23,.13),Color(.39,.28,.16),Color(.27,.32,.29),Color(.47,.19,.10)]
-    var roof_mat := _make_texture_material("res://assets/architecture/clay_roof_v1.png",roof_colors[style%roof_colors.size()],.96,3.0)
-    var foundation := _make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.58,.57,.53),1.0,3.0)
+    var roof_tint:Color=[Color(.20,.25,.27),Color(.29,.30,.29),Color(.25,.29,.31)][style%3] if architecture_set in ["icewatch_hold","rimegate_lodge"] else ([Color(.25,.37,.40),Color(.31,.42,.43),Color(.20,.31,.35)][style%3] if architecture_set=="skeld_coast" else ([Color(.34,.40,.40),Color(.42,.44,.40),Color(.29,.36,.37)][style%3] if architecture_set=="stormbreak_highland" else ([Color(.45,.55,.48),Color(.53,.56,.47),Color(.39,.49,.47)][style%3] if architecture_set in ["rainward_timber","rainward_stone"] else roof_colors[style%roof_colors.size()])))
+    if architecture_set in ["marcher_stone","marcher_timber"]:roof_tint=[Color(.62,.22,.09),Color(.49,.16,.065),Color(.72,.31,.11)][style%3]
+    var roof_texture:="res://assets/terrain/highland_stone_v1.png" if architecture_set in ["rainward_timber","rainward_stone","stormbreak_highland","skeld_coast"] else "res://assets/architecture/clay_roof_v1.png"
+    var roof_mat := _make_texture_material(roof_texture,roof_tint,.98,3.0)
+    var foundation_tint:=Color(.42,.46,.46) if architecture_set in ["icewatch_hold","rimegate_lodge"] else (Color(.58,.67,.66) if architecture_set=="skeld_coast" else (Color(.82,.86,.82) if architecture_set=="stormbreak_highland" else (Color(.69,.71,.64) if architecture_set in ["rainward_timber","rainward_stone"] else Color(.58,.57,.53))))
+    if architecture_set in ["marcher_stone","marcher_timber"]:foundation_tint=Color(.49,.43,.34)
+    var foundation := _make_texture_material("res://assets/architecture/castle_stone_v1.png",foundation_tint,1.0,3.0)
     var thick := 0.45
     var door_w := 2.25
     var door_h := 3.1
@@ -1227,7 +1920,7 @@ func _add_enterable_house(root: Node3D, ground: Vector3, yaw: float, width: floa
     _add_working_house_door(house,door_w,door_h,depth,beam_mat,door_x)
     for x in [-width * 0.5, width * 0.5]:
         _visual_box(house, Vector3(0.30, height + 0.25, 0.30), Vector3(x, height * 0.5, depth * 0.51), beam_mat)
-    _add_house_roof_profile(house,width,depth,height,family,wall_mat,beam_mat,roof_mat)
+    _add_house_roof_profile(house,width,depth,height,family,wall_mat,beam_mat,roof_mat,architecture_set)
     _visual_box(house, Vector3(width - 0.7, 0.16, depth - 0.7), Vector3(0, 0.01, 0), beam_mat)
     # The foundation follows the actual shell and stops at the doorway instead
     # of forming the old stone bar across the entrance.
@@ -1256,27 +1949,75 @@ func _add_house_window_frame(root:Node3D,center:Vector3,timber:Material,back_fac
     _add_architecture_detail(root,"HouseWindowSurround",center,Vector3.ONE,timber,Vector3(0,PI if back_facing else 0.0,0),92.0)
 
 
-func _add_house_roof_profile(house:Node3D,width:float,depth:float,height:float,family:int,wall:Material,timber:Material,roof:Material)->void:
+func _add_house_roof_profile(house:Node3D,width:float,depth:float,height:float,family:int,wall:Material,timber:Material,roof:Material,architecture_set:String="")->void:
+    if architecture_set in ["icewatch_hold","rimegate_lodge"]:
+        # High joined gables shed snow and give the two glacial settlements a
+        # silhouette that cannot be mistaken for Riverwatch's low clay roofs.
+        var snow_rise:=3.45 if architecture_set=="icewatch_hold" else 3.05
+        _add_clean_gabled_roof(house,width,depth,height,snow_rise,roof,timber)
+        _add_house_gables(house,width,depth,height,wall,timber)
+        var chimney_x:=width*(-.30 if family%2 else .28)
+        _visual_box(house,Vector3(1.02,3.6,1.02),Vector3(chimney_x,height+1.55,-depth*.19),_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.38,.40,.39),1.0,2.5))
+        return
+    if architecture_set in ["rainward_timber","rainward_stone"]:
+        # Steep slate gables and offset stone chimneys give the rain country a
+        # distinct silhouette while preserving the enterable house shell.
+        var rise:=3.15 if architecture_set=="rainward_timber" else 2.65
+        _add_clean_gabled_roof(house,width,depth,height,rise,roof,timber)
+        _add_house_gables(house,width,depth,height,wall,timber)
+        var chimney_x:=width*(-.31 if family%2 else .30)
+        _visual_box(house,Vector3(1.0,3.5,1.0),Vector3(chimney_x,height+1.55,-depth*.18),_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.39,.42,.36),1.0,2.6))
+        return
+    if architecture_set=="marcher_stone":
+        # Broad joined terracotta hips distinguish the dry stone customs towns
+        # from northern gables while still closing every side of the house.
+        var roof_mesh:=CylinderMesh.new();roof_mesh.top_radius=.08;roof_mesh.bottom_radius=1.0;roof_mesh.height=2.8;roof_mesh.radial_segments=4
+        var hip:=MeshInstance3D.new();hip.name="MarcherHippedRoof";hip.mesh=roof_mesh;hip.position=Vector3(0,height+1.30,0);hip.rotation.y=PI*.25;hip.scale=Vector3(width*.72,1.0,depth*.72);hip.material_override=roof;house.add_child(hip)
+        var chimney_x:=width*(-.29 if family%2 else .28)
+        _visual_box(house,Vector3(1.0,3.4,1.0),Vector3(chimney_x,height+1.40,-depth*.16),_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.48,.42,.32),1.0,2.6))
+        return
+    if architecture_set=="marcher_timber":
+        var rise:=2.75 if family%2==0 else 2.45
+        _add_clean_gabled_roof(house,width,depth,height,rise,roof,timber)
+        _add_house_gables(house,width,depth,height,wall,timber)
+        var chimney_x:=width*(-.30 if family%2 else .29)
+        _visual_box(house,Vector3(.96,3.25,.96),Vector3(chimney_x,height+1.42,-depth*.18),_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.49,.42,.31),1.0,2.6))
+        return
+    if architecture_set=="skeld_coast":
+        # Low, steep slate gables and broad stone chimneys resist maritime
+        # wind while remaining distinct from both Icewatch and Stormbreak.
+        var rise:=3.25 if family%2==0 else 2.95
+        _add_clean_gabled_roof(house,width,depth,height,rise,roof,timber)
+        _add_house_gables(house,width,depth,height,wall,timber)
+        var chimney_x:=width*(-.32 if family%2 else .31)
+        _visual_box(house,Vector3(1.22,3.65,1.22),Vector3(chimney_x,height+1.52,-depth*.15),_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.43,.49,.48),1.0,2.7))
+        return
+    if architecture_set=="stormbreak_highland":
+        var rise:=3.45 if family%2==0 else 3.10
+        _add_clean_gabled_roof(house,width,depth,height,rise,roof,timber)
+        _add_house_gables(house,width,depth,height,wall,timber)
+        var chimney_x:=width*(-.30 if family%2 else .29)
+        _visual_box(house,Vector3(1.12,3.8,1.12),Vector3(chimney_x,height+1.62,-depth*.16),_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.35,.39,.38),1.0,2.8))
+        return
     match family:
         1:
             # Broad four-sided roof gives crofts and alehouses a low, sturdy silhouette.
             var roof_mesh:=CylinderMesh.new();roof_mesh.top_radius=.08;roof_mesh.bottom_radius=1.0;roof_mesh.height=3.0;roof_mesh.radial_segments=4
             var hip:=MeshInstance3D.new();hip.name="HippedRoof";hip.mesh=roof_mesh;hip.position=Vector3(0,height+1.38,0);hip.rotation.y=PI*.25;hip.scale=Vector3(width*.72,1.0,depth*.72);hip.material_override=roof;house.add_child(hip)
         3:
-            # Merchant houses use a shallow hipped roof and raised ridge cap,
-            # replacing the old flat rectangular lid.
+            # Merchant houses use a shallow, self-supporting hipped roof. The
+            # former oversized ridge-cap box floated above its point and read as
+            # an unattached slab, so the clean hip now terminates naturally.
             var merchant_mesh:=CylinderMesh.new();merchant_mesh.top_radius=.10;merchant_mesh.bottom_radius=1.0;merchant_mesh.height=2.6;merchant_mesh.radial_segments=4
             var merchant_roof:=MeshInstance3D.new();merchant_roof.name="MerchantHippedRoof";merchant_roof.mesh=merchant_mesh;merchant_roof.position=Vector3(0,height+1.20,0);merchant_roof.rotation.y=PI*.25;merchant_roof.scale=Vector3(width*.72,1.0,depth*.72);merchant_roof.material_override=roof;house.add_child(merchant_roof)
-            _visual_box(house,Vector3(width*.34,.34,depth*.34),Vector3(0,height+2.55,0),timber)
         2:
-            var tall_side:=_visual_box(house,Vector3(width*.66,.50,depth+.9),Vector3(-width*.19,height+1.18,0),roof);tall_side.rotation.z=.42
-            var long_side:=_visual_box(house,Vector3(width*.48,.50,depth+.9),Vector3(width*.34,height+.86,0),roof);long_side.rotation.z=-.27
+            # The old mismatched lean-to panels left one eave high, one eave
+            # short, and could read as a partly missing roof. The workshop keeps
+            # its side annex below, while the main shell gets one closed gable.
+            _add_clean_gabled_roof(house,width,depth,height,2.30,roof,timber)
             _add_house_gables(house,width,depth,height,wall,timber)
         _:
-            var roof_angle:=.35 if family!=5 else .42
-            var roof_y:=height+1.18
-            var left_roof:=_visual_box(house,Vector3(width*.56,.50,depth+.9),Vector3(-width*.235,roof_y,0),roof);left_roof.rotation.z=roof_angle
-            var right_roof:=_visual_box(house,Vector3(width*.56,.50,depth+.9),Vector3(width*.235,roof_y,0),roof);right_roof.rotation.z=-roof_angle
+            _add_clean_gabled_roof(house,width,depth,height,2.30 if family!=5 else 2.55,roof,timber)
             _add_house_gables(house,width,depth,height,wall,timber)
             if family==5:
                 # Two small dormers make the tall inn/townhouse profile legible.
@@ -1286,6 +2027,23 @@ func _add_house_roof_profile(house:Node3D,width:float,depth:float,height:float,f
     var chimney_x:=width*(.27 if family%2==0 else -.31)
     _visual_box(house,Vector3(.88,3.25,.88),Vector3(chimney_x,height+1.38,-depth*.18),_make_material(Color(.29,.27,.24),1.0))
     _visual_box(house,Vector3(1.06,.24,1.06),Vector3(chimney_x,height+3.02,-depth*.18),timber)
+
+
+func _add_clean_gabled_roof(house:Node3D,width:float,depth:float,height:float,rise:float,roof:Material,timber:Material)->void:
+    # Exact run/rise construction makes both roof planes meet at one ridge and
+    # puts both eaves at the same wall height. This removes the exposed ceiling
+    # wedges and odd floating panels seen on several house families.
+    var half_run:=width*.5+.52
+    var panel_length:=sqrt(half_run*half_run+rise*rise)
+    var angle:=atan2(rise,half_run)
+    var center_y:=height+rise*.5
+    var left:=_visual_box(house,Vector3(panel_length,.34,depth+1.10),Vector3(-half_run*.5,center_y,0),roof)
+    left.name="JoinedGableRoofLeft"
+    left.rotation.z=angle
+    var right:=_visual_box(house,Vector3(panel_length,.34,depth+1.10),Vector3(half_run*.5,center_y,0),roof)
+    right.name="JoinedGableRoofRight"
+    right.rotation.z=-angle
+    _visual_box(house,Vector3(.30,.32,depth+1.16),Vector3(0,height+rise,0),timber).name="SupportedRoofRidge"
 
 
 func _add_house_facade_details(house:Node3D,width:float,depth:float,height:float,family:int,door_x:float,door_height:float)->void:
@@ -1353,7 +2111,24 @@ func _add_attached_house_sign(house:Node3D,width:float,depth:float,height:float,
 func _add_house_upper_storey(house:Node3D,width:float,depth:float,height:float,timber:Material,wall:Material,style:int)->void:
     var floor_y:=height*.50
     house.set_meta("upper_floor_y",floor_y)
-    var hole:=Rect2(width*.08,-depth*.35,width*.28,depth*.58)
+    # A player-width stairwell with a generous head-clearance run. The previous
+    # opening only barely exceeded the ramp width, so the capsule or nearby
+    # furniture could make a visibly present staircase functionally blocked.
+    var stair_x:=width*.22
+    var stair_width:=minf(2.35,width*.25)
+    var start_z:=depth*.33
+    var end_z:=-depth*.27
+    var hole:=Rect2(
+        stair_x-stair_width*.78,
+        end_z-depth*.115,
+        stair_width*1.56,
+        (start_z-end_z)+depth*.20
+    )
+    house.set_meta("stair_opening_rect",hole)
+    house.set_meta("stair_width",stair_width)
+    house.set_meta("stair_x",stair_x)
+    house.set_meta("stair_start_z",start_z)
+    house.set_meta("stair_end_z",end_z)
     var x_cuts:Array=[-width*.5+.35,hole.position.x,hole.end.x,width*.5-.35]
     var z_cuts:Array=[-depth*.5+.35,hole.position.y,hole.end.y,depth*.5-.35]
     for xi in range(x_cuts.size()-1):
@@ -1362,22 +2137,20 @@ func _add_house_upper_storey(house:Node3D,width:float,depth:float,height:float,t
             var midpoint:=Vector2((x0+x1)*.5,(z0+z1)*.5)
             if hole.has_point(midpoint):continue
             _solid_box(house,Vector3(x1-x0,.20,z1-z0),Vector3(midpoint.x,floor_y,midpoint.y),timber)
-    var stair_x:=width*.22
-    var start_z:=depth*.31;var end_z:=-depth*.29
-    var ramp_mesh:=_build_bridge_ramp_mesh(Vector2(stair_x,start_z),Vector2(stair_x,end_z),Vector2(1,0),2.15,2.15,.04,floor_y+.03)
+    var ramp_mesh:=_build_bridge_ramp_mesh(Vector2(stair_x,start_z),Vector2(stair_x,end_z),Vector2(1,0),stair_width,stair_width,.04,floor_y+.03)
     var ramp:=MeshInstance3D.new();ramp.name="HouseInteriorStairRamp";ramp.mesh=ramp_mesh;ramp.material_override=timber;ramp.set_meta("skip_static_solidify",true);house.add_child(ramp)
-    _add_walkable_ramp_collision(ramp,Vector2(stair_x,start_z),Vector2(stair_x,end_z),2.15,.04,floor_y+.03)
-    for step in range(13):
-        var t:=(float(step)+.5)/13.0
-        var tread:=_visual_box(house,Vector3(2.18,.09,depth*.60/13.0+.08),Vector3(stair_x,lerpf(.04,floor_y,t),lerpf(start_z,end_z,t)),timber)
+    _add_walkable_ramp_collision(ramp,Vector2(stair_x,start_z),Vector2(stair_x,end_z),stair_width,.04,floor_y+.03)
+    for step in range(14):
+        var t:=(float(step)+.5)/14.0
+        var tread:=_visual_box(house,Vector3(stair_width+.03,.09,(start_z-end_z)/14.0+.07),Vector3(stair_x,lerpf(.04,floor_y,t),lerpf(start_z,end_z,t)),timber)
         tread.set_meta("skip_static_solidify",true)
     # Bridge the final few centimetres between the ramp opening and upper
     # floor. Without this landing the last stride could drop through the hole.
-    _solid_box(house,Vector3(2.18,.14,depth*.115),Vector3(stair_x,floor_y-.07,-depth*.36),timber)
+    _solid_box(house,Vector3(stair_width,.14,depth*.12),Vector3(stair_x,floor_y-.07,end_z-depth*.09),timber)
     for side in [-1.0,1.0]:
         for post in range(5):
             var t:=float(post)/4.0
-            _visual_box(house,Vector3(.14,1.0,.14),Vector3(stair_x+1.15*float(side),lerpf(.58,floor_y+.58,t),lerpf(start_z,end_z,t)),wall)
+            _visual_box(house,Vector3(.14,1.0,.14),Vector3(stair_x+(stair_width*.5+.10)*float(side),lerpf(.58,floor_y+.58,t),lerpf(start_z,end_z,t)),wall)
 
 
 func _add_architecture_detail(root:Node3D,mesh_name:String,position:Vector3,scale_factor:Vector3=Vector3.ONE,material:Material=null,rotation:Vector3=Vector3.ZERO,visibility_range:float=48.0)->MeshInstance3D:
@@ -1403,6 +2176,7 @@ func _add_working_house_door(house:Node3D,door_width:float,door_height:float,dep
     if not extra_group.is_empty():hinge.add_to_group(extra_group)
     hinge.set_meta("door_center_x",door_center_x)
     hinge.set_meta("door_depth",depth)
+    hinge.set_meta("door_width",door_width)
     house.add_child(hinge)
     var body:=StaticBody3D.new();body.position=Vector3(door_width*.5-.10,door_height*.5,0);body.collision_layer=1;hinge.add_child(body)
     var mesh:=MeshInstance3D.new();var box:=BoxMesh.new();box.size=Vector3(door_width-.20,door_height-.12,.16);mesh.mesh=box;mesh.material_override=material;body.add_child(mesh)
@@ -1446,8 +2220,9 @@ func _add_house_furniture(house:Node3D,width:float,depth:float,timber:Material,s
             _append_house_table(furniture,timber_boxes,Vector3(-width*.12,0,-depth*.08),Vector2(3.5,1.55))
             _add_architecture_detail(furniture,"FurnitureChest",Vector3(-width*.29,0,-depth*.39),Vector3(1.05,1.05,1.05),null,Vector3.ZERO,48.0)
         5:
-            # Inn: two dining tables downstairs with a service counter.
-            for x in [-width*.22,width*.18]:_append_house_table(furniture,timber_boxes,Vector3(x,0,-depth*.08),Vector2(3.1,1.35))
+            # Inn: keep the right-hand stair route open from the doorway to the
+            # upper floor; the former second table sat directly on the ramp.
+            for table_z in [-depth*.18,depth*.20]:_append_house_table(furniture,timber_boxes,Vector3(-width*.19,0,float(table_z)),Vector2(3.1,1.35))
             timber_boxes.append({"size":Vector3(width*.50,1.10,.90),"position":Vector3(0,.55,-depth*.40)})
     if family not in [1,3]:
         _add_architecture_detail(furniture,"FurnitureChair",Vector3(width*.12,0,depth*.16),Vector3(.72,.72,.72),furniture_timber,Vector3(0,PI,0),40.0)
@@ -1458,9 +2233,11 @@ func _add_house_furniture(house:Node3D,width:float,depth:float,timber:Material,s
         _append_house_bed(furniture,timber_boxes,Vector3(-width*.28,upper_y,-depth*.25),furniture_timber,cloth)
         _append_house_bed(furniture,timber_boxes,Vector3(-width*.28,upper_y,depth*.22),furniture_timber,cloth)
         var upper_rug:=_visual_box(furniture,Vector3(width*.38,.055,depth*.30),Vector3(-width*.04,upper_y+.12,0),cloth);upper_rug.name="Upper Floor Woven Rug";upper_rug.set_meta("skip_static_solidify",true)
-        timber_boxes.append({"size":Vector3(2.6,.24,.72),"position":Vector3(width*.30,upper_y+2.0,-depth*.44)})
-        _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(width*.31,upper_y,-depth*.42),Vector3(.82,.82,.82),furniture_timber,Vector3.ZERO,46.0)
-        _add_architecture_detail(furniture,"FurnitureChest",Vector3(width*.22,upper_y,depth*.28),Vector3(.82,.82,.82),null,Vector3.ZERO,46.0)
+        # Upper storage stays on the opposite wall from the stair exit so the
+        # player does not arrive against a collision prop.
+        timber_boxes.append({"size":Vector3(2.6,.24,.72),"position":Vector3(-width*.31,upper_y+2.0,-depth*.44)})
+        _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(-width*.32,upper_y,-depth*.42),Vector3(.82,.82,.82),furniture_timber,Vector3.ZERO,46.0)
+        _add_architecture_detail(furniture,"FurnitureChest",Vector3(-width*.18,upper_y,depth*.30),Vector3(.82,.82,.82),null,Vector3.ZERO,46.0)
         _add_house_interior_light(furniture,Vector3(-width*.08,upper_y+2.35,0))
     _add_box_batch(furniture,timber_boxes,furniture_timber,false,46.0)
     for entry in timber_boxes:_add_static_collision_box(furniture,entry.get("size",Vector3.ONE),entry.get("position",Vector3.ZERO),entry.get("rotation",Vector3.ZERO))
@@ -2084,6 +2861,13 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
         _visual_box(root, Vector3(2.8, 6.0, 0.20), keep_center + Vector3(x, council_y + 4.5, 20.92), royal)
         _add_broken_crown_crest(root,keep_center+Vector3(x,council_y+4.15,20.77),.70,gold)
     for x in [-20.0,14.0]:_add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(x,council_y,-19.9),Vector3(1.2,1.2,1.2),timber,Vector3.ZERO,66.0)
+    for z in [4.0,10.0,16.0]:
+        _add_architecture_detail(root,"FurnitureChest",keep_center+Vector3(-21.0,council_y,z),Vector3(.78,.78,.78),timber,Vector3(0,PI*.5,0),58.0)
+    # A readable planning wall gives the council chamber an actual purpose.
+    _visual_box(root,Vector3(9.4,4.8,.18),keep_center+Vector3(2.0,council_y+4.1,-20.86),stone)
+    for route_offset in [-2.9,-.7,1.4,3.2]:
+        var route_strip:=_visual_box(root,Vector3(1.45,.14,.06),keep_center+Vector3(2.0+route_offset,council_y+4.1+route_offset*.16,-20.72),gold)
+        route_strip.rotation.z=.22-route_offset*.035
     _solid_box(root,Vector3(5.2,.34,2.3),keep_center+Vector3(-16.0,council_y+1.0,11.0),timber)
     for x in [-18.0,-14.0]:
         for z in [10.2,11.8]:_visual_box(root,Vector3(.20,.90,.20),keep_center+Vector3(x,council_y+.45,z),timber)
@@ -2103,6 +2887,11 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
     _solid_box(root, Vector3(5.0, 1.0, 3.2), keep_center + Vector3(-4.0, armory_y + 0.50, 12.0), timber)
     for z in [-13.0,-5.0,3.0,11.0]:_add_architecture_detail(root,"CastleWeaponRack",keep_center+Vector3(22.0,armory_y,z),Vector3(.86,.86,.86),null,Vector3(0,-PI*.5,0),68.0)
     for position in [Vector3(-20,0,13),Vector3(-16,0,15),Vector3(3,0,-14)]:_add_architecture_detail(root,"FurnitureBarrel",keep_center+Vector3(position.x,armory_y,position.z),Vector3(.86,.86,.86),null,Vector3.ZERO,58.0)
+    for position in [Vector3(-8,0,15),Vector3(-1,0,15),Vector3(7,0,-15)]:
+        _add_architecture_detail(root,"FurnitureChest",keep_center+Vector3(position.x,armory_y,position.z),Vector3(.82,.82,.82),timber,Vector3.ZERO,58.0)
+    _solid_box(root,Vector3(8.0,.32,2.6),keep_center+Vector3(8.0,armory_y+1.0,12.5),timber)
+    for x in [4.4,11.6]:
+        for z in [11.4,13.6]:_visual_box(root,Vector3(.20,.86,.20),keep_center+Vector3(x,armory_y+.43,z),timber)
     for x in [-19.0,-11.5,-4.0]:
         _visual_box(root,Vector3(1.8,2.1,.28),keep_center+Vector3(x,armory_y+3.0,-20.58),stone)
         _visual_box(root,Vector3(.22,2.75,.22),keep_center+Vector3(x,armory_y+2.9,-20.35),gold).rotation.z=.22
@@ -2128,6 +2917,10 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
         for z in [10.0,12.0]:_visual_box(root,Vector3(.20,.88,.20),keep_center+Vector3(x,solar_y+.44,z),timber)
     _add_architecture_detail(root,"FurnitureChair",keep_center+Vector3(-8.0,solar_y,8.8),Vector3(.80,.80,.80),timber,Vector3.ZERO,64.0)
     for x in [-21.5,15.0]:_add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(x,solar_y,-20.0),Vector3(1.15,1.15,1.15),timber,Vector3.ZERO,66.0)
+    for position in [Vector3(-20,0,-4),Vector3(5,0,-4),Vector3(18,0,13)]:
+        _add_architecture_detail(root,"FurnitureChest",keep_center+Vector3(position.x,solar_y,position.z),Vector3(.86,.86,.86),timber,Vector3.ZERO,58.0)
+    for z in [-1.0,4.5,10.0]:
+        _add_architecture_detail(root,"FurnitureChair",keep_center+Vector3(18.0,solar_y,z),Vector3(.76,.76,.76),timber,Vector3(0,-PI*.5,0),58.0)
     _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(-2.0,solar_y+6.0,5.0),Vector3(1.0,1.0,1.0),null,Vector3.ZERO,72.0)
     _add_castle_room_light(root,keep_center+Vector3(-2.0,solar_y+5.7,5.0))
 
@@ -2295,14 +3088,17 @@ func _clear_root(root: Node) -> void:
         child.free()
 
 
-func _build_ponds(root: Node3D, ponds: Array, terrain_result: Dictionary) -> void:
+func _build_ponds(root: Node3D, ponds: Array, terrain_result: Dictionary, profile:Dictionary={}) -> void:
     var terrain_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     for pond in ponds:
         var center: Vector2 = pond.get("position", Vector2.ZERO)
         var radius: float = pond.get("radius", 70.0) * 1.18
         var water_height: float = pond.get("water_height", 1.2)
         var edge_points: Array[Vector3] = []
-        var segments := 40
+        # Large regional meres need enough shoreline samples to remain curved
+        # at gameplay distance. Forty segments produced 20–30 m straight
+        # facets around Glassmere even though the terrain basin was smooth.
+        var segments:=clampi(ceili(radius*1.35),96,256)
         for i in range(segments):
             var angle := TAU * float(i) / float(segments)
             var irregularity := 1.0 + sin(angle * 3.0 + center.x * 0.0017) * 0.11 + sin(angle * 7.0 + center.y * 0.0011) * 0.055
@@ -2322,46 +3118,276 @@ func _build_ponds(root: Node3D, ponds: Array, terrain_result: Dictionary) -> voi
         instance.name = "%s_Water" % pond.get("name", "Pond")
         instance.mesh = mesh
         instance.material_override = _make_water_material()
+        instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
         root.add_child(instance)
+        _add_pond_shore_transition(root,pond,terrain_sampler,radius,water_height,segments)
+    _build_ocean_basins(root,profile.get("ocean_basins",[]),profile)
+
+
+func _add_pond_shore_transition(root:Node3D,pond:Dictionary,terrain_sampler:Callable,radius:float,water_height:float,segments:int)->void:
+    # A 7.2 km heightfield cannot describe a curved mere at centimetre scale:
+    # the terrain/water intersection otherwise exposes the diagonal edges of
+    # its 30 m cells. This render-only wet-meadow shelf follows the same exact
+    # authored shoreline at high resolution, covers that coarse transition,
+    # and fades back into the real collision terrain on its outer row.
+    var center:Vector2=pond.get("position",Vector2.ZERO)
+    var inner_ratio:float=clampf(float(pond.get("shore_inner_ratio",.885)),.84,.97)
+    var outer_width:float=clampf(float(pond.get("shore_outer_width",clampf(radius*.09,10.0,17.0))),7.0,20.0)
+    var inner_vertices:Array[Vector3]=[]
+    var outer_vertices:Array[Vector3]=[]
+    for i in range(segments):
+        var angle:=TAU*float(i)/float(segments)
+        var irregularity:=1.0+sin(angle*3.0+center.x*.0017)*.11+sin(angle*7.0+center.y*.0011)*.055
+        var inner_radius:=radius*irregularity*inner_ratio
+        var outer_radius:=radius*irregularity+outer_width
+        var inner2:=center+Vector2(cos(angle),sin(angle))*inner_radius
+        var outer2:=center+Vector2(cos(angle),sin(angle))*outer_radius
+        var outer_ground:Vector3=terrain_sampler.call(outer2.x,outer2.y)
+        inner_vertices.append(Vector3(inner2.x,water_height+.018,inner2.y))
+        outer_vertices.append(Vector3(outer2.x,maxf(water_height+.085,outer_ground.y+.032),outer2.y))
+    var st:=SurfaceTool.new()
+    st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    for i in range(segments):
+        var next_i:=(i+1)%segments
+        var u0:=float(i)/float(segments)*18.0
+        var u1:=float(i+1)/float(segments)*18.0
+        st.set_uv(Vector2(u0,0));st.add_vertex(inner_vertices[i])
+        st.set_uv(Vector2(u0,1));st.add_vertex(outer_vertices[i])
+        st.set_uv(Vector2(u1,0));st.add_vertex(inner_vertices[next_i])
+        st.set_uv(Vector2(u1,0));st.add_vertex(inner_vertices[next_i])
+        st.set_uv(Vector2(u0,1));st.add_vertex(outer_vertices[i])
+        st.set_uv(Vector2(u1,1));st.add_vertex(outer_vertices[next_i])
+    st.generate_normals()
+    var shore:=MeshInstance3D.new()
+    shore.name="%s Natural Shore"%str(pond.get("name","Pond"))
+    shore.mesh=st.commit()
+    shore.material_override=_make_pond_shore_blend_material()
+    shore.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    root.add_child(shore)
+
+
+func _build_ocean_basins(root:Node3D,basins:Array,profile:Dictionary)->void:
+    var world_size:=float(profile.get("world_size",7200.0))
+    for basin_value in basins:
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast" or str(basin.get("edge","west"))!="west":continue
+        var authored:Array=basin.get("coast_points",[])
+        if authored.size()<2:continue
+        var coast:Array[Vector2]=[]
+        for index in range(authored.size()-1):
+            var a:=Vector2(authored[index]);var b:=Vector2(authored[index+1])
+            var steps:=maxi(1,int(ceil(a.distance_to(b)/80.0)))
+            for step in range(steps):coast.append(a.lerp(b,float(step)/float(steps)))
+        coast.append(Vector2(authored[-1]))
+        var water_height:=float(basin.get("water_height",-.6))
+        var offshore_x:=-world_size*.96
+        var shore_overlap:=24.0
+        var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
+        for index in range(coast.size()-1):
+            var a:=coast[index];var b:=coast[index+1]
+            var vertices:Array[Vector3]=[
+                Vector3(offshore_x,water_height,a.y),Vector3(a.x+shore_overlap,water_height,a.y),
+                Vector3(b.x+shore_overlap,water_height,b.y),Vector3(offshore_x,water_height,b.y),
+            ]
+            var uvs:Array[Vector2]=[Vector2(0,float(index)*.08),Vector2(1,float(index)*.08),Vector2(1,float(index+1)*.08),Vector2(0,float(index+1)*.08)]
+            for tri in [[0,1,2],[0,2,3]]:
+                for vertex_index in tri:
+                    st.set_uv(uvs[vertex_index]);st.add_vertex(vertices[vertex_index])
+        st.generate_normals()
+        var ocean:=MeshInstance3D.new();ocean.name=str(basin.get("name","Ocean"))+"_Water"
+        ocean.mesh=st.commit();ocean.material_override=_make_water_material()
+        ocean.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+        root.add_child(ocean)
+        # Short, widely separated foam wisps suggest small breakers without
+        # outlining the whole coast. A continuous bright ribbon made the sea
+        # look pasted on top of the terrain at ordinary gameplay distance.
+        var foam_st:=SurfaceTool.new();foam_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+        for index in range(coast.size()-1):
+            if index%9!=2:continue
+            var segment_a:=coast[index];var segment_b:=coast[index+1]
+            var a:=segment_a.lerp(segment_b,.22);var b:=segment_a.lerp(segment_b,.62)
+            var direction:=(b-a).normalized();var normal:=Vector2(-direction.y,direction.x)
+            var width:=1.1+float(index%3)*.28
+            var vertices:Array[Vector3]=[
+                Vector3(a.x+normal.x*width,water_height+.055,a.y+normal.y*width),
+                Vector3(a.x-normal.x*width,water_height+.055,a.y-normal.y*width),
+                Vector3(b.x-normal.x*width,water_height+.055,b.y-normal.y*width),
+                Vector3(b.x+normal.x*width,water_height+.055,b.y+normal.y*width),
+            ]
+            for tri in [[0,1,2],[0,2,3]]:
+                for vertex_index in tri:foam_st.add_vertex(vertices[vertex_index])
+        foam_st.generate_normals()
+        var foam:=MeshInstance3D.new();foam.name=str(basin.get("name","Ocean"))+"_ShoreFoam"
+        foam.mesh=foam_st.commit();foam.material_override=_make_material(Color(.72,.84,.85,.18),.52)
+        foam.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+        root.add_child(foam)
 
 
 func _build_waterfalls(root:Node3D,sites:Array,terrain_result:Dictionary,profile:Dictionary)->void:
+    for site in sites:
+        for phase in range(7):_build_waterfall_phase(root,site,terrain_result,profile,phase)
+
+
+func _build_waterfall_phase(root:Node3D,site:Dictionary,terrain_result:Dictionary,profile:Dictionary,phase:int)->void:
     var river_sampler:Callable=terrain_result.get("river_height_sampler",terrain_result.height_sampler)
     var water_lift:float=float(profile.get("river_water_lift",1.35))
-    for site in sites:
-        var point: Vector2 = site.get("position", Vector2.ZERO)
-        var width: float = site.get("width", 70.0)
-        var drop: float = site.get("drop", 3.0)
-        var water_top:float=(river_sampler.call(point.x,point.y) as Vector3).y+water_lift
-        var river_info:=_nearest_corridor_segment(point,profile.get("river_corridors",[]))
-        var tangent:Vector2=river_info.get("direction",Vector2(1.0,0.0))
-        var alignment:float=-atan2(tangent.y,tangent.x)
-        var cascade_mesh := BoxMesh.new()
-        cascade_mesh.size = Vector3(0.45, drop, width)
+    var point: Vector2 = site.get("position", Vector2.ZERO)
+    var width: float = site.get("width", 70.0)
+    var drop: float = site.get("drop", 3.0)
+    var water_top:float=(river_sampler.call(point.x,point.y) as Vector3).y+water_lift
+    var river_info:=_nearest_corridor_segment(point,profile.get("river_corridors",[]))
+    var tangent:Vector2=river_info.get("direction",Vector2(1.0,0.0)).normalized()
+    var across:=Vector2(-tangent.y,tangent.x)
+    # Each visible component is its own streamed job. This preserves the full
+    # cascade while keeping SurfaceTool and particle setup out of one movement
+    # frame as the player approaches a newly loaded region.
+    var ribbon_specs:Array[Dictionary]=[
+        {"offset":-width*.30,"width":width*.34,"depth":2.65,"phase":.31},
+        {"offset": width*.01,"width":width*.39,"depth":3.15,"phase":1.47},
+        {"offset": width*.31,"width":width*.28,"depth":2.35,"phase":2.63},
+    ]
+    if phase>=0 and phase<3:
+        var spec:Dictionary=ribbon_specs[phase]
+        var ribbon_point:=point+across*float(spec.offset)
         var cascade := MeshInstance3D.new()
-        cascade.name = "%s_Cascade" % site.get("name", "Waterfall")
-        cascade.mesh = cascade_mesh
-        cascade.position = Vector3(point.x, water_top - drop * 0.5, point.y)
-        cascade.rotation.y=alignment
-        cascade.material_override = _make_water_material()
+        cascade.name = "%s_Cascade_%d" % [site.get("name", "Waterfall"),phase+1]
+        cascade.mesh = _build_waterfall_sheet_mesh(
+            ribbon_point,tangent,float(spec.width),water_top,water_top-drop,
+            float(spec.depth),float(spec.phase)
+        )
+        cascade.material_override = _make_waterfall_material()
         cascade.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
         root.add_child(cascade)
-        var foam_mesh := BoxMesh.new()
-        foam_mesh.size = Vector3(5.0, 0.16, width * 0.92)
-        var foam := MeshInstance3D.new()
-        foam.mesh = foam_mesh
-        var downstream:=tangent.normalized()*2.4
-        foam.position=Vector3(point.x+downstream.x,water_top-drop+0.12,point.y+downstream.y)
-        foam.rotation.y=alignment
-        foam.material_override = _make_material(Color(0.76, 0.91, 0.94, 0.88), 0.24)
+    elif phase==3 or phase==4:
+        var foam_index:=phase-3
+        var foam_specs:Array[Dictionary]=[
+            {"offset":tangent*.20,"height":water_top+.10,"depth":1.25,"width":width*.83},
+            {"offset":tangent*3.55,"height":water_top-drop+.12,"depth":7.2,"width":width*1.02},
+        ]
+        var foam_data:Dictionary=foam_specs[foam_index]
+        var foam_offset:Vector2=foam_data.get("offset",Vector2.ZERO)
+        var foam_center:Vector2=point+foam_offset
+        var foam:=MeshInstance3D.new();foam.name="Waterfall Foam"
+        foam.mesh=_build_waterfall_foam_mesh(
+            foam_center,tangent,float(foam_data.width),float(foam_data.depth),
+            float(foam_data.height),foam_index
+        )
+        foam.material_override=_make_waterfall_foam_material()
         foam.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
         root.add_child(foam)
+    elif phase==5:
+        _add_waterfall_ledge_rocks(root,point,tangent,water_top,water_top-drop,width)
+    elif phase==6:
+        _add_waterfall_spray(root,point+tangent*2.6,water_top-drop,width)
+
+
+func _build_waterfall_sheet_mesh(point:Vector2,tangent:Vector2,width:float,top:float,bottom:float,plunge_depth:float=2.6,phase:float=0.0)->ArrayMesh:
+    var across:=Vector2(-tangent.y,tangent.x)
+    var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    var strips:=7
+    var rows:=8
+    for strip in range(strips):
+        var a_t:=float(strip)/float(strips)
+        var b_t:=float(strip+1)/float(strips)
+        for row in range(rows):
+            var top_v:=float(row)/float(rows)
+            var bottom_v:=float(row+1)/float(rows)
+            var vertices:Array[Vector3]=[]
+            for uv in [Vector2(a_t,top_v),Vector2(b_t,top_v),Vector2(b_t,bottom_v),Vector2(a_t,bottom_v)]:
+                var taper:=lerpf(1.0,.82,uv.y)
+                var across_offset:=lerpf(-width*.5,width*.5,uv.x)*taper
+                var edge_wander:=sin(uv.y*7.1+uv.x*4.7+phase)*.16
+                var bow:=sin(uv.y*PI)*(.72+plunge_depth*.22)
+                var forward:=lerpf(.08,plunge_depth,uv.y)+bow+edge_wander
+                var p:=point+across*across_offset+tangent*forward
+                var y:=lerpf(top,bottom,uv.y)+sin(uv.y*PI*2.0+uv.x*5.3+phase)*.09
+                vertices.append(Vector3(p.x,y,p.y))
+            st.set_uv(Vector2(a_t,top_v));st.add_vertex(vertices[0])
+            st.set_uv(Vector2(b_t,top_v));st.add_vertex(vertices[1])
+            st.set_uv(Vector2(b_t,bottom_v));st.add_vertex(vertices[2])
+            st.set_uv(Vector2(a_t,top_v));st.add_vertex(vertices[0])
+            st.set_uv(Vector2(b_t,bottom_v));st.add_vertex(vertices[2])
+            st.set_uv(Vector2(a_t,bottom_v));st.add_vertex(vertices[3])
+    st.generate_normals()
+    return st.commit()
+
+
+func _build_waterfall_foam_mesh(center:Vector2,tangent:Vector2,width:float,depth:float,height:float,seed:int)->ArrayMesh:
+    var across:=Vector2(-tangent.y,tangent.x)
+    var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    var rim_count:=20
+    var center_vertex:=Vector3(center.x,height,center.y)
+    for index in range(rim_count):
+        var angle_a:=TAU*float(index)/float(rim_count)
+        var angle_b:=TAU*float(index+1)/float(rim_count)
+        var radius_a:=.84+.16*sin(float(index)*2.37+float(seed)*1.9)
+        var radius_b:=.84+.16*sin(float(index+1)*2.37+float(seed)*1.9)
+        var offset_a:=across*(cos(angle_a)*width*.5*radius_a)+tangent*(sin(angle_a)*depth*.5*radius_a)
+        var offset_b:=across*(cos(angle_b)*width*.5*radius_b)+tangent*(sin(angle_b)*depth*.5*radius_b)
+        st.set_uv(Vector2(.5,.5));st.add_vertex(center_vertex)
+        st.set_uv(Vector2(.5+cos(angle_a)*.5,.5+sin(angle_a)*.5));st.add_vertex(Vector3(center.x+offset_a.x,height,center.y+offset_a.y))
+        st.set_uv(Vector2(.5+cos(angle_b)*.5,.5+sin(angle_b)*.5));st.add_vertex(Vector3(center.x+offset_b.x,height,center.y+offset_b.y))
+    st.generate_normals()
+    return st.commit()
+
+
+func _add_waterfall_ledge_rocks(root:Node3D,point:Vector2,tangent:Vector2,top:float,bottom:float,width:float)->void:
+    var across:=Vector2(-tangent.y,tangent.x)
+    var mesh:=SphereMesh.new();mesh.radius=1.0;mesh.height=1.7;mesh.radial_segments=8;mesh.rings=4
+    var transforms:Array[Transform3D]=[]
+    var offsets:Array[Dictionary]=[
+        {"x":-.49,"z":.10,"y":top-.55,"s":Vector3(2.1,1.1,1.5)},
+        {"x":-.14,"z":.18,"y":top-.70,"s":Vector3(1.3,.8,1.0)},
+        {"x": .20,"z":.08,"y":top-.62,"s":Vector3(1.5,.9,1.2)},
+        {"x": .49,"z":.14,"y":top-.54,"s":Vector3(2.0,1.0,1.45)},
+        {"x":-.42,"z":3.1,"y":bottom+.20,"s":Vector3(1.8,.9,1.5)},
+        {"x": .40,"z":3.5,"y":bottom+.15,"s":Vector3(2.2,1.0,1.7)},
+    ]
+    for index in range(offsets.size()):
+        var data:Dictionary=offsets[index]
+        var horizontal:=point+across*(float(data.x)*width)+tangent*float(data.z)
+        var basis:=Basis(Vector3.UP,float(index)*.91+.24).scaled(data.s)
+        transforms.append(Transform3D(basis,Vector3(horizontal.x,float(data.y),horizontal.y)))
+    _add_material_multimesh(
+        root,mesh,transforms,
+        _make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.56,.61,.61),1.0,3.4),
+        false,520.0,220.0
+    )
+
+
+func _add_waterfall_spray(root:Node3D,point:Vector2,height:float,width:float)->void:
+    # Reuse the already-warmed cascade shader on one small ribbon mesh. Both a
+    # fresh particle pipeline and a billboard MultiMesh cost ~150 ms on first
+    # regional upload; this keeps the pale rising spray without introducing a
+    # second renderer pipeline during travel.
+    var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    for index in range(12):
+        var lane:=float(index)/11.0-.5
+        var center:=Vector3(point.x+lane*width*.70+sin(float(index)*2.17)*.9,height+.12,point.y+cos(float(index)*1.31)*1.2)
+        var angle:=float(index)*2.399963
+        var right:=Vector3(cos(angle),0.0,sin(angle))*(.24+float(index%3)*.08)
+        var rise:=Vector3.UP*(.72+float(index%5)*.18)
+        st.set_uv(Vector2(0,1));st.add_vertex(center-right)
+        st.set_uv(Vector2(1,1));st.add_vertex(center+right)
+        st.set_uv(Vector2(1,0));st.add_vertex(center+right+rise)
+        st.set_uv(Vector2(0,1));st.add_vertex(center-right)
+        st.set_uv(Vector2(1,0));st.add_vertex(center+right+rise)
+        st.set_uv(Vector2(0,0));st.add_vertex(center-right+rise)
+    st.generate_normals()
+    var spray:=MeshInstance3D.new();spray.name="Waterfall Spray Mist";spray.mesh=st.commit()
+    spray.material_override=_make_waterfall_material()
+    spray.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    spray.visibility_range_end=620.0;spray.visibility_range_end_margin=60.0
+    spray.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(spray)
 
 
 func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
     var world_size: float = profile.get("world_size", 600.0)
     var controlled: bool = profile.get("controlled_aqueduct", false)
-    var rock_count := 1050 if controlled else 220
+    var base_rock_count:int=1050 if controlled else 220
+    var rock_count:int=_scaled_population_count(profile,base_rock_count,200 if controlled else 70)
     var ore_specs:Array[Dictionary]=[
         {"id":"iron","name":"Iron Ore","color":Color(.34,.37,.39),"profile":Vector3(1.30,.70,1.00)},
         {"id":"copper","name":"Copper Ore","color":Color(.48,.285,.16),"profile":Vector3(1.12,.88,1.28)},
@@ -2382,6 +3408,8 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
         if _is_too_close_to_corridors(point, profile.get("road_corridors", []), 26.0):
             continue
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 50.0):
+            continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),4.0):
             continue
         if _is_too_close_to_sites(point, profile.get("town_sites", []), 90.0):
             continue
@@ -2435,6 +3463,7 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
 
 
 func _build_grass(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+    if profile.get("streamed_population",false):return
     if not profile.get("controlled_aqueduct", false):
         return
     var blade_mesh := _make_ground_cover_mesh()
@@ -2443,13 +3472,16 @@ func _build_grass(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
     var raw_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     var grass_rng:=RandomNumberGenerator.new()
     grass_rng.seed=99173
-    for i in range(18000):
+    var grass_sample_count:int=_scaled_population_count(profile,18000,7000)
+    for i in range(grass_sample_count):
         var point:=Vector2(
             grass_rng.randf_range(-world_size*.46,world_size*.46),
             grass_rng.randf_range(-world_size*.46,world_size*.46)
         )
         if _is_dry_biome(point,world_size):continue
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 50.0):
+            continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):
             continue
         if _is_too_close_to_corridors(point, profile.get("road_corridors", []), 2.0):
             continue
@@ -2458,6 +3490,8 @@ func _build_grass(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
         if _is_near_bridge_site(point, profile.get("ford_sites", []), 76.0):
             continue
         if _is_on_stone_walkway(point,profile):
+            continue
+        if _is_inside_town_farm_plot(point,profile):
             continue
         if point.distance_to(profile.get("spawn_site", {}).get("position", Vector2.ZERO)) < 6.0:
             continue
@@ -2491,7 +3525,7 @@ func _build_regional_ground_cover(root:Node3D,profile:Dictionary,terrain_result:
         var radius:float=maxf(40.0,float(region.get("radius",900.0)))
         var aspect:float=maxf(.25,float(region.get("aspect",1.0)))
         var rotation:float=float(region.get("angle",0.0))
-        var sample_count:int=maxi(0,int(region.get("cover_count",300)))
+        var sample_count:int=_scaled_population_count(profile,maxi(0,int(region.get("cover_count",300))),50)
         # Ground plants read as a habitat when they form loose colonies. A
         # realm-wide even scatter looked like procedural confetti and was too
         # thin to break up the large fields at player height.
@@ -2511,11 +3545,13 @@ func _build_regional_ground_cover(root:Node3D,profile:Dictionary,terrain_result:
             var local:=colony+Vector2(cos(patch_angle),sin(patch_angle))*sqrt(rng.randf())*patch_radius
             var point:=center+local
             if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),51.0):continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
             if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),2.8):continue
             if _is_too_close_to_corridors(point,profile.get("trail_corridors",[]),1.1):continue
             if _is_too_close_to_corridors(point,profile.get("field_boundaries",[]),1.2):continue
             if _is_near_bridge_site(point,profile.get("ford_sites",[]),74.0):continue
             if _is_on_stone_walkway(point,profile):continue
+            if _is_inside_town_farm_plot(point,profile):continue
             var ground:Vector3=sampler.call(point.x,point.y)
             if ground.y<=float(terrain_result.water_level)+.7:continue
             var scale_value:=rng.randf_range(1.02,1.52)
@@ -2573,6 +3609,7 @@ func _make_ground_cover_mesh() -> ArrayMesh:
 
 
 func _build_traversal_ground_cover(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+    if profile.get("streamed_population",false):return
     var tuft_mesh := _make_ground_cover_mesh()
     var green: Array[Transform3D] = []
     var dry: Array[Transform3D] = []
@@ -2606,6 +3643,8 @@ func _build_traversal_ground_cover(root: Node3D, profile: Dictionary, terrain_re
                         sample_index += 1
                         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 50.0):
                             continue
+                        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):
+                            continue
                         if _is_too_close_to_corridors(point, profile.get("road_corridors", []), 0.8):
                             continue
                         if _is_too_close_to_corridors(point, profile.get("trail_corridors", []), 0.35):
@@ -2627,6 +3666,76 @@ func _build_traversal_ground_cover(root: Node3D, profile: Dictionary, terrain_re
                             green.append(transform)
     _add_ground_cover_batch(root, tuft_mesh, green, Color(0.18, 0.32, 0.12, 1.0))
     _add_ground_cover_batch(root, tuft_mesh, dry, Color(0.36, 0.31, 0.14, 1.0))
+
+
+func _build_streamed_meadow_floor_chunk(root:Node3D,profile:Dictionary,terrain_result:Dictionary,chunk_index:int)->void:
+    var state_key:int=root.get_instance_id()
+    if chunk_index==0 or not _streamed_meadow_states.has(state_key):
+        var source:=MEADOW_GRASS_SCENE.instantiate()
+        var source_mesh:=_find_first_mesh_resource(source)
+        source.free()
+        if source_mesh==null:source_mesh=_make_ground_cover_mesh()
+        var meadow_rng:=RandomNumberGenerator.new()
+        meadow_rng.seed=481516+int(abs(hash(str(profile.get("zone_id","streamed")))))%100000
+        _streamed_meadow_states[state_key]={
+            "mesh":_make_scattered_grass_patch_mesh(source_mesh),
+            "green":[],"dry":[],"rng":meadow_rng,
+        }
+    var state:Dictionary=_streamed_meadow_states[state_key]
+    var green:Array[Transform3D]=[];green.assign(state.get("green",[]))
+    var dry:Array[Transform3D]=[];dry.assign(state.get("dry",[]))
+    var rng:RandomNumberGenerator=state.get("rng") as RandomNumberGenerator
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var world_size:float=float(profile.get("world_size",7200.0))
+    var destinations:Array=[profile.get("spawn_site",{})]
+    destinations.append_array(profile.get("town_sites",[]))
+    var forests:Array=profile.get("forest_regions",[])
+    var samples_per_chunk:=maxi(STREAMED_MEADOW_SAMPLES_PER_CHUNK,int(profile.get("meadow_samples_per_chunk",STREAMED_MEADOW_SAMPLES_PER_CHUNK)))
+    for local_index in range(samples_per_chunk):
+        var sample_index:int=chunk_index*samples_per_chunk+local_index
+        var point:Vector2
+        if sample_index%5==0 and not destinations.is_empty():
+            var site:Dictionary=destinations[(sample_index/5)%destinations.size()]
+            var site_center:Vector2=site.get("position",Vector2.ZERO)
+            var site_radius:float=maxf(100.0,float(site.get("radius",120.0))*1.55)
+            var site_angle:float=rng.randf_range(-PI,PI)
+            point=site_center+Vector2(cos(site_angle),sin(site_angle))*sqrt(rng.randf())*site_radius
+        elif sample_index%3==0 and not forests.is_empty():
+            var forest:Dictionary=forests[(sample_index/3)%forests.size()]
+            var forest_center:Vector2=forest.get("center",Vector2.ZERO)
+            var forest_radius:float=float(forest.get("radius",400.0))
+            var forest_angle:float=rng.randf_range(-PI,PI)
+            point=forest_center+Vector2(cos(forest_angle),sin(forest_angle))*sqrt(rng.randf())*forest_radius
+        else:
+            point=Vector2(
+                rng.randf_range(-world_size*.455,world_size*.455),
+                rng.randf_range(-world_size*.455,world_size*.455)
+            )
+        if _is_dry_biome(point,world_size):continue
+        if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
+        if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),2.5):continue
+        if _is_too_close_to_corridors(point,profile.get("trail_corridors",[]),1.0):continue
+        if _is_near_bridge_site(point,profile.get("ford_sites",[]),72.0):continue
+        if _is_on_stone_walkway(point,profile) or _is_inside_town_farm_plot(point,profile):continue
+        var ground:Vector3=sampler.call(point.x,point.y)
+        if ground.y<=float(terrain_result.water_level)+.7:continue
+        var scale_value:float=rng.randf_range(.80,1.32)
+        var yaw:float=rng.randf_range(-PI,PI)
+        var grass_scale:=Vector3(scale_value*rng.randf_range(1.04,1.32),scale_value,scale_value)
+        var grass_transform:=Transform3D(Basis(Vector3.UP,yaw).scaled(grass_scale),ground-Vector3.UP*.035)
+        if rng.randf()<.17:dry.append(grass_transform)
+        else:green.append(grass_transform)
+    state["green"]=green;state["dry"]=dry
+    if chunk_index>=STREAMED_MEADOW_CHUNK_COUNT-1:
+        var mesh:Mesh=state.get("mesh") as Mesh
+        _add_ground_cover_batch(root,mesh,green,Color(.15,.29,.105,1.0))
+        _add_ground_cover_batch(root,mesh,dry,Color(.38,.32,.15,1.0))
+        root.set_meta("meadow_grass_count",green.size()+dry.size())
+        root.set_meta("meadow_grass_cache_hit",false)
+        _streamed_meadow_states.erase(state_key)
+    else:
+        _streamed_meadow_states[state_key]=state
 
 
 func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
@@ -2663,23 +3772,26 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
     # Each accepted instance contains seven separately offset grass clumps.
     # The former 36k baseline oversampled the same visible area and spent
     # several seconds on corridor queries during every launch.
-    for i in range(36000):
+    var baseline_sample_count:int=_scaled_population_count(profile,36000,3500)
+    for i in range(baseline_sample_count):
         var point:=Vector2(
             grass_rng.randf_range(-world_size*.455,world_size*.455),
             grass_rng.randf_range(-world_size*.455,world_size*.455)
         )
         if _is_dry_biome(point,world_size):continue
         if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
         if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),2.5):continue
         if _is_too_close_to_corridors(point,profile.get("trail_corridors",[]),1.0):continue
         if _is_near_bridge_site(point,profile.get("ford_sites",[]),72.0):continue
         if _is_on_stone_walkway(point,profile):continue
+        if _is_inside_town_farm_plot(point,profile):continue
         var ground:Vector3=sampler.call(point.x,point.y)
         if ground.y<=float(terrain_result.water_level)+.7:continue
         var scale_value:=grass_rng.randf_range(.78,1.34)
         var yaw:=grass_rng.randf_range(-PI,PI)
-        var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*grass_rng.randf_range(1.05,1.34),scale_value*grass_rng.randf_range(.92,1.24),scale_value))
-        var transform:=Transform3D(basis,ground+Vector3.UP*.018)
+        var grass_scale:=Vector3(scale_value*grass_rng.randf_range(1.05,1.34),scale_value*grass_rng.randf_range(.92,1.24),scale_value)
+        var transform:=Transform3D(Basis(Vector3.UP,yaw).scaled(grass_scale),ground-Vector3.UP*.035)
         if grass_rng.randf()<.16:dry.append(transform)
         else:green.append(transform)
 
@@ -2711,14 +3823,15 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
                     var lateral:=half_width+5.5+absf(sin(float(pattern)*.371+side*2.1))*12.0
                     var point:=center+tangent*along_jitter+normal*side*lateral
                     if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
+                    if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
                     if _is_near_bridge_site(point,profile.get("ford_sites",[]),78.0):continue
                     if _is_on_stone_walkway(point,profile):continue
+                    if _is_inside_town_farm_plot(point,profile):continue
                     var ground:Vector3=sampler.call(point.x,point.y)
                     if ground.y<=float(terrain_result.water_level)+.7:continue
                     var scale_value:=.94+float(abs(pattern)%7)*.07
                     var yaw:=float(pattern)*.413
-                    var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*1.18,scale_value*1.12,scale_value))
-                    var transform:=Transform3D(basis,ground+Vector3.UP*.018)
+                    var transform:=Transform3D(Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*1.18,scale_value*1.12,scale_value)),ground-Vector3.UP*.035)
                     if _is_dry_biome(point,world_size) or pattern%9==0:dry.append(transform)
                     else:green.append(transform)
                 pocket_index+=1
@@ -2735,7 +3848,7 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
         var radius:float=float(site.get("radius",72.0))
         var inner_radius:=16.0 if site_index==0 else radius*.48
         var outer_radius:=maxf(280.0 if site_index==0 else 170.0,radius*1.42)
-        var sample_count:=4800 if site_index==0 else 2800
+        var sample_count:int=_scaled_population_count(profile,4800 if site_index==0 else 2800,480 if site_index==0 else 280)
         for local_index in range(sample_count):
             var ratio:=sqrt(grass_rng.randf())
             var edge_weight:=clampf((1.0-ratio)/.30,0.0,1.0)
@@ -2745,16 +3858,18 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
             var point:=center+Vector2(cos(angle),sin(angle))*radial
             if _is_dry_biome(point,world_size):continue
             if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
             if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),2.5):continue
             if _is_too_close_to_corridors(point,profile.get("trail_corridors",[]),1.0):continue
             if _is_near_bridge_site(point,profile.get("ford_sites",[]),72.0):continue
             if _is_on_stone_walkway(point,profile):continue
+            if _is_inside_town_farm_plot(point,profile):continue
             var ground:Vector3=sampler.call(point.x,point.y)
             if ground.y<=float(terrain_result.water_level)+.7:continue
             var scale_value:=grass_rng.randf_range(.82,1.30)
             var yaw:=grass_rng.randf_range(-PI,PI)
-            var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*grass_rng.randf_range(1.08,1.38),scale_value*grass_rng.randf_range(1.0,1.22),scale_value))
-            var transform:=Transform3D(basis,ground+Vector3.UP*.018)
+            var grass_scale:=Vector3(scale_value*grass_rng.randf_range(1.08,1.38),scale_value*grass_rng.randf_range(1.0,1.22),scale_value)
+            var transform:=Transform3D(Basis(Vector3.UP,yaw).scaled(grass_scale),ground-Vector3.UP*.035)
             if grass_rng.randf()<.10:dry.append(transform)
             else:green.append(transform)
 
@@ -2763,7 +3878,7 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
     for forest in profile.get("forest_regions",[]):
         var center:Vector2=forest.get("center",Vector2.ZERO)
         var radius:float=forest.get("radius",260.0)
-        var forest_samples:=maxi(1800,roundi(radius*10.0))
+        var forest_samples:int=_scaled_population_count(profile,maxi(1800,roundi(radius*10.0)),320)
         for local_index in range(forest_samples):
             var ratio:=sqrt(grass_rng.randf())
             if ratio>.76 and grass_rng.randf()>clampf((1.0-ratio)/.24,0.0,1.0):continue
@@ -2772,14 +3887,15 @@ func _build_meadow_floor_detail(root:Node3D,profile:Dictionary,terrain_result:Di
             if _is_dry_biome(point,world_size):continue
             if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
             if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),2.5):continue
-            if _is_too_close_to_sites(point,profile.get("pond_sites",[]),4.0):continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
             if _is_on_stone_walkway(point,profile):continue
+            if _is_inside_town_farm_plot(point,profile):continue
             var ground:Vector3=sampler.call(point.x,point.y)
             if ground.y<=float(terrain_result.water_level)+.7:continue
             var scale_value:=grass_rng.randf_range(.74,1.16)
             var yaw:=grass_rng.randf_range(-PI,PI)
-            var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value*grass_rng.randf_range(1.0,1.28),scale_value,scale_value))
-            var transform:=Transform3D(basis,ground+Vector3.UP*.018)
+            var grass_scale:=Vector3(scale_value*grass_rng.randf_range(1.0,1.28),scale_value,scale_value)
+            var transform:=Transform3D(Basis(Vector3.UP,yaw).scaled(grass_scale),ground-Vector3.UP*.035)
             if grass_rng.randf()<.22:dry.append(transform)
             else:green.append(transform)
     _store_meadow_cache(meadow_cache_path,green,dry)
@@ -2794,7 +3910,7 @@ func _meadow_cache_path(profile:Dictionary)->String:
     for key in [
         "world_size","water_level","spawn_site","town_sites","pond_sites",
         "river_corridors","road_corridors","trail_corridors","ford_sites",
-        "forest_regions","terrain_palette_regions",
+        "forest_regions","terrain_palette_regions","population_scale",
     ]:
         relevant[key]=profile.get(key)
     var signature:=str(hash(relevant)).replace("-","n")
@@ -2828,12 +3944,12 @@ func _make_scattered_grass_patch_mesh(source_mesh:Mesh)->ArrayMesh:
     # millions of realm-wide instances, and the offsets contain no rows.
     var offsets:Array=[
         [Vector3.ZERO,0.0,1.0],
-        [Vector3(1.62,0.0,.48),.71,.86],
-        [Vector3(-1.38,0.0,.92),-1.17,.94],
-        [Vector3(.43,0.0,-1.73),2.04,.78],
-        [Vector3(-.92,0.0,-1.46),-2.48,1.08],
-        [Vector3(2.08,0.0,-1.10),1.46,.72],
-        [Vector3(-2.14,0.0,-.61),-.39,.81]
+        [Vector3(.62,0.0,.18),.71,.86],
+        [Vector3(-.54,0.0,.38),-1.17,.94],
+        [Vector3(.17,0.0,-.67),2.04,.78],
+        [Vector3(-.36,0.0,-.56),-2.48,1.08],
+        [Vector3(.77,0.0,-.40),1.46,.72],
+        [Vector3(-.79,0.0,-.24),-.39,.81]
     ]
     var st:=SurfaceTool.new()
     for patch in offsets:
@@ -2848,6 +3964,24 @@ func _make_scattered_grass_patch_mesh(source_mesh:Mesh)->ArrayMesh:
             st.append_from(source_mesh,surface_index,transform)
     _meadow_grass_patch_mesh=st.commit()
     return _meadow_grass_patch_mesh
+
+
+func _grounded_surface_transform(point:Vector2,ground:Vector3,yaw:float,scale_value:Vector3,sampler:Callable,footprint:float)->Transform3D:
+    # Detailed roadside verge assets span several metres. Orient these sparse
+    # hero-facing clusters to the two terrain tangents and bury their base by
+    # one centimetre. Realm-wide meadow micro-patches stay compact enough to
+    # use their center height without making first-run cache builds expensive.
+    var local_x:=Vector2(cos(yaw),-sin(yaw))
+    var local_z:=Vector2(sin(yaw),cos(yaw))
+    var sample_x:Vector3=sampler.call(point.x+local_x.x*footprint,point.y+local_x.y*footprint)
+    var sample_z:Vector3=sampler.call(point.x+local_z.x*footprint,point.y+local_z.y*footprint)
+    var x_axis:=Vector3(local_x.x,(sample_x.y-ground.y)/footprint,local_x.y).normalized()
+    var z_hint:=Vector3(local_z.x,(sample_z.y-ground.y)/footprint,local_z.y).normalized()
+    var y_axis:=z_hint.cross(x_axis).normalized()
+    if y_axis.y<0.0:y_axis=-y_axis
+    var z_axis:=x_axis.cross(y_axis).normalized()
+    var basis:=Basis(x_axis*scale_value.x,y_axis*scale_value.y,z_axis*scale_value.z)
+    return Transform3D(basis,ground-y_axis*.012)
 
 
 func _build_forest_leaf_litter(root:Node3D,terrain_result:Dictionary)->void:
@@ -2932,11 +4066,14 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
     # Each shrub is one batched branching frame plus a cluster of individual
     # angular leaf bunches. This keeps the silhouette open and woody instead
     # of reading as three green boulders.
-    for i in range(1450):
+    var shrub_sample_count:int=_scaled_population_count(profile,1450,280)
+    for i in range(shrub_sample_count):
         var x := world_size * (fmod(float(i * 193), 1451.0) / 1451.0 - 0.5) * 0.90
         var z := world_size * (fmod(float(i * 317), 1453.0) / 1453.0 - 0.5) * 0.90
         var point := Vector2(x, z)
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 50.0):
+            continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):
             continue
         if _is_too_close_to_corridors(point, profile.get("road_corridors", []), 4.0):
             continue
@@ -2945,6 +4082,8 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
         if _is_near_bridge_site(point, profile.get("ford_sites", []), 76.0):
             continue
         if _is_on_stone_walkway(point,profile):
+            continue
+        if _is_inside_town_farm_plot(point,profile):
             continue
         var ground: Vector3 = raw_sampler.call(x, z)
         var s:=1.10+float(i%7)*.12
@@ -2979,6 +4118,7 @@ func _build_bushes(root: Node3D, profile: Dictionary, terrain_result: Dictionary
             var point:Vector2=center+tangent*along+normal*(curve+jitter)
             if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),3.5):continue
             if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),50.0):continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):continue
             var ground:Vector3=raw_sampler.call(point.x,point.y)
             var s:=1.18+float((hedge_index+site_index)%6)*.11
             var yaw:=rotation+sin(float(hedge_index)*1.31)*.16
@@ -3008,7 +4148,7 @@ func _build_authored_ecology(root:Node3D,profile:Dictionary,terrain_result:Dicti
         if str(site.get("kind",""))!="bracken":continue
         var center:Vector2=site.get("position",Vector2.ZERO)
         var radius:float=maxf(20.0,float(site.get("radius",120.0)))
-        var count:int=maxi(1,int(site.get("count",90)))
+        var count:int=_scaled_population_count(profile,maxi(1,int(site.get("count",90))),24)
         for local_index in range(count):
             var ratio:=sqrt(rng.randf())
             var angle:=rng.randf_range(-PI,PI)
@@ -3021,6 +4161,7 @@ func _build_authored_ecology(root:Node3D,profile:Dictionary,terrain_result:Dicti
             if _is_near_bridge_site(point,profile.get("ford_sites",[]),72.0):continue
             if _is_too_close_to_sites(point,profile.get("town_sites",[]),34.0):continue
             if _is_on_stone_walkway(point,profile):continue
+            if _is_inside_town_farm_plot(point,profile):continue
             var ground:Vector3=sampler.call(point.x,point.y)
             if ground.y<=float(terrain_result.water_level)+.65:continue
             var scale_value:=rng.randf_range(.82,1.34)
@@ -3066,6 +4207,7 @@ func _build_wetland_vegetation(root:Node3D,profile:Dictionary,terrain_result:Dic
                     var side:float=float(raw_side)
                     var jitter:=sin(float(sample_index*13+step*7))*3.2
                     var point:Vector2=center+normal*(bank_offset+jitter)*side+tangent*sin(float(sample_index)*1.9)*7.0
+                    if _is_inside_pond_water(point,profile.get("pond_sites",[]),1.5):continue
                     if _is_near_bridge_site(point,profile.get("ford_sites",[]),88.0):continue
                     if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),7.0):continue
                     if _is_too_close_to_sites(point,profile.get("town_sites",[]),30.0):continue
@@ -3079,11 +4221,13 @@ func _build_wetland_vegetation(root:Node3D,profile:Dictionary,terrain_result:Dic
     for pond_index in range(profile.get("pond_sites",[]).size()):
         var pond:Dictionary=profile.get("pond_sites",[])[pond_index]
         var center:Vector2=pond.get("position",Vector2.ZERO)
-        var radius:float=float(pond.get("radius",70.0))*1.22
-        for i in range(52):
+        var radius:float=float(pond.get("radius",70.0))*1.18
+        var pond_samples:=clampi(roundi(radius*.58),58,112)
+        for i in range(pond_samples):
             if (i+pond_index*2)%6==0:continue
             var angle:=float(i)*2.39996323+float(pond_index)*.7
-            var shoreline:=radius*(.94+sin(angle*3.0+float(pond_index))*.08)
+            var irregularity:=1.0+sin(angle*3.0+center.x*.0017)*.11+sin(angle*7.0+center.y*.0011)*.055
+            var shoreline:=radius*irregularity+2.4
             var point:=center+Vector2(cos(angle),sin(angle))*shoreline
             if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),6.0):continue
             if _is_near_bridge_site(point,profile.get("ford_sites",[]),72.0):continue
@@ -3146,6 +4290,7 @@ func _build_riverbank_ground_detail(root:Node3D,profile:Dictionary,terrain_resul
                 var along_jitter:=rng.randf_range(-6.5,6.5)
                 var bank_offset:=half_water+rng.randf_range(2.1,8.1)
                 var bank_point:=point+normal*bank_offset*side+tangent*along_jitter
+                if _is_inside_pond_water(bank_point,profile.get("pond_sites",[]),1.5):continue
                 if _is_near_bridge_site(bank_point,profile.get("ford_sites",[]),62.0):continue
                 if _is_too_close_to_corridors(bank_point,profile.get("road_corridors",[]),4.5):continue
                 if _near_other_river(bank_point,str(river.get("name","River")),profile.get("river_corridors",[])):continue
@@ -3298,7 +4443,8 @@ func _build_wildflowers(root: Node3D, profile: Dictionary, terrain_result: Dicti
     var gold: Array[Transform3D] = []
     var purple: Array[Transform3D] = []
     var raw_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
-    for i in range(2600):
+    var stone_sample_count:int=_scaled_population_count(profile,2600,360)
+    for i in range(stone_sample_count):
         var x := world_size * (fmod(float(i * 157), 2609.0) / 2609.0 - 0.5) * 0.88
         var z := world_size * (fmod(float(i * 283), 2617.0) / 2617.0 - 0.5) * 0.88
         var point := Vector2(x, z)
@@ -3361,7 +4507,7 @@ func _add_ground_cover_batch(root: Node3D, mesh: Mesh, transforms: Array[Transfo
     _add_material_multimesh(root,mesh,transforms,material,false,320.0,360.0)
 
 
-func _build_forest_composition(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+func _build_forest_composition(root:Node3D,profile:Dictionary,terrain_result:Dictionary,region_start:int=0,region_count:int=-1)->void:
     # A forest needs readable rooms, edges and ground stories, not simply more
     # trunks. These authored Blender clusters populate clearing rims and deep
     # woodland while remaining spatially batched and locally culled.
@@ -3388,9 +4534,10 @@ func _build_forest_composition(root:Node3D,profile:Dictionary,terrain_result:Dic
     var flower_white:Array[Transform3D]=[]
     var collision_registry:Array=root.get_meta("collision_prop_registry",[])
     var forest_regions:Array=profile.get("forest_regions",[])
-    var rng:=RandomNumberGenerator.new();rng.seed=527401
+    var rng:=RandomNumberGenerator.new();rng.seed=527401+region_start*7919
     var clearing_total:=0
-    for region_index in range(forest_regions.size()):
+    var region_end:int=forest_regions.size() if region_count<0 else mini(forest_regions.size(),region_start+region_count)
+    for region_index in range(clampi(region_start,0,forest_regions.size()),region_end):
         var region:Dictionary=forest_regions[region_index]
         var center:Vector2=region.get("center",Vector2.ZERO)
         var radius:float=region.get("radius",260.0)
@@ -3457,9 +4604,9 @@ func _build_forest_composition(root:Node3D,profile:Dictionary,terrain_result:Dic
     _add_material_multimesh(root,flower_petals,flower_gold,gold_material,false,250.0,240.0)
     _add_material_multimesh(root,flower_petals,flower_blue,blue_material,false,250.0,240.0)
     _add_material_multimesh(root,flower_petals,flower_white,white_material,false,250.0,240.0)
-    root.set_meta("deadwood_cluster_count",deadwood_transforms.size())
-    root.set_meta("woodland_flower_patch_count",flower_all.size())
-    root.set_meta("forest_clearing_count",clearing_total)
+    root.set_meta("deadwood_cluster_count",int(root.get_meta("deadwood_cluster_count",0))+deadwood_transforms.size())
+    root.set_meta("woodland_flower_patch_count",int(root.get_meta("woodland_flower_patch_count",0))+flower_all.size())
+    root.set_meta("forest_clearing_count",int(root.get_meta("forest_clearing_count",0))+clearing_total)
 
 
 func _append_woodland_flower_transform(point:Vector2,variant:int,rng:RandomNumberGenerator,sampler:Callable,profile:Dictionary,terrain_result:Dictionary,all:Array[Transform3D],gold:Array[Transform3D],blue:Array[Transform3D],white:Array[Transform3D])->void:
@@ -3480,7 +4627,7 @@ func _append_woodland_flower_transform(point:Vector2,variant:int,rng:RandomNumbe
     else:gold.append(transform)
 
 
-func _build_ground_stones(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+func _build_ground_stones(root:Node3D,profile:Dictionary,terrain_result:Dictionary,chunk_index:int=0,chunk_count:int=1)->void:
     var mesh := SphereMesh.new()
     mesh.radius = 0.24
     mesh.height = 0.32
@@ -3489,11 +4636,17 @@ func _build_ground_stones(root: Node3D, profile: Dictionary, terrain_result: Dic
     var transforms: Array[Transform3D] = []
     var world_size: float = profile.get("world_size", 7200.0)
     var stone_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
-    for i in range(2600):
+    var stone_sample_count:int=_scaled_population_count(profile,2600,360)
+    var chunk_size:int=ceili(float(stone_sample_count)/float(maxi(1,chunk_count)))
+    var sample_start:int=clampi(chunk_index*chunk_size,0,stone_sample_count)
+    var sample_end:int=clampi(sample_start+chunk_size,0,stone_sample_count)
+    for i in range(sample_start,sample_end):
         var x := world_size * (fmod(float(i * 211), 2609.0) / 2609.0 - 0.5) * 0.90
         var z := world_size * (fmod(float(i * 359), 2621.0) / 2621.0 - 0.5) * 0.90
         var point := Vector2(x, z)
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 48.0):
+            continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),2.0):
             continue
         if _is_too_close_to_corridors(point, profile.get("road_corridors", []), 0.8):
             continue
@@ -3523,6 +4676,7 @@ func _build_rock_formations(root: Node3D, profile: Dictionary, terrain_result: D
             for stone in range(5):
                 var angle := cluster_angle + float(stone) * 1.2566
                 var point := cluster_center + Vector2(cos(angle), sin(angle)) * (3.0 + float(stone % 3) * 2.8)
+                if _is_inside_pond_water(point,profile.get("pond_sites",[]),4.0):continue
                 var ground: Vector3 = raw_sampler.call(point.x, point.y)
                 var s := 1.6 + float((cluster + stone) % 5) * 0.72
                 var basis := Basis(Vector3.UP, angle).scaled(Vector3(s * 1.35, s * (0.75 + float(stone % 2) * 0.22), s))
@@ -3577,6 +4731,20 @@ func _build_highland_outcrop_clusters(root:Node3D,profile:Dictionary,terrain_res
                 "yaw":angle+float(local_index)*.57+float(chain_index)*.19,
                 "scale":1.25+float((chain_index+local_index)%4)*.16,
             })
+        # A broken band on one high flank reads as an exposed rocky cliff face,
+        # not another evenly scattered boulder field. These use the authored
+        # Blender outcrop mesh stretched along the ridge, with uneven gaps.
+        for cliff_index in range(4):
+            var cliff_progress:float=float(cliff_index+1)/5.0
+            var cliff_side:=(-1.0 if chain_index%2==0 else 1.0)
+            var cliff_point:=chain_center+tangent*((cliff_progress-.5)*length*.70)+normal*width*(.26+.025*sin(float(cliff_index)*1.7))*cliff_side
+            anchors.append({
+                "position":cliff_point,
+                "yaw":angle+sin(float(cliff_index+chain_index)*.81)*.16,
+                "scale":1.34+float((chain_index+cliff_index)%3)*.14,
+                "profile":Vector3(1.75,1.38,.92),
+                "cliff":true,
+            })
     # Broad uplands and knolls get one smaller exposed-stone landmark so the
     # open interior has readable middle-distance silhouettes too.
     for region_index in range(profile.get("landform_regions",[]).size()):
@@ -3597,7 +4765,9 @@ func _build_highland_outcrop_clusters(root:Node3D,profile:Dictionary,terrain_res
         var anchor:Dictionary=anchors[anchor_index]
         var point:Vector2=anchor.get("position",Vector2.ZERO)
         var scale_value:float=float(anchor.get("scale",1.0))
+        var scale_profile:Vector3=anchor.get("profile",Vector3.ONE)
         if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),62.0):continue
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),8.0):continue
         if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),24.0):continue
         if _is_near_bridge_site(point,profile.get("ford_sites",[]),84.0):continue
         if _is_too_close_to_sites(point,profile.get("town_sites",[]),105.0):continue
@@ -3606,15 +4776,16 @@ func _build_highland_outcrop_clusters(root:Node3D,profile:Dictionary,terrain_res
         # Reject a sharply changing footprint rather than letting a rigid
         # Blender cluster float across a terrain break.
         var maximum_delta:=0.0
+        var footprint_scale:=scale_value*maxf(scale_profile.x,scale_profile.z)
         for sample_offset in [Vector2(-3,0),Vector2(3,0),Vector2(0,-2),Vector2(0,2)]:
-            maximum_delta=maxf(maximum_delta,absf(sampler.call(point.x+sample_offset.x*scale_value,point.y+sample_offset.y*scale_value).y-ground.y))
-        if maximum_delta>2.1*scale_value:continue
+            maximum_delta=maxf(maximum_delta,absf(sampler.call(point.x+sample_offset.x*footprint_scale,point.y+sample_offset.y*footprint_scale).y-ground.y))
+        if maximum_delta>2.1*scale_value*scale_profile.y:continue
         var yaw:float=float(anchor.get("yaw",0.0))
-        var basis:=Basis(Vector3.UP,yaw).scaled(Vector3.ONE*scale_value)
+        var basis:=Basis(Vector3.UP,yaw).scaled(scale_profile*scale_value)
         transforms.append(Transform3D(basis,ground+Vector3.UP*.025))
         var collision:=CollisionShape3D.new()
         var shape:=BoxShape3D.new()
-        shape.size=Vector3(7.8,2.8,3.4)*scale_value
+        shape.size=Vector3(7.8,2.8,3.4)*scale_profile*scale_value
         collision.shape=shape
         collision.position=ground+Vector3.UP*1.25*scale_value
         collision.rotation.y=yaw
@@ -3659,13 +4830,16 @@ func _build_flower_meadows(root: Node3D, profile: Dictionary, terrain_result: Di
     for town in profile.get("town_sites",[]):
         var town_center:Vector2=town.get("position",Vector2.ZERO)
         centers.append(town_center+Vector2(float(31+(centers.size()%3)*14),float(-26+(centers.size()%2)*49)))
+    var flowers_per_meadow:int=_scaled_population_count(profile,420,60)
     for meadow_idx in range(centers.size()):
         var center: Vector2 = centers[meadow_idx]
-        for i in range(420):
+        for i in range(flowers_per_meadow):
             var angle := float(i) * 2.39996323
-            var radius := 18.0 + sqrt(float(i) / 420.0) * (78.0 + float(meadow_idx % 3) * 18.0)
+            var radius := 18.0 + sqrt(float(i) / float(flowers_per_meadow)) * (78.0 + float(meadow_idx % 3) * 18.0)
             var point := center + Vector2(cos(angle), sin(angle)) * radius
             if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 50.0):
+                continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0):
                 continue
             if _is_too_close_to_corridors(point, profile.get("trail_corridors", []), 1.5):
                 continue
@@ -3701,11 +4875,12 @@ func _build_flowering_shrubs(root:Node3D,profile:Dictionary,terrain_result:Dicti
     var raw_sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
     var leaf_mesh:=_get_broadleaf_canopy_mesh();var head_mesh:=SphereMesh.new();head_mesh.radius=.075;head_mesh.height=.11;head_mesh.radial_segments=6;head_mesh.rings=3
     var leaves:Array[Transform3D]=[];var gold:Array[Transform3D]=[];var rose:Array[Transform3D]=[];var blue:Array[Transform3D]=[]
-    for i in range(1350):
+    var flowering_shrub_count:int=_scaled_population_count(profile,1350,250)
+    for i in range(flowering_shrub_count):
         var x:=world_size*(fmod(float(i*173),1361.0)/1361.0-.5)*.86
         var z:=world_size*(fmod(float(i*317),1367.0)/1367.0-.5)*.86
         var point:=Vector2(x,z)
-        if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),48.0) or _is_too_close_to_corridors(point,profile.get("road_corridors",[]),5.0) or _is_near_bridge_site(point,profile.get("ford_sites",[]),76.0) or _is_on_stone_walkway(point,profile):continue
+        if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),48.0) or _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0) or _is_too_close_to_corridors(point,profile.get("road_corridors",[]),5.0) or _is_near_bridge_site(point,profile.get("ford_sites",[]),76.0) or _is_on_stone_walkway(point,profile):continue
         var ground:Vector3=raw_sampler.call(x,z);var s:=.24+float(i%6)*.045;var yaw:=float(i)*2.39996323
         leaves.append(Transform3D(Basis(Vector3.UP,yaw).scaled(Vector3(s*1.55,s*.72,s*1.35)),ground+Vector3.UP*(s*.72)))
         for blossom in range(3):
@@ -3817,12 +4992,17 @@ func _build_river_ribbons(root: Node3D, corridors: Array, terrain_result: Dictio
         # lake edge so narrow earth ribbons do not continue across open water.
         var bank_points:Array=points.duplicate()
         var bank_width_profile:Array[float]=width_profile.duplicate()
-        var lake_transition_clearance:=bank_outer*.68
+        # Pond shore geometry already owns the receiving mouth. Retire the
+        # straight river-bank strips well before it so their square end caps
+        # cannot project as two artificial land piers into the lake.
+        var lake_transition_clearance:=bank_outer*1.85
+        var tapered_lake_start:=false
+        var tapered_lake_end:=false
         while bank_points.size()>2 and _point_inside_pond_water(bank_points[0],profile.get("pond_sites",[]),lake_transition_clearance):
-            bank_points.pop_front();bank_width_profile.pop_front()
+            bank_points.pop_front();bank_width_profile.pop_front();tapered_lake_start=true
         while bank_points.size()>2 and _point_inside_pond_water(bank_points[-1],profile.get("pond_sites",[]),lake_transition_clearance):
-            bank_points.pop_back();bank_width_profile.pop_back()
-        _build_smooth_river_banks(root,bank_points,width,bank_outer,terrain_result,str(corridor.get("name","River")),corridors,bank_width_profile,water_lift,bank_drop)
+            bank_points.pop_back();bank_width_profile.pop_back();tapered_lake_end=true
+        _build_smooth_river_banks(root,bank_points,width,bank_outer,terrain_result,str(corridor.get("name","River")),corridors,bank_width_profile,water_lift,bank_drop,tapered_lake_start,tapered_lake_end)
     _build_shaped_river_joins(root,corridors,terrain_result,water_lift)
 
 
@@ -3854,28 +5034,28 @@ func _build_shaped_river_joins(root:Node3D,corridors:Array,terrain_result:Dictio
                 if point_index+1<points.size():_append_river_incident(incidents,(Vector2(points[point_index+1])-junction).normalized(),visible_width)
                 break
         if incidents.size()<2:continue
-        var outline:Array[Vector2]=[]
-        for incident in incidents:
-            var direction:Vector2=incident.direction
-            var half_width:float=float(incident.width)*.5
-            var reach:=maxf(18.0,float(incident.width)*.38)
-            var center:=junction+direction*reach
-            var normal:=Vector2(-direction.y,direction.x)
-            outline.append(center+normal*half_width)
-            outline.append(center-normal*half_width)
-        outline.sort_custom(func(a:Vector2,b:Vector2)->bool:
-            return (a-junction).angle()<(b-junction).angle()
-        )
+        var join_radius:=0.0
+        for incident in incidents:join_radius=maxf(join_radius,float(incident.width)*.515)
+        var join_segments:=48
         var center3:Vector3=sampler.call(junction.x,junction.y);center3.y+=water_lift+.02
         var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
-        for outline_index in range(outline.size()):
-            var a2:=outline[outline_index]
-            var b2:=outline[(outline_index+1)%outline.size()]
+        # A rounded confluence pool covers the meeting ends of every incident
+        # ribbon. The former six-point convex fan exposed large angular bites
+        # of terrain between tributaries and made a natural junction read like
+        # overlapping blue polygons.
+        for outline_index in range(join_segments):
+            var angle_a:=TAU*float(outline_index)/float(join_segments)
+            var angle_b:=TAU*float(outline_index+1)/float(join_segments)
+            var seed:=float(junction_index)*1.71+junction.x*.0007+junction.y*.0011
+            var radius_a:=join_radius*(.91+sin(angle_a*3.0+seed)*.075+sin(angle_a*5.0-seed*.61)*.035)
+            var radius_b:=join_radius*(.91+sin(angle_b*3.0+seed)*.075+sin(angle_b*5.0-seed*.61)*.035)
+            var a2:=junction+Vector2(cos(angle_a),sin(angle_a))*radius_a
+            var b2:=junction+Vector2(cos(angle_b),sin(angle_b))*radius_b
             var a3:Vector3=sampler.call(a2.x,a2.y);a3.y+=water_lift+.02
             var b3:Vector3=sampler.call(b2.x,b2.y);b3.y+=water_lift+.02
             st.set_uv(Vector2(.5,.5));st.add_vertex(center3)
-            st.set_uv(Vector2(.5+(b2.x-junction.x)/128.0,.5+(b2.y-junction.y)/128.0));st.add_vertex(b3)
-            st.set_uv(Vector2(.5+(a2.x-junction.x)/128.0,.5+(a2.y-junction.y)/128.0));st.add_vertex(a3)
+            st.set_uv(Vector2(.5+cos(angle_b)*.5,.5+sin(angle_b)*.5));st.add_vertex(b3)
+            st.set_uv(Vector2(.5+cos(angle_a)*.5,.5+sin(angle_a)*.5));st.add_vertex(a3)
         st.generate_normals()
         var join:=MeshInstance3D.new();join.name="RiverJoin_%d"%junction_index
         join.mesh=st.commit();join.material_override=_make_water_material();join.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -3902,7 +5082,7 @@ func _point_inside_pond_water(point:Vector2,ponds:Array,clearance:float=0.0)->bo
     return false
 
 
-func _build_smooth_river_banks(root:Node3D,points:Array,water_width:float,_outer_distance:float,terrain_result:Dictionary,river_name:String,all_corridors:Array,width_profile:Array[float]=[],water_lift:float=1.35,_bank_drop:float=1.15)->void:
+func _build_smooth_river_banks(root:Node3D,points:Array,water_width:float,_outer_distance:float,terrain_result:Dictionary,river_name:String,all_corridors:Array,width_profile:Array[float]=[],water_lift:float=1.35,_bank_drop:float=1.15,taper_start:bool=false,taper_end:bool=false)->void:
     if points.size()<2:return
     var river_sampler:Callable=terrain_result.get("river_height_sampler",terrain_result.height_sampler)
     var raw_sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
@@ -3926,6 +5106,13 @@ func _build_smooth_river_banks(root:Node3D,points:Array,water_width:float,_outer
             # green/brown ribbon looked manufactured even on a curved channel.
             var bank_variation:=sin(float(i)*.61+float(river_name.length())*.37)*.72+sin(float(i)*.19+side*1.3)*.38
             var shore_distance:=local_water_width*.5+5.2+bank_variation*.70
+            # A receiving lake owns the mouth shoreline. Collapse the river's
+            # separate soil strip smoothly into the submerged contact row so
+            # its final segment cannot read as a square pier on open water.
+            var taper_factor:=1.0
+            if taper_start:taper_factor=minf(taper_factor,smoothstep(0.0,6.0,float(i)))
+            if taper_end:taper_factor=minf(taper_factor,smoothstep(0.0,6.0,float(points.size()-1-i)))
+            shore_distance=lerpf(inner_distance,shore_distance,taper_factor)
             var inner2:=point+normal*inner_distance
             var shore2:=point+normal*shore_distance
             var inner_ground:Vector3=river_sampler.call(inner2.x,inner2.y)
@@ -4057,7 +5244,11 @@ func _build_river_channel_walls(root: Node3D, points: Array, width: float, terra
 func _build_road_ribbons(root: Node3D, corridors: Array, terrain_result: Dictionary, profile: Dictionary = {}) -> void:
     var road_ground_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     for corridor in corridors:
-        var points: Array = _subdivide_polyline(corridor.get("points", []), 5)
+        # Fit road chords to the actual heightfield. Most terrain keeps a
+        # four-metre spacing; only a chord that would enter the ground is
+        # recursively split toward one metre. This removes missing alpine
+        # patches without multiplying every lowland road vertex.
+        var points: Array = _surface_fitted_polyline(corridor.get("points", []),road_ground_sampler,.18,4.0,1.0)
         if points.size() < 2:
             continue
         var bridge_gaps := _road_bridge_gaps(corridor, profile)
@@ -4066,15 +5257,9 @@ func _build_road_ribbons(root: Node3D, corridors: Array, terrain_result: Diction
         # A compacted, slightly wider shoulder grounds the road in the terrain
         # and removes the hard printed-on edge. It shares every bridge gap and
         # sits below the travel surface, so routing and collision stay intact.
-        var shoulder_mesh:=_build_corridor_ribbon_mesh(
-            points,
-            road_ground_sampler,
-            width+(2.7 if route_class=="major" else 1.8),
-            0.0,
-            0.075,
-            false,
-            bridge_gaps,
-            true
+        var shoulder_mesh:=_build_surface_following_ribbon_mesh(
+            points,road_ground_sampler,width+(2.7 if route_class=="major" else 1.8),
+            .075,.035,bridge_gaps
         )
         if shoulder_mesh:
             var shoulder:=MeshInstance3D.new()
@@ -4083,16 +5268,7 @@ func _build_road_ribbons(root: Node3D, corridors: Array, terrain_result: Diction
             shoulder.material_override=_make_road_shoulder_material(route_class)
             shoulder.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
             root.add_child(shoulder)
-        var mesh: ArrayMesh = _build_corridor_ribbon_mesh(
-            points,
-            road_ground_sampler,
-            width,
-            0.0,
-            0.14,
-            false,
-            bridge_gaps,
-            true
-        )
+        var mesh: ArrayMesh = _build_surface_following_ribbon_mesh(points,road_ground_sampler,width,.18,.12,bridge_gaps)
         if mesh == null:
             continue
 
@@ -4106,13 +5282,13 @@ func _build_road_ribbons(root: Node3D, corridors: Array, terrain_result: Diction
 func _build_trail_ribbons(root: Node3D, corridors: Array, terrain_result: Dictionary) -> void:
     var raw_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     for corridor in corridors:
-        var points: Array = _subdivide_polyline(corridor.get("points", []), 5)
+        var points: Array = _surface_fitted_polyline(corridor.get("points", []),raw_sampler,.18,3.5,1.0)
         if points.size() < 2:
             continue
         # Use the proven road ribbon construction at footpath scale. This keeps
         # the mesh continuous while remaining visibly narrower than a road.
         var width := maxf(2.4, float(corridor.get("width", 5.0)) * 0.48)
-        var mesh := _build_corridor_ribbon_mesh(points, raw_sampler, width, 0.0, 0.14, false, [], true)
+        var mesh := _build_surface_following_ribbon_mesh(points,raw_sampler,width,.18,.12,[])
         if mesh == null:
             continue
         var trail := MeshInstance3D.new()
@@ -4410,11 +5586,12 @@ func _add_town_cluster(root: Node3D, center2: Vector2, center3: Vector3, radius:
     hub.add_child(plaza)
 
 
-func _build_forests(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+func _build_forests(root:Node3D,profile:Dictionary,terrain_result:Dictionary,region_start:int=0,region_count:int=-1)->void:
     var forest_regions:Array=profile.get("forest_regions",[])
     var clearing_total:=0
     var forest_entries:Array[Dictionary]=[]
-    for region_index in range(forest_regions.size()):
+    var region_end:int=forest_regions.size() if region_count<0 else mini(forest_regions.size(),region_start+region_count)
+    for region_index in range(clampi(region_start,0,forest_regions.size()),region_end):
         var region:Dictionary=forest_regions[region_index]
         var center: Vector2 = region.get("center", Vector2.ZERO)
         var radius: float = region.get("radius", 180.0)
@@ -4423,7 +5600,8 @@ func _build_forests(root: Node3D, profile: Dictionary, terrain_result: Dictionar
         clearing_total+=clearings.size()
         # MultiMesh keeps several thousand trees inexpensive; favor a real
         # forest silhouette instead of sparse decorative clusters.
-        var tree_count: int = int(maxf(48.0, radius * density * 1.18))
+        var base_tree_count:int=int(maxf(48.0,radius*density*1.18))
+        var tree_count:int=_scaled_population_count(profile,base_tree_count,36)
         var accepted: Array[Dictionary] = []
         for i in range(tree_count):
             var angle: float = float(i) * 2.39996323
@@ -4467,7 +5645,13 @@ func _build_forests(root: Node3D, profile: Dictionary, terrain_result: Dictionar
             var entry:Dictionary=accepted[accepted_index]
             entry["yaw"]=float(accepted_index)*2.39996323
             entry["style"]=accepted_index%5
-            entry["species"]="birch" if accepted_index%8==0 else ("maple" if accepted_index%11==1 else "oak")
+            var biome_id:=str(profile.get("biome_id",""))
+            if biome_id in ["alpine_frontier","glacial_alpine","subarctic_coast"]:
+                entry["species"]="birch" if accepted_index%7==0 else "pine"
+            elif biome_id=="windswept_highlands":
+                entry["species"]="birch" if accepted_index%6==0 else ("oak" if accepted_index%9==1 else "pine")
+            else:
+                entry["species"]="birch" if accepted_index%8==0 else ("maple" if accepted_index%11==1 else "oak")
             forest_entries.append(entry)
     _add_forest_batch(root,forest_entries,terrain_result)
     root.set_meta("forest_clearing_count",clearing_total)
@@ -4486,10 +5670,39 @@ func _forest_clearing_specs(center:Vector2,radius:float,region_index:int)->Array
 
 
 func _is_dry_biome(point: Vector2, world_size: float) -> bool:
-    return point.y < -world_size * 0.18 and point.x > -world_size * 0.10
+    return _point_inside_active_ocean(point) or (point.y < -world_size * 0.18 and point.x > -world_size * 0.10)
+
+
+func _point_inside_active_ocean(point:Vector2,margin:float=0.0)->bool:
+    for basin_value in _active_ocean_basins:
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast" or str(basin.get("edge","west"))!="west":continue
+        var coast_points:Array=basin.get("coast_points",[])
+        if coast_points.size()<2:continue
+        var coast_x:=Vector2(coast_points[0]).x
+        var z:=point.y
+        if z<=Vector2(coast_points[0]).y:
+            coast_x=Vector2(coast_points[0]).x
+        elif z>=Vector2(coast_points[-1]).y:
+            coast_x=Vector2(coast_points[-1]).x
+        else:
+            for index in range(coast_points.size()-1):
+                var a:=Vector2(coast_points[index]);var b:=Vector2(coast_points[index+1])
+                if z<minf(a.y,b.y) or z>maxf(a.y,b.y):continue
+                var span:=b.y-a.y
+                coast_x=lerpf(a.x,b.x,0.0 if absf(span)<.001 else clampf((z-a.y)/span,0.0,1.0))
+                break
+        if point.x<coast_x+margin:return true
+    return false
 
 
 func _build_biome_vegetation(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
+    # Streamed frontier profiles already carry four authored forest regions.
+    # Re-running the realm-wide generic biome scatter duplicates those trees,
+    # creates southern cacti in a northern climate, and causes a large travel
+    # hitch. The authored forests above now select pine/birch for this zone.
+    if profile.get("streamed_population",false):return
     var world_size: float = profile.get("world_size", 7200.0)
     var terrain_sampler: Callable = terrain_result.get("terrain_height_sampler", terrain_result.height_sampler)
     var spawn: Vector2 = profile.get("spawn_site", {}).get("position", Vector2.ZERO)
@@ -4497,7 +5710,8 @@ func _build_biome_vegetation(root: Node3D, profile: Dictionary, terrain_result: 
     # Broadleaf trees scatter outside the authored forest cores, while broad
     # open sight-lines remain near towns, roads and the starting location.
     var scattered: Array[Dictionary] = []
-    for i in range(2600):
+    var scattered_tree_count:int=_scaled_population_count(profile,2600,800)
+    for i in range(scattered_tree_count):
         var anchor_index:=i/6
         var anchor_x:=world_size*(fmod(float(anchor_index*149),439.0)/439.0-.5)*.88
         var anchor_z:=world_size*(fmod(float(anchor_index*283),443.0)/443.0-.5)*.86
@@ -4522,7 +5736,8 @@ func _build_biome_vegetation(root: Node3D, profile: Dictionary, terrain_result: 
     var pine_transforms: Array[Transform3D] = []
     var conifer_ground:Array[Vector3]=[]
     var conifer_scales:Array[float]=[]
-    for i in range(1900):
+    var pine_sample_count:int=_scaled_population_count(profile,1900,600)
+    for i in range(pine_sample_count):
         var x := world_size * (fmod(float(i * 181), 1901.0) / 1901.0 - 0.5) * 0.90
         var z := world_size * (0.10 + fmod(float(i * 307), 1913.0) / 1913.0 * 0.34)
         var point := Vector2(x, z)
@@ -4550,44 +5765,62 @@ func _build_biome_vegetation(root: Node3D, profile: Dictionary, terrain_result: 
     var cactus_trunks: Array[Transform3D] = []
     var cactus_arms: Array[Transform3D] = []
     var tumble_branches: Array[Transform3D] = []
-    for i in range(820):
+    var cactus_sample_count:int=_scaled_population_count(profile,820,280)
+    for i in range(cactus_sample_count):
         var x := lerpf(-world_size * 0.08, world_size * 0.43, fmod(float(i * 127), 823.0) / 823.0)
         var z := lerpf(-world_size * 0.43, -world_size * 0.19, fmod(float(i * 251), 827.0) / 827.0)
         var point := Vector2(x, z)
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 58.0) or _is_too_close_to_corridors(point, profile.get("road_corridors", []), 15.0) or _is_too_close_to_sites(point, profile.get("town_sites", []), 62.0):
             continue
         var ground: Vector3 = terrain_sampler.call(x, z)
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),4.0) or ground.y<=float(terrain_result.water_level)+.8:
+            continue
         var s := 0.72 + float(i % 7) * 0.08
         var yaw := float(i) * 1.73
         cactus_trunks.append(Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3(s, s, s)), ground + Vector3.UP * 1.75 * s))
-        if i % 2 == 0:
-            var arm_basis := Basis.from_euler(Vector3(0, yaw, PI * 0.5)).scaled(Vector3(s * 0.72, s * 0.72, s * 0.72))
-            cactus_arms.append(Transform3D(arm_basis, ground + Vector3(cos(yaw) * 0.42, 1.8 * s, sin(yaw) * 0.42)))
-    for i in range(760):
+        # Every cactus gets a recognizable elbow. Bare cylinders were reading
+        # as the same green sticks previously rejected for grass.
+        var arm_count:=2 if i%3==0 else 1
+        for arm_index in range(arm_count):
+            var arm_yaw:=yaw+(PI if i%2 else 0.0)+float(arm_index)*2.05
+            var arm_direction:=Vector2(cos(arm_yaw),sin(arm_yaw))
+            var arm_height:=(1.42+.52*float(arm_index))*s
+            var arm_reach:=(.70+.10*float((i+arm_index)%3))*s
+            var arm_basis:=Basis.from_euler(Vector3(0,arm_yaw,PI*.5)).scaled(Vector3(s,s,s))
+            cactus_arms.append(Transform3D(arm_basis,ground+Vector3(arm_direction.x*arm_reach*.5,arm_height,arm_direction.y*arm_reach*.5)))
+            var tip_basis:=Basis(Vector3.UP,arm_yaw).scaled(Vector3(s*.88,s*(.78+.12*float(arm_index)),s*.88))
+            cactus_arms.append(Transform3D(tip_basis,ground+Vector3(arm_direction.x*arm_reach,arm_height+.43*s,arm_direction.y*arm_reach)))
+    var tumbleweed_sample_count:int=_scaled_population_count(profile,760,260)
+    for i in range(tumbleweed_sample_count):
         var x := lerpf(-world_size * 0.08, world_size * 0.43, fmod(float(i * 167), 761.0) / 761.0)
         var z := lerpf(-world_size * 0.43, -world_size * 0.19, fmod(float(i * 313), 769.0) / 769.0)
         var point := Vector2(x, z)
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 54.0) or _is_too_close_to_corridors(point, profile.get("road_corridors", []), 9.0):
             continue
         var ground: Vector3 = terrain_sampler.call(x, z)
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0) or ground.y<=float(terrain_result.water_level)+.6:
+            continue
         for branch_index in range(5):
             var rotation := Vector3(float(branch_index) * 0.63, float(i) * 0.87 + branch_index, PI * (0.33 + float(branch_index) * 0.08))
             tumble_branches.append(Transform3D(Basis.from_euler(rotation), ground + Vector3.UP * 0.58))
     var cactus_mesh := CylinderMesh.new(); cactus_mesh.top_radius = 0.25; cactus_mesh.bottom_radius = 0.32; cactus_mesh.height = 3.5; cactus_mesh.radial_segments = 7
-    var arm_mesh := CylinderMesh.new(); arm_mesh.top_radius = 0.17; arm_mesh.bottom_radius = 0.20; arm_mesh.height = 1.25; arm_mesh.radial_segments = 6
+    var arm_mesh := CylinderMesh.new(); arm_mesh.top_radius = 0.23; arm_mesh.bottom_radius = 0.27; arm_mesh.height = 1.45; arm_mesh.radial_segments = 7
     var branch_mesh := CylinderMesh.new(); branch_mesh.top_radius = 0.025; branch_mesh.bottom_radius = 0.035; branch_mesh.height = 1.35; branch_mesh.radial_segments = 5
     _add_multimesh_batch(root, cactus_mesh, cactus_trunks, Color(0.20, 0.40, 0.20, 1.0))
     _add_multimesh_batch(root, arm_mesh, cactus_arms, Color(0.22, 0.42, 0.21, 1.0))
     _add_multimesh_batch(root, branch_mesh, tumble_branches, Color(0.34, 0.245, 0.135, 1.0), false)
 
     var ground_branches: Array[Transform3D] = []
-    for i in range(2800):
+    var ground_branch_count:int=_scaled_population_count(profile,2800,900)
+    for i in range(ground_branch_count):
         var x := world_size * (fmod(float(i * 233), 2801.0) / 2801.0 - 0.5) * 0.90
         var z := world_size * (fmod(float(i * 397), 2819.0) / 2819.0 - 0.5) * 0.90
         var point := Vector2(x, z)
         if _is_too_close_to_corridors(point, profile.get("river_corridors", []), 51.0) or _is_too_close_to_corridors(point, profile.get("road_corridors", []), 5.0) or _is_too_close_to_sites(point, profile.get("town_sites", []), 48.0):
             continue
         var ground: Vector3 = terrain_sampler.call(x, z)
+        if _is_inside_pond_water(point,profile.get("pond_sites",[]),3.0) or ground.y<=float(terrain_result.water_level)+.5:
+            continue
         var yaw := float(i) * 1.914
         var s := 0.55 + float(i % 6) * 0.11
         var branch_basis := Basis.from_euler(Vector3(0.08 * float(i % 3), yaw, PI * 0.5)).scaled(Vector3(s, s, s))
@@ -4773,6 +6006,7 @@ func _add_forest_batch(root: Node3D, entries: Array, terrain_result: Dictionary)
         "oak":[],
         "birch":[],
         "maple":[],
+        "pine":[],
         "willow":[],
     }
     var tree_render_refs:Array[Dictionary]=[]
@@ -4915,6 +6149,321 @@ func _get_architecture_detail_mesh(mesh_name:String)->Mesh:
     source.free()
     _architecture_detail_mesh_cache[mesh_name]=mesh
     return mesh
+
+
+func _get_glacial_environment_mesh(mesh_name:String)->Mesh:
+    if _glacial_environment_mesh_cache.has(mesh_name):return _glacial_environment_mesh_cache[mesh_name]
+    var source:=GLACIAL_ENVIRONMENT_KIT_SCENE.instantiate()
+    var mesh:=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    _glacial_environment_mesh_cache[mesh_name]=mesh
+    return mesh
+
+
+func _get_western_environment_mesh(mesh_name:String)->Mesh:
+    if _western_environment_mesh_cache.has(mesh_name):return _western_environment_mesh_cache[mesh_name]
+    var source:=WESTERN_ENVIRONMENT_KIT_SCENE.instantiate()
+    var mesh:=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    _western_environment_mesh_cache[mesh_name]=mesh
+    return mesh
+
+
+func _get_stormbreak_environment_mesh(mesh_name:String)->Mesh:
+    if _stormbreak_environment_mesh_cache.has(mesh_name):return _stormbreak_environment_mesh_cache[mesh_name]
+    var source:=STORMBREAK_ENVIRONMENT_KIT_SCENE.instantiate()
+    var mesh:=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    _stormbreak_environment_mesh_cache[mesh_name]=mesh
+    return mesh
+
+
+func _get_skeld_environment_mesh(mesh_name:String)->Mesh:
+    if _skeld_coast_environment_mesh_cache.has(mesh_name):return _skeld_coast_environment_mesh_cache[mesh_name]
+    var source:=SKELD_COAST_ENVIRONMENT_KIT_SCENE.instantiate()
+    var mesh:=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    _skeld_coast_environment_mesh_cache[mesh_name]=mesh
+    return mesh
+
+
+func _get_eastern_environment_mesh(mesh_name:String)->Mesh:
+    if _eastern_marches_environment_mesh_cache.has(mesh_name):return _eastern_marches_environment_mesh_cache[mesh_name]
+    var source:=EASTERN_MARCHES_ENVIRONMENT_KIT_SCENE.instantiate()
+    var mesh:=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    _eastern_marches_environment_mesh_cache[mesh_name]=mesh
+    return mesh
+
+
+func _add_eastern_environment_piece(root:Node3D,mesh_name:String,ground:Vector3,yaw:float,scale_value:float,collidable:bool,visibility_range:float,instance_name:String="")->MeshInstance3D:
+    var mesh:=_get_eastern_environment_mesh(mesh_name)
+    if mesh==null:return null
+    var piece:=MeshInstance3D.new()
+    piece.name=instance_name if not instance_name.is_empty() else mesh_name
+    piece.mesh=mesh
+    # Substantial foundations extend below their Blender origin. A tiny inset
+    # prevents daylight under the model on coarse terrain without burying the
+    # true gates, ramps, and door openings.
+    piece.position=ground-Vector3.UP*.06
+    piece.rotation.y=yaw
+    piece.scale=Vector3.ONE*scale_value
+    for surface_index in range(mesh.get_surface_count()):
+        var source_material:=mesh.surface_get_material(surface_index)
+        var material_name:=str(source_material.resource_name).to_lower() if source_material!=null else ""
+        var replacement:Material=null
+        if "pale limestone" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.82,.75,.58),1.0,2.6)
+        elif "warm cut stone" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.59,.47,.31),1.0,2.7)
+        elif "charcoal basalt" in material_name:
+            # Read as dark volcanic masonry without collapsing into a black
+            # silhouette against the Marches' bright sky and pale grassland.
+            replacement=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.82,.74,.66),1.0,2.5)
+        elif "sunwashed basalt" in material_name:
+            replacement=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.84,.71,.53),1.0,2.35)
+        elif "warm plaster" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/aged_plaster_v1.png",Color(.83,.66,.40),1.0,2.25)
+        elif "terracotta" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/clay_roof_v1.png",Color(.64,.24,.10),1.0,2.8)
+        elif "dark oak" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.34,.20,.09),1.0,2.1)
+        elif "striped canvas" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/aged_plaster_v1.png",Color(.72,.43,.14),1.0,1.8)
+        elif "aged bronze" in material_name:
+            replacement=_make_material(Color(.32,.24,.10),.68)
+        elif "beacon ember" in material_name:
+            replacement=_make_lit_window_material(Color(1.0,.24,.035))
+        if replacement!=null:piece.set_surface_override_material(surface_index,replacement)
+    piece.visibility_range_end=visibility_range
+    piece.visibility_range_end_margin=140.0
+    piece.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(piece)
+    if collidable:piece.create_trimesh_collision()
+    return piece
+
+
+func _add_skeld_environment_piece(root:Node3D,mesh_name:String,ground:Vector3,yaw:float,scale_value:float,collidable:bool,visibility_range:float,instance_name:String="")->MeshInstance3D:
+    var mesh:=_get_skeld_environment_mesh(mesh_name)
+    if mesh==null:return null
+    var piece:=MeshInstance3D.new()
+    piece.name=instance_name if not instance_name.is_empty() else mesh_name
+    piece.mesh=mesh
+    piece.position=ground+Vector3.UP*.02
+    piece.rotation.y=yaw
+    piece.scale=Vector3.ONE*scale_value
+    for surface_index in range(mesh.get_surface_count()):
+        var source_material:=mesh.surface_get_material(surface_index)
+        var material_name:=str(source_material.resource_name).to_lower() if source_material!=null else ""
+        var replacement:Material=null
+        if "sea stone" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.67,.75,.74),1.0,3.0)
+        elif "cut stone" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.90,.91,.82),1.0,2.8)
+        elif "slate" in material_name:
+            replacement=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.28,.40,.43),1.0,2.9)
+        elif "timber" in material_name or "oak" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.47,.34,.23) if "weathered" in material_name else Color(.28,.22,.18),1.0,2.15)
+        elif "boat hull" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.20,.29,.30),1.0,2.4)
+        elif "sail canvas" in material_name:
+            replacement=_make_texture_material("res://assets/terrain/meadow_soil_realistic_v3.png",Color(.73,.68,.53),1.0,2.0)
+        if replacement!=null:piece.set_surface_override_material(surface_index,replacement)
+    piece.visibility_range_end=visibility_range
+    piece.visibility_range_end_margin=120.0
+    piece.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(piece)
+    if collidable:piece.create_trimesh_collision()
+    return piece
+
+
+func _add_stormbreak_environment_piece(root:Node3D,mesh_name:String,ground:Vector3,yaw:float,scale_value:float,collidable:bool,visibility_range:float)->MeshInstance3D:
+    var mesh:=_get_stormbreak_environment_mesh(mesh_name)
+    if mesh==null:return null
+    var piece:=MeshInstance3D.new()
+    piece.name=mesh_name
+    piece.mesh=mesh
+    piece.position=ground+Vector3.UP*.02
+    piece.rotation.y=yaw
+    piece.scale=Vector3.ONE*scale_value
+    for surface_index in range(mesh.get_surface_count()):
+        var source_material:=mesh.surface_get_material(surface_index)
+        var material_name:=str(source_material.resource_name).to_lower() if source_material!=null else ""
+        var replacement:Material=null
+        if "field stone" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.82,.88,.84),1.0,3.1)
+        elif "cut stone" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.98,.96,.82),1.0,2.9)
+        elif "slate" in material_name:
+            replacement=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.34,.40,.40),1.0,3.0)
+        elif "oak" in material_name:
+            replacement=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.46,.33,.20),1.0,2.25)
+        if replacement!=null:piece.set_surface_override_material(surface_index,replacement)
+    piece.visibility_range_end=visibility_range
+    piece.visibility_range_end_margin=120.0
+    piece.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(piece)
+    if collidable:piece.create_trimesh_collision()
+    return piece
+
+
+func _add_western_environment_piece(root:Node3D,mesh_name:String,ground:Vector3,yaw:float,scale_value:float,collidable:bool,visibility_range:float)->MeshInstance3D:
+    var mesh:=_get_western_environment_mesh(mesh_name)
+    if mesh==null:return null
+    var piece:=MeshInstance3D.new()
+    piece.name=mesh_name
+    piece.mesh=mesh
+    piece.position=ground+Vector3.UP*.02
+    piece.rotation.y=yaw
+    piece.scale=Vector3.ONE*scale_value
+    for surface_index in range(mesh.get_surface_count()):
+        var source_material:=mesh.surface_get_material(surface_index)
+        var material_name:=str(source_material.resource_name).to_lower() if source_material!=null else ""
+        var replacement:Material=null
+        if "stone" in material_name:
+            replacement=_make_texture_material(
+                "res://assets/architecture/castle_stone_v1.png",
+                Color(.88,.90,.81) if "cut" in material_name else Color(.68,.72,.65),1.0,2.8
+            )
+        elif "timber" in material_name or "oak" in material_name:
+            replacement=_make_texture_material(
+                "res://assets/architecture/dark_oak_v1.png",
+                Color(.66,.48,.27) if "wet" in material_name else Color(.51,.36,.21),1.0,2.2
+            )
+        elif "slate" in material_name:
+            replacement=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.48,.57,.51),.98,2.7)
+        if replacement!=null:piece.set_surface_override_material(surface_index,replacement)
+    piece.visibility_range_end=visibility_range
+    piece.visibility_range_end_margin=120.0
+    piece.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(piece)
+    if collidable:piece.create_trimesh_collision()
+    return piece
+
+
+func _add_glacial_environment_piece(root:Node3D,mesh_name:String,ground:Vector3,yaw:float,scale_value:float,collidable:bool,visibility_range:float)->MeshInstance3D:
+    var mesh:=_get_glacial_environment_mesh(mesh_name)
+    if mesh==null:return null
+    var piece:=MeshInstance3D.new()
+    var readable_name:=mesh_name
+    var duplicate_index:=2
+    while root.get_node_or_null(NodePath(readable_name))!=null:
+        readable_name="%s_%d"%[mesh_name,duplicate_index]
+        duplicate_index+=1
+    piece.name=readable_name
+    piece.mesh=mesh
+    piece.position=ground+Vector3.UP*.02
+    piece.rotation.y=yaw
+    piece.scale=Vector3.ONE*scale_value
+    var is_shelter:=mesh_name in ["FrostlineRefuge","SurveyShelter"]
+    for surface_index in range(mesh.get_surface_count()):
+        var source_material:=mesh.surface_get_material(surface_index)
+        var material_name:=str(source_material.resource_name).to_lower() if source_material!=null else ""
+        var replacement:Material=null
+        if "snow" in material_name:
+            replacement=_make_glacier_surface_material(true,true) if mesh_name.begins_with("Glacier") else _make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(1.12,1.17,1.16),.92,3.0)
+        elif "ice" in material_name:
+            if mesh_name.begins_with("Glacier"):
+                replacement=_make_glacier_surface_material(false,"weathered" in material_name or "pale" in material_name)
+            else:
+                var ice_tint:=Color(1.02,1.34,1.52) if "deep" in material_name else Color(1.20,1.34,1.34)
+                var ice_material:=_make_texture_material("res://assets/terrain/highland_stone_v1.png",ice_tint,.38,3.6).duplicate() as StandardMaterial3D
+                ice_material.specular_mode=BaseMaterial3D.SPECULAR_SCHLICK_GGX
+                ice_material.metallic_specular=.34
+                replacement=ice_material
+        elif "moraine" in material_name:
+            if is_shelter:
+                replacement=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(1.0,1.02,1.02) if "frosted" in material_name else Color(.82,.88,.88),1.0,2.7)
+            else:
+                replacement=_make_texture_material("res://assets/terrain/highland_stone_v1.png",Color(.32,.35,.35) if "cold" in material_name else Color(.49,.51,.49),1.0,3.1)
+        elif "deadwood" in material_name:
+            replacement=_make_bark_material(Color(.68,.51,.34) if is_shelter else Color(.47,.39,.31))
+        if replacement!=null:piece.set_surface_override_material(surface_index,replacement)
+    piece.visibility_range_end=visibility_range
+    piece.visibility_range_end_margin=120.0
+    piece.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    root.add_child(piece)
+    if collidable:piece.create_trimesh_collision()
+    return piece
+
+
+func _make_glacier_surface_material(snow_surface:bool=false,pale_ice:bool=false)->ShaderMaterial:
+    var cache_key:="glacier_snow" if snow_surface else ("glacier_pale_ice" if pale_ice else "glacier_deep_ice")
+    if _shared_materials.has(cache_key):return _shared_materials[cache_key]
+    var material:=ShaderMaterial.new()
+    var shader:=Shader.new()
+    shader.code="""
+shader_type spatial;
+render_mode specular_schlick_ggx;
+
+uniform bool snow_surface=false;
+uniform bool pale_ice=false;
+varying vec3 world_position;
+
+float glacier_hash(vec2 p){
+    p=fract(p*vec2(123.34,345.45));
+    p+=dot(p,p+34.345);
+    return fract(p.x*p.y);
+}
+float glacier_noise(vec2 p){
+    vec2 i=floor(p);vec2 f=fract(p);f=f*f*(3.0-2.0*f);
+    return mix(mix(glacier_hash(i),glacier_hash(i+vec2(1,0)),f.x),mix(glacier_hash(i+vec2(0,1)),glacier_hash(i+vec2(1,1)),f.x),f.y);
+}
+void vertex(){world_position=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;}
+void fragment(){
+    float broad=glacier_noise(world_position.xz*.085);
+    float fine=glacier_noise(world_position.xy*.23+world_position.zy*.11);
+    float band=.5+.5*sin(world_position.y*.31+broad*2.8);
+    if(snow_surface){
+        ALBEDO=mix(vec3(.73,.81,.84),vec3(.91,.95,.95),broad*.58+fine*.18);
+        ROUGHNESS=.88;
+        SPECULAR=.18;
+    }else{
+        vec3 deep=vec3(.16,.39,.52);
+        vec3 pale=vec3(.44,.66,.73);
+        vec3 base=mix(deep,pale,pale_ice?.76:.26);
+        vec3 frost=vec3(.67,.82,.84);
+        ALBEDO=mix(base,frost,band*.18+fine*.12);
+        ROUGHNESS=mix(.32,.48,fine);
+        SPECULAR=.46;
+    }
+}
+"""
+    material.shader=shader
+    material.set_shader_parameter("snow_surface",snow_surface)
+    material.set_shader_parameter("pale_ice",pale_ice)
+    _shared_materials[cache_key]=material
+    return material
+
+
+func _add_glacier_source_atmosphere(root:Node3D,ground:Vector3,yaw:float,scale_value:float)->void:
+    # A restrained band of cold mist conceals the exact water/ice join and
+    # makes the terminal face feel active. It is local, unlit and bounded so
+    # the effect does not become a region-wide particle tax.
+    var mist:=GPUParticles3D.new()
+    mist.name="Rimewater Source Mist"
+    mist.position=ground+Vector3(0,2.2,-13.0*scale_value).rotated(Vector3.UP,yaw)
+    mist.amount=72
+    mist.lifetime=5.5
+    mist.randomness=.72
+    mist.visibility_aabb=AABB(Vector3(-38,-3,-25)*scale_value,Vector3(76,18,50)*scale_value)
+    mist.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    var process:=ParticleProcessMaterial.new()
+    process.emission_shape=ParticleProcessMaterial.EMISSION_SHAPE_BOX
+    process.emission_box_extents=Vector3(19.0,1.2,5.5)*scale_value
+    process.direction=Vector3(0,1,.12)
+    process.spread=32.0
+    process.initial_velocity_min=.10
+    process.initial_velocity_max=.42
+    process.gravity=Vector3(0,.08,0)
+    process.scale_min=2.4*scale_value
+    process.scale_max=5.6*scale_value
+    mist.process_material=process
+    var quad:=QuadMesh.new();quad.size=Vector2(2.4,1.4)
+    var mist_mat:=StandardMaterial3D.new();mist_mat.albedo_color=Color(.72,.84,.87,.14);mist_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA;mist_mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED;mist_mat.billboard_mode=BaseMaterial3D.BILLBOARD_ENABLED;mist_mat.no_depth_test=false
+    quad.material=mist_mat
+    mist.draw_pass_1=quad
+    root.add_child(mist)
 
 
 func _cylinder_between_transform(start:Vector3,finish:Vector3,radius:float)->Transform3D:
@@ -5113,7 +6662,9 @@ func _add_bridge(root: Node3D, point: Vector2, road_dir: Vector2, road_width: fl
             deck_width,
             maxf(3.0, approach_width * 0.48),
             end_y,
-            bank_ground.y + 0.185
+            # Sit just above the 0.18 m road ribbon through the overlap. This
+            # guarantees a clean visual handoff without coplanar shimmer.
+            bank_ground.y + 0.205
         )
         if ramp_mesh:
             var ramp := MeshInstance3D.new()
@@ -5177,6 +6728,60 @@ func _add_walkable_ramp_collision(ramp:MeshInstance3D,start2:Vector2,end2:Vector
     ramp.add_child(body)
 
 
+func _build_surface_following_ribbon_mesh(points:Array,height_sampler:Callable,width:float,center_lift:float,edge_lift:float,exclusion_sites:Array=[])->ArrayMesh:
+    if points.size()<2:return null
+    const LANE_COUNT:=5
+    const CENTER_LANE:=2
+    var rows:Array=[]
+    var distances:Array[float]=[]
+    var accumulated:=0.0
+    for point_index in range(points.size()):
+        var point:Vector2=points[point_index]
+        var tangent:=_polyline_tangent(points,point_index)
+        if tangent.length_squared()<=.0001:continue
+        var normal:=Vector2(-tangent.y,tangent.x).normalized()
+        var row:Array[Vector3]=[]
+        for lane_index in range(LANE_COUNT):
+            var u:=float(lane_index)/float(LANE_COUNT-1)
+            var offset:=(u-.5)*width
+            var lane_point:=point+normal*offset
+            var sampled:Vector3=height_sampler.call(lane_point.x,lane_point.y)
+            sampled.y+=lerpf(center_lift,edge_lift,absf(u-.5)*2.0)
+            row.append(sampled)
+        if not rows.is_empty():
+            var previous:Array=rows[-1]
+            accumulated+=(previous[CENTER_LANE] as Vector3).distance_to(row[CENTER_LANE])
+        rows.append(row)
+        distances.append(accumulated)
+    if rows.size()<2:return null
+    var st:=SurfaceTool.new();st.begin(Mesh.PRIMITIVE_TRIANGLES)
+    for row_index in range(rows.size()-1):
+        var a_row:Array=rows[row_index]
+        var b_row:Array=rows[row_index+1]
+        var quad_center:=Vector2(
+            ((a_row[CENTER_LANE] as Vector3).x+(b_row[CENTER_LANE] as Vector3).x)*.5,
+            ((a_row[CENTER_LANE] as Vector3).z+(b_row[CENTER_LANE] as Vector3).z)*.5
+        )
+        if _inside_bridge_road_gap(quad_center,exclusion_sites):continue
+        var va:=distances[row_index]/14.0
+        var vb:=distances[row_index+1]/14.0
+        for lane_index in range(LANE_COUNT-1):
+            var ua:=float(lane_index)/float(LANE_COUNT-1)
+            var ub:=float(lane_index+1)/float(LANE_COUNT-1)
+            var a_left:Vector3=a_row[lane_index]
+            var a_right:Vector3=a_row[lane_index+1]
+            var b_left:Vector3=b_row[lane_index]
+            var b_right:Vector3=b_row[lane_index+1]
+            st.set_uv(Vector2(ua,va));st.add_vertex(a_left)
+            st.set_uv(Vector2(ua,vb));st.add_vertex(b_left)
+            st.set_uv(Vector2(ub,va));st.add_vertex(a_right)
+            st.set_uv(Vector2(ub,va));st.add_vertex(a_right)
+            st.set_uv(Vector2(ua,vb));st.add_vertex(b_left)
+            st.set_uv(Vector2(ub,vb));st.add_vertex(b_right)
+    st.generate_normals()
+    return st.commit()
+
+
 func _build_corridor_ribbon_mesh(points: Array, height_sampler: Callable, width: float, fixed_y: float, y_lift: float, force_flat: bool, exclusion_sites: Array = [], taper_edges: bool = false, edge_height_sampler: Callable = Callable(), width_profile: Array[float] = []) -> ArrayMesh:
     if points.size() < 2:
         return null
@@ -5222,7 +6827,7 @@ func _build_corridor_ribbon_mesh(points: Array, height_sampler: Callable, width:
             # Keep road and trail shoulders above coarse terrain triangles.
             # The former 0.02 edge offset was swallowed between grid vertices,
             # creating intermittent missing patches.
-            var edge_lift := minf(0.08, y_lift) if taper_edges else y_lift
+            var edge_lift := minf(0.12, y_lift) if taper_edges else y_lift
             left3.y += edge_lift
             center3.y += y_lift
             right3.y += edge_lift
@@ -5306,12 +6911,53 @@ func _road_bridge_gaps(road: Dictionary, profile: Dictionary) -> Array[Dictionar
         gaps.append({
             "center": center,
             "direction": road_info.get("direction", Vector2(0.0, 1.0)),
-            # The tapered ramp extends 10 units beyond the deck. Ending the
-            # cutout one unit early tucks the dirt edge beneath its road end.
-            "half_length": deck_half + 8.2,
+            # The approach extends ten metres beyond the deck. Four metres of
+            # covered overlap keeps the dirt road physically continuous under
+            # the timber ramp even when the smoothed road centerline meets the
+            # bridge at a slight angle.
+            "half_length": deck_half + 6.0,
             "half_width": maxf(10.0, road_width * 0.90),
         })
     return gaps
+
+
+func _resample_polyline_by_spacing(points:Array,spacing:float)->Array:
+    if points.size()<2:return points.duplicate()
+    var result:Array=[]
+    var safe_spacing:=maxf(.75,spacing)
+    for index in range(points.size()-1):
+        var a:Vector2=points[index]
+        var b:Vector2=points[index+1]
+        var steps:=maxi(1,ceili(a.distance_to(b)/safe_spacing))
+        for step in range(steps):result.append(a.lerp(b,float(step)/float(steps)))
+    result.append(points[-1])
+    return result
+
+
+func _surface_fitted_polyline(points:Array,height_sampler:Callable,y_lift:float,max_spacing:float,min_spacing:float)->Array:
+    var coarse:=_resample_polyline_by_spacing(points,max_spacing)
+    if coarse.size()<2 or not height_sampler.is_valid():return coarse
+    var result:Array=[]
+    for index in range(coarse.size()-1):
+        _append_surface_fitted_segment(result,coarse[index],coarse[index+1],height_sampler,y_lift,min_spacing,0)
+    result.append(coarse[-1])
+    return result
+
+
+func _append_surface_fitted_segment(result:Array,a:Vector2,b:Vector2,height_sampler:Callable,y_lift:float,min_spacing:float,depth:int)->void:
+    var a_y:float=(height_sampler.call(a.x,a.y) as Vector3).y+y_lift
+    var b_y:float=(height_sampler.call(b.x,b.y) as Vector3).y+y_lift
+    var minimum_clearance:=INF
+    for fraction in [.25,.5,.75]:
+        var point:=a.lerp(b,float(fraction))
+        var ground_y:float=(height_sampler.call(point.x,point.y) as Vector3).y
+        minimum_clearance=minf(minimum_clearance,lerpf(a_y,b_y,float(fraction))-ground_y)
+    if minimum_clearance<.035 and a.distance_to(b)>min_spacing and depth<4:
+        var midpoint:=a.lerp(b,.5)
+        _append_surface_fitted_segment(result,a,midpoint,height_sampler,y_lift,min_spacing,depth+1)
+        _append_surface_fitted_segment(result,midpoint,b,height_sampler,y_lift,min_spacing,depth+1)
+        return
+    if result.is_empty() or not (result[-1] as Vector2).is_equal_approx(a):result.append(a)
 
 
 func _subdivide_polyline(points: Array, passes: int) -> Array:
@@ -5390,9 +7036,15 @@ func _is_too_close_to_corridors(point: Vector2, corridors: Array, extra: float) 
             if _distance_to_segment(point,segment_data.a,segment_data.b)<width:return true
         return false
     for corridor in corridors:
-        var width: float = corridor.get("width", 24.0) * 0.5 + extra
-        if _distance_to_polyline(point, corridor.get("points", [])) < width:
-            return true
+        var points:Array=corridor.get("points",[])
+        for index in range(points.size()-1):
+            # Match the cached path exactly, including a river's intentional
+            # source-to-mouth width change. The old fallback compared against
+            # one maximum corridor width and disagreed with the fast runtime
+            # query in dozens of locations.
+            var progress:float=(float(index)+.5)/maxf(1.0,float(points.size()-1))
+            var width:float=_corridor_width_at(corridor,progress,24.0)*.5+extra
+            if _distance_to_segment(point,points[index],points[index+1])<width:return true
     return false
 
 
@@ -5452,7 +7104,10 @@ func _corridor_cache_key(corridors:Array)->String:
 func _is_too_close_to_sites(point: Vector2, sites: Array, extra: float) -> bool:
     for site in sites:
         var center: Vector2 = site.get("position", Vector2.ZERO)
-        var radius: float = site.get("radius", 90.0) * 0.42 + extra
+        # Water sites use their full irregular rendered footprint. Other site
+        # types retain the intentionally reduced dressing-clearance radius.
+        var footprint_scale:=1.38 if site.has("water_height") else .42
+        var radius: float = site.get("radius", 90.0) * footprint_scale + extra
         if point.distance_squared_to(center) < radius * radius:
             return true
     return false
@@ -5462,6 +7117,7 @@ func _tree_overlaps_authored_site(point:Vector2,profile:Dictionary,canopy_radius
     # Tree trunks and crowns must stay outside complete settlement and camp
     # footprints. The generic proximity helper intentionally uses a reduced
     # radius for small ground dressing, which was not safe for full-size trees.
+    if _point_inside_active_ocean(point,canopy_radius):return true
     var sites:Array=[]
     sites.append_array(profile.get("town_sites",[]))
     sites.append_array(profile.get("camp_sites",[]))
@@ -5477,6 +7133,66 @@ func _tree_overlaps_authored_site(point:Vector2,profile:Dictionary,canopy_radius
         if point.distance_squared_to(center)<clearance*clearance:return true
     for boundary in profile.get("field_boundaries",[]):
         if _distance_to_polyline(point,boundary.get("points",[]))<canopy_radius+2.2:return true
+    # Cultivated town plots sit just beyond the settlement radius, so the
+    # generic town clearance can still place a forest tree through the crops.
+    # Respect their oriented footprint plus the tree's canopy margin.
+    if _farm_plot_regions.is_empty():_prepare_farm_plot_cache(profile)
+    for field in _farm_plot_regions:
+        var delta:=point-Vector2(field.get("center",Vector2.ZERO))
+        var along:=absf(delta.dot(Vector2(field.get("direction",Vector2(0,1)))))
+        var across:=absf(delta.dot(Vector2(field.get("normal",Vector2(1,0)))))
+        if along<=float(field.get("half_length",25.0))+canopy_radius and across<=float(field.get("half_width",17.0))+canopy_radius:return true
+    return false
+
+
+func _is_inside_pond_water(point:Vector2,pond_sites:Array,margin:float=0.0)->bool:
+    # Match the irregular pond fan used by _build_ponds. The generic reduced-
+    # radius site check left grass and small props standing in outer water.
+    for pond_value in pond_sites:
+        if not pond_value is Dictionary:continue
+        var pond:Dictionary=pond_value
+        var center:Vector2=pond.get("position",Vector2.ZERO)
+        var delta:=point-center
+        var angle:=atan2(delta.y,delta.x)
+        var base_radius:float=float(pond.get("radius",70.0))*1.18
+        var irregularity:=1.0+sin(angle*3.0+center.x*.0017)*.11+sin(angle*7.0+center.y*.0011)*.055
+        if delta.length()<base_radius*irregularity+margin:return true
+    return false
+
+
+func _prepare_farm_plot_cache(profile:Dictionary)->void:
+    _farm_plot_regions.clear()
+    for site_value in profile.get("town_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        if site.get("capital",false):continue
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var radius:float=site.get("radius",140.0)
+        var road_info:=_nearest_corridor_segment(center,profile.get("road_corridors",[]))
+        if road_info.is_empty():continue
+        var direction:Vector2=road_info.get("direction",Vector2(0,1)).normalized()
+        var normal:=Vector2(-direction.y,direction.x)
+        for side in [-1.0,1.0]:
+            _farm_plot_regions.append({
+                "center":center-direction*radius*.86+normal*float(side)*radius*.60,
+                "direction":direction,
+                "normal":normal,
+                "half_length":25.0,
+                "half_width":17.0,
+            })
+
+
+func _is_inside_town_farm_plot(point:Vector2,profile:Dictionary)->bool:
+    # Cache is built alongside the corridor cache; the profile argument keeps
+    # the helper's call sites explicit and permits isolated verification calls.
+    if _farm_plot_regions.is_empty() and not profile.get("town_sites",[]).is_empty():
+        _prepare_farm_plot_cache(profile)
+    for field in _farm_plot_regions:
+        var delta:=point-Vector2(field.get("center",Vector2.ZERO))
+        var along:=absf(delta.dot(Vector2(field.get("direction",Vector2(0,1)))))
+        var across:=absf(delta.dot(Vector2(field.get("normal",Vector2(1,0)))))
+        if along<=float(field.get("half_length",25.0)) and across<=float(field.get("half_width",17.0)):
+            return true
     return false
 
 
@@ -5556,10 +7272,10 @@ func _make_road_material(route_class:String="secondary") -> StandardMaterial3D:
     var key:="road_"+normalized_class
     if _shared_materials.has(key):return _shared_materials[key]
     var material := StandardMaterial3D.new()
-    # Major roads are broader, warmer compacted routes. Secondary settlement
-    # spurs retain a darker earth tone so hierarchy reads while moving without
-    # introducing another texture asset or material-heavy detail layer.
-    material.albedo_color = Color(0.84, 0.78, 0.66, 1.0) if normalized_class=="major" else Color(0.63, 0.59, 0.53, 1.0)
+    # Width remains the primary hierarchy cue, with a restrained value shift:
+    # major roads use cleaner, sun-worn aggregate while secondary roads retain
+    # more local soil. Both remain in one earth palette so junctions blend.
+    material.albedo_color = Color(.76,.705,.59,1.0) if normalized_class=="major" else Color(.70,.65,.55,1.0)
     material.albedo_texture = load("res://assets/terrain/medieval_dirt_road_v1.png")
     material.uv1_scale = Vector3.ONE
     material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
@@ -5575,7 +7291,7 @@ func _make_road_shoulder_material(route_class:String="secondary")->StandardMater
     var normalized_class:="major" if route_class=="major" else "secondary"
     var key:="road_shoulder_"+normalized_class
     if _shared_materials.has(key):return _shared_materials[key]
-    var tint:=Color(.74,.67,.54,1.0) if normalized_class=="major" else Color(.58,.54,.45,1.0)
+    var tint:=Color(.64,.59,.49,1.0) if normalized_class=="major" else Color(.59,.545,.46,1.0)
     var material:=StandardMaterial3D.new()
     material.albedo_color=tint
     material.albedo_texture=load("res://assets/terrain/medieval_dirt_road_v1.png")
@@ -5678,6 +7394,14 @@ uniform sampler2D depth_texture : hint_depth_texture, filter_nearest;
 varying vec3 world_position;
 
 void vertex() {
+    // A restrained pair of world-space waves gives the river a liquid surface
+    // instead of a perfectly flat sheet. UV edge masking pins both banks to the
+    // shoreline so this detail cannot reopen a water/land gap.
+    float center_mask = 1.0 - smoothstep(0.32, 0.50, abs(UV.x - 0.5));
+    vec3 before = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    float surface_wave = sin(before.x * 0.061 + before.z * 0.083 - TIME * 0.92) * 0.020;
+    surface_wave += sin(before.x * -0.113 + before.z * 0.049 - TIME * 0.57) * 0.012;
+    VERTEX.y += surface_wave * center_mask;
     world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
@@ -5758,6 +7482,39 @@ func _make_river_wet_bank_material()->StandardMaterial3D:
     material.roughness=.92
     material.specular_mode=BaseMaterial3D.SPECULAR_SCHLICK_GGX
     _shared_materials.river_wet_bank=material
+    return material
+
+
+func _make_waterfall_material()->ShaderMaterial:
+    if _shared_materials.has("waterfall"):return _shared_materials.waterfall
+    var material:=ShaderMaterial.new()
+    var shader:=Shader.new()
+    shader.code="""
+shader_type spatial;
+render_mode blend_mix, depth_prepass_alpha, cull_disabled, unshaded;
+
+void fragment() {
+    float edge = smoothstep(0.0, 0.10, UV.x) * (1.0 - smoothstep(0.90, 1.0, UV.x));
+    float broad = sin(UV.x * 22.0 + TIME * 0.55 + sin(UV.y * 8.0 - TIME * 2.1));
+    float fine = sin(UV.x * 61.0 - UV.y * 15.0 - TIME * 4.4);
+    float streak = smoothstep(0.47, 0.91, broad * 0.30 + fine * 0.12 + 0.53);
+    float plunge_foam = smoothstep(0.76, 1.0, UV.y);
+    vec3 deep_water = vec3(0.11, 0.35, 0.47);
+    vec3 aerated = vec3(0.60, 0.82, 0.85);
+    ALBEDO = mix(deep_water, aerated, streak * 0.34 + plunge_foam * 0.30);
+    EMISSION = ALBEDO * (0.018 + plunge_foam * 0.035);
+    ALPHA = edge * (0.74 + streak * 0.10);
+}
+"""
+    material.shader=shader
+    _shared_materials.waterfall=material
+    return material
+
+
+func _make_waterfall_foam_material()->StandardMaterial3D:
+    if _shared_materials.has("waterfall_foam"):return _shared_materials.waterfall_foam
+    var material:=_make_material(Color(.78,.91,.93,.88),.30)
+    _shared_materials.waterfall_foam=material
     return material
 
 
@@ -5872,6 +7629,47 @@ void fragment(){
     material.set_shader_parameter("soil_texture",load("res://assets/terrain/woodland_soil_v1.png"))
     material.set_shader_parameter("stone_texture",load("res://assets/terrain/highland_stone_v1.png"))
     _shared_materials.river_shore_blend=material
+    return material
+
+
+func _make_pond_shore_blend_material()->ShaderMaterial:
+    if _shared_materials.has("pond_shore_blend"):return _shared_materials.pond_shore_blend
+    var material:=ShaderMaterial.new()
+    var shader:=Shader.new()
+    shader.code="""
+shader_type spatial;
+render_mode blend_mix, depth_prepass_alpha, cull_disabled, specular_disabled;
+uniform sampler2D grass_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D soil_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform sampler2D stone_texture : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
+varying vec3 world_position;
+float pond_hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float pond_noise(vec2 p){vec2 i=floor(p);vec2 f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(pond_hash(i),pond_hash(i+vec2(1,0)),f.x),mix(pond_hash(i+vec2(0,1)),pond_hash(i+vec2(1,1)),f.x),f.y);}
+void vertex(){world_position=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;}
+void fragment(){
+    vec2 p=world_position.xz;
+    float small=pond_noise(p*.17+vec2(11.0,3.0));
+    float broad=pond_noise(vec2(p.x*.038+p.y*.016,-p.x*.016+p.y*.038)+vec2(9.0,27.0));
+    float warped=clamp(UV.y+(small-.5)*.11+(broad-.5)*.17,0.0,1.0);
+    vec2 uv=p*.068;
+    vec3 soil_tex=texture(soil_texture,uv*.78+vec2(.17,.31)).rgb;
+    vec3 stone_tex=texture(stone_texture,uv*.61+vec2(.43,.11)).rgb;
+    vec3 grass_tex=texture(grass_texture,uv).rgb;
+    vec3 damp=mix(vec3(.205,.175,.090),soil_tex*vec3(.66,.63,.48),.42);
+    vec3 gravel=mix(vec3(.295,.270,.175),stone_tex*vec3(.72,.70,.58),.42);
+    vec3 turf=mix(vec3(.17,.275,.095),grass_tex*vec3(.58,.66,.44),.30);
+    vec3 color=mix(damp,gravel,smoothstep(.11,.50,warped));
+    color=mix(color,turf,smoothstep(.43,.90,warped));
+    ALBEDO=color;
+    ROUGHNESS=.98;
+    ALPHA=1.0-smoothstep(.79,1.0,warped);
+}
+"""
+    material.shader=shader
+    material.set_shader_parameter("grass_texture",load("res://assets/terrain/meadow_soil_realistic_v3.png"))
+    material.set_shader_parameter("soil_texture",load("res://assets/terrain/woodland_soil_v1.png"))
+    material.set_shader_parameter("stone_texture",load("res://assets/terrain/highland_stone_v1.png"))
+    _shared_materials.pond_shore_blend=material
     return material
 
 
@@ -6006,8 +7804,14 @@ func _build_roadside_verge_clusters(root:Node3D,profile:Dictionary,terrain_resul
                             maximum_delta=maxf(maximum_delta,absf(sampler.call(sample_point.x,sample_point.y).y-ground.y))
                         if maximum_delta<.82*scale_value:
                             var yaw:=-atan2(tangent.y,tangent.x)+sin(float(pattern)*.39)*.27
-                            var basis:=Basis(Vector3.UP,yaw).scaled(Vector3(scale_value,scale_value*(.92+float(pattern%3)*.04),scale_value))
-                            transforms.append(Transform3D(basis,ground+Vector3.UP*.018))
+                            transforms.append(_grounded_surface_transform(
+                                point,
+                                ground,
+                                yaw,
+                                Vector3(scale_value,scale_value*(.92+float(pattern%3)*.04),scale_value),
+                                sampler,
+                                2.1
+                            ))
                 sample_index+=1
                 distance_to_next+=spacing+sin(float(pattern)*.217)*7.0
             distance_to_next-=length
@@ -6017,11 +7821,9 @@ func _build_roadside_verge_clusters(root:Node3D,profile:Dictionary,terrain_resul
 
 
 func _build_wayfinding_landmarks(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
-    var timber := _make_material(Color(0.20, 0.115, 0.055, 1.0), 0.98)
-    var carved_wood := _make_material(Color(0.34, 0.20, 0.09, 1.0), 0.95).duplicate() as StandardMaterial3D
-    carved_wood.emission_enabled = true
-    carved_wood.emission = Color(0.055, 0.028, 0.010)
-    carved_wood.emission_energy_multiplier = 0.35
+    var timber := _make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.58,.42,.24),1.0,2.0)
+    var carved_wood := _make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.69,.48,.24),.98,2.4)
+    var lantern_frame:=_make_material(Color(.16,.14,.10),.72)
     var lantern_material := _make_material(Color(0.92, 0.55, 0.12, 1.0), 0.45).duplicate() as StandardMaterial3D
     lantern_material.emission_enabled = true
     lantern_material.emission = Color(0.95, 0.38, 0.06)
@@ -6047,7 +7849,13 @@ func _build_wayfinding_landmarks(root: Node3D, profile: Dictionary, terrain_resu
             marker.rotation.y = atan2(direction.x, direction.y)
             root.add_child(marker)
             _solid_box(marker, Vector3(0.32, 3.2, 0.32), Vector3(0.0, 1.6, 0.0), timber)
-            _visual_box(marker, Vector3(0.72, 0.58, 0.72), Vector3(0.0, 3.25, 0.0), lantern_material)
+            # A small framed road lantern replaces the former emissive yellow
+            # cube, which read as a floating placeholder from bridge distance.
+            _visual_box(marker,Vector3(.50,.42,.50),Vector3(0,3.22,0),lantern_material)
+            _visual_box(marker,Vector3(.68,.10,.68),Vector3(0,3.48,0),lantern_frame)
+            _visual_box(marker,Vector3(.68,.10,.68),Vector3(0,2.96,0),lantern_frame)
+            for corner in [Vector2(-.29,-.29),Vector2(.29,-.29),Vector2(-.29,.29),Vector2(.29,.29)]:
+                _visual_box(marker,Vector3(.07,.55,.07),Vector3(corner.x,3.22,corner.y),lantern_frame)
             if end_sign < 0.0:
                 # Project the board in front of the post so the upright cannot
                 # show through its center.

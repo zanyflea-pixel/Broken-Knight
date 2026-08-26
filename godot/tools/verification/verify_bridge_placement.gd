@@ -56,6 +56,8 @@ func _run()->void:
             if float(deck_end_river.get("distance",0.0))<visible_half-1.5:
                 failures.append("%s does not fully span visible water on side %.0f"%[bridge_name,float(side)])
         var previous_deck_y:=0.0
+        var local_deck_step:=0.0
+        var local_step_point:=Vector2.ZERO
         for sample_index in range(13):
             var sample_progress:=float(sample_index)/12.0
             var sample_point:=center+direction*lerpf(-landing_offset,landing_offset,sample_progress)
@@ -63,7 +65,12 @@ func _run()->void:
                 failures.append("%s has a blocked traversal sample"%bridge_name);break
             if height_sampler.is_valid():
                 var sample_y:float=(height_sampler.call(sample_point.x,sample_point.y) as Vector3).y
-                if sample_index>0:worst_deck_step=maxf(worst_deck_step,absf(sample_y-previous_deck_y))
+                if sample_index>0:
+                    var deck_step:=absf(sample_y-previous_deck_y)
+                    worst_deck_step=maxf(worst_deck_step,deck_step)
+                    if deck_step>local_deck_step:
+                        local_deck_step=deck_step
+                        local_step_point=sample_point
                 previous_deck_y=sample_y
         var route_gaps:Array[float]=[]
         var landing_points:Array[Vector2]=[]
@@ -86,11 +93,11 @@ func _run()->void:
             var pond_center:Vector2=pond.get("position",Vector2.ZERO)
             if center.distance_to(pond_center)<float(pond.get("radius",70.0))*1.18:
                 failures.append("%s sits inside %s"%[bridge_name,str(pond.get("name","open water"))])
-        print("BRIDGE_PLACEMENT|%s|river=%s|miss=%.2f|span=%.1f|dir=%.3f,%.3f|landings=%.1f,%.1f;%.1f,%.1f|cross_dot=%.3f|routes=%.1f,%.1f|purpose=%s"%[
+        print("BRIDGE_PLACEMENT|%s|river=%s|miss=%.2f|span=%.1f|dir=%.3f,%.3f|landings=%.1f,%.1f;%.1f,%.1f|cross_dot=%.3f|routes=%.1f,%.1f|deck_step=%.3f|step_at=%.1f,%.1f|purpose=%s"%[
             bridge_name,str(river_info.get("name","river")),river_miss,span,
             direction.x,direction.y,
             landing_points[0].x,landing_points[0].y,landing_points[1].x,landing_points[1].y,
-            crossing_dot,route_gaps[0],route_gaps[1],str(site.get("purpose","missing")),
+            crossing_dot,route_gaps[0],route_gaps[1],local_deck_step,local_step_point.x,local_step_point.y,str(site.get("purpose","missing")),
         ])
 
     for first_index in range(bridge_cache.size()):

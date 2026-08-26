@@ -71,13 +71,18 @@ func refresh() -> void:
         body.text = "\n\n".join(lines)
     else:
         title.text = "QUEST JOURNAL"
-        var quest_lines:Array[String]=["[color=#e7bd55][b]THE BROKEN CROWN CHRONICLE[/b][/color]","The king is missing, the old seals are failing, and something beneath the river is calling its champions.",""]
+        var quest_lines:Array[String]=["[color=#e7bd55][b]THE BROKEN CROWN CHRONICLE[/b][/color]","The king is missing, the Five Civic Oaths are failing, and old commands are waking beneath Crownspire.",""]
         for quest in director.get_quest_state():
             var available:bool=quest.get("available",true)
             var status:="[color=#83d69a]COMPLETE - REWARD CLAIMED[/color]" if quest.get("claimed",false) else ("%d / %d"%[quest.current,quest.goal] if available else "[color=#78828c]LOCKED - continue the main story[/color]")
             var story:=str(quest.get("story","")) if available else "This chapter has not yet been revealed."
             quest_lines.append("[color=#e7bd55]CHAPTER %s[/color]  [b]%s[/b]    %s\n[color=#a8b7c4]%s[/color]\n%s\n[color=#9fc6e8]Objective: %s\nReward: %s[/color]"%[quest.get("chapter",""),quest.get("title","Untitled quest"),status,quest.get("giver",""),story,quest.get("description","No active objective."),quest.get("reward","Story progression")])
-        quest_lines.append("\n[color=#8292a8]Quest, gathering, crafting, equipment and dungeon progress are saved.[/color]")
+        var lore_entries:Array=director.get_lore_entries() if director.has_method("get_lore_entries") else []
+        if not lore_entries.is_empty():
+            quest_lines.append("\n[color=#e7bd55][b]DISCOVERED LORE[/b][/color]")
+            for entry in lore_entries:
+                quest_lines.append("[color=#9fc6e8][b]%s[/b][/color]\n%s"%[entry.get("title","Recovered testimony"),entry.get("text","")])
+        quest_lines.append("\n[color=#8292a8]Quest, lore, gathering, crafting, equipment and dungeon progress are saved.[/color]")
         body.text="\n\n".join(quest_lines)
 
 

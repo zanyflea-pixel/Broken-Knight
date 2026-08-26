@@ -66,15 +66,22 @@ def render_stable():
 def render_horse():
     bpy.ops.wm.open_mainfile(filepath=os.path.join(ROOT, "blender", "world", "animals", "riverwatch_horse.blend"))
     arm = bpy.data.objects.get("RiverwatchHorseRig")
-    trot = bpy.data.actions.get("Trot")
-    if arm and trot:
+    if arm:
         if not arm.animation_data:
             arm.animation_data_create()
-        arm.animation_data.action = trot
-        bpy.context.scene.frame_set(8)
     prepare_scene((4.4, -6.8, 3.05), (0, -0.12, 1.02), 20)
-    bpy.context.scene.render.filepath = os.path.join(OUT, "riverwatch_horse_preview.png")
-    bpy.ops.render.render(write_still=True)
+    previews = (
+        ("Trot", 8, "riverwatch_horse_preview.png"),
+        ("Walk", 13, "riverwatch_horse_walk_preview.png"),
+        ("Jump", 20, "riverwatch_horse_jump_preview.png"),
+    )
+    for action_name, frame, filename in previews:
+        action = bpy.data.actions.get(action_name)
+        if arm and action:
+            arm.animation_data.action = action
+            bpy.context.scene.frame_set(frame)
+            bpy.context.scene.render.filepath = os.path.join(OUT, filename)
+            bpy.ops.render.render(write_still=True)
 
 
 os.makedirs(OUT, exist_ok=True)

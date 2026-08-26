@@ -1,6 +1,7 @@
 extends CharacterBody3D
 
 signal environment_damage_requested(amount: float, source: String)
+signal world_item_requested(action:String,item_id:String)
 
 @export var walk_speed := 5.2
 @export var sprint_speed := 8.5
@@ -14,6 +15,7 @@ signal environment_damage_requested(amount: float, source: String)
 @export var acceleration := 15.0
 @export var deceleration := 19.0
 @export var jump_velocity := 6.2
+@export var mounted_jump_velocity := 7.8
 @export var gravity := 17.0
 @export var safe_fall_distance := 5.0
 @export var fatal_fall_distance := 30.0
@@ -52,6 +54,8 @@ signal environment_damage_requested(amount: float, source: String)
 @export var resin := 0
 @export var mushrooms := 0
 @export var crystal := 0
+@export var chitin := 0
+@export var raw_meat := 0
 @export var grave_tokens := 0
 @export var plague_samples := 0
 @export var enemies_defeated := 0
@@ -88,7 +92,7 @@ var _released_ladder_at_top:=false
 var active_class := "Warrior"
 var bag_slots: Array = []
 var equipped_armor: Dictionary = {}
-var equipment_slots := {"head":{},"chest":{},"shoulders":{},"hands":{},"feet":{},"pants":{},"mainhand":{},"offhand":{}}
+var equipment_slots := {"head":{},"chest":{},"shoulders":{},"hands":{},"feet":{},"pants":{},"mainhand":{},"offhand":{},"ring_left":{},"ring_right":{}}
 var base_max_hp := 112.0
 var base_max_mana := 34.0
 var _dead:=false
@@ -138,6 +142,22 @@ func configure_world(height_sampler: Callable, spawn_position: Vector3, walkable
     _climbable_ladders.clear()
     _active_ladder=null
     global_position = _resolve_ground_position(spawn_position)
+
+
+func teleport_to_surface(destination:Vector3)->void:
+    set_interior_mode(false)
+    global_position=destination
+    velocity=Vector3.ZERO
+    _vertical_velocity=0.0
+    _is_airborne=false
+    _fall_peak_y=global_position.y
+    _roll_time=0.0
+    _roll_cooldown=0.0
+    _current_move_speed=0.0
+    if is_instance_valid(_visual):
+        if _visual.has_method("set_move_blend"):_visual.set_move_blend(0.0)
+        if _visual.has_method("set_movement_speed"):_visual.set_movement_speed(0.0)
+        if _visual.has_method("reset_traversal_animation"):_visual.reset_traversal_animation()
 
 
 func set_input_enabled(enabled: bool) -> void:
@@ -277,7 +297,7 @@ func _process(delta: float) -> void:
     var has_move_input := move_dir.length_squared() > 0.001
     _roll_cooldown=maxf(0.0,_roll_cooldown-delta)
     var jump_down := Input.is_key_pressed(KEY_SPACE)
-    if not _mounted and jump_down and not _jump_was_down and not _is_airborne:
+    if jump_down and not _jump_was_down and not _is_airborne:
         _start_jump()
     _jump_was_down = jump_down
     var roll_down:=Input.is_key_pressed(KEY_CTRL)
@@ -293,6 +313,9 @@ func _process(delta: float) -> void:
     else:
         var active_walk_speed:=mounted_walk_speed if _mounted else walk_speed
         var active_sprint_speed:=mounted_sprint_speed if _mounted else sprint_speed
+        if not _mounted and has_equipment_effect("windstep"):
+            active_walk_speed*=1.08
+            active_sprint_speed*=1.08
         var target_speed:float=(active_sprint_speed if Input.is_key_pressed(KEY_SHIFT) else active_walk_speed) if has_move_input else 0.0
         var active_acceleration:=mounted_acceleration if _mounted else acceleration
         var active_deceleration:=mounted_deceleration if _mounted else deceleration
@@ -360,7 +383,9 @@ func _process(delta: float) -> void:
             _vertical_velocity = 0.0
             _is_airborne = false
             _apply_fall_damage(fall_distance)
-            if _visual.has_method("play_land"):
+            if _mounted and is_instance_valid(_mount_node) and _mount_node.has_method("play_land"):
+                _mount_node.play_land()
+            elif _visual.has_method("play_land"):
                 _visual.play_land()
     else:
         global_position.y = ground_position.y
@@ -373,9 +398,11 @@ func _process(delta: float) -> void:
 
 func _start_jump() -> void:
     _is_airborne = true
-    _vertical_velocity = jump_velocity
+    _vertical_velocity = mounted_jump_velocity if _mounted else jump_velocity
     _fall_peak_y = global_position.y
-    if _visual.has_method("play_jump"):
+    if _mounted and is_instance_valid(_mount_node) and _mount_node.has_method("play_jump"):
+        _mount_node.play_jump()
+    elif _visual.has_method("play_jump"):
         _visual.play_jump()
 
 
@@ -657,6 +684,8 @@ func get_hud_state() -> Dictionary:
         "resin":resin,
         "mushrooms":mushrooms,
         "crystal":crystal,
+        "chitin":chitin,
+        "raw_meat":raw_meat,
         "grave_tokens":grave_tokens,
         "plague_samples":plague_samples,
         "enemies_defeated": enemies_defeated,
@@ -665,13 +694,13 @@ func get_hud_state() -> Dictionary:
 
 
 func get_material_amount(kind:String)->int:
-    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:
+    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","chitin","raw_meat","grave_tokens","plague_samples"]:
         return int(get(kind))
     return 0
 
 
 func add_material(kind:String,amount:int)->void:
-    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:
+    if kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","chitin","raw_meat","grave_tokens","plague_samples"]:
         set(kind,maxi(0,int(get(kind))+amount))
         _sync_material_stack(kind)
 
@@ -690,6 +719,7 @@ func spend_materials(costs:Dictionary)->bool:
 
 func add_bag_item(item:Dictionary)->bool:
     var stored:=item.duplicate(true)
+    _ensure_item_condition(stored)
     var quantity:=maxi(1,int(stored.get("quantity",1)))
     stored["quantity"]=quantity
     if _is_stackable_item(stored):
@@ -729,7 +759,7 @@ func consume_bag_item(item_id:String,amount:int=1)->bool:
 
 
 func sync_material_inventory()->void:
-    for kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:
+    for kind in ["herbs","scrap","ore","essence","logs","leather","cloth","stone","resin","mushrooms","crystal","chitin","raw_meat","grave_tokens","plague_samples"]:
         _sync_material_stack(kind)
 
 
@@ -749,7 +779,7 @@ func _sync_material_stack(kind:String)->void:
         "herbs":"Medicinal Herbs","scrap":"Metal Scrap","ore":"Iron Ore",
         "essence":"Arcane Essence","logs":"Wood Logs","leather":"Treated Leather",
         "cloth":"Woven Cloth","stone":"Field Stone","resin":"Tree Resin",
-        "mushrooms":"Cave Mushrooms","crystal":"Royal Crystal",
+        "mushrooms":"Cave Mushrooms","crystal":"Royal Crystal","chitin":"Rime Chitin","raw_meat":"Raw Game Meat",
         "grave_tokens":"Grave Tokens","plague_samples":"Plague Samples",
     }
     bag_slots.append({
@@ -804,6 +834,7 @@ func give_knight_armor() -> void:
 		{"id":"royal_pants","slot":"pants","icon":7,"name":"Royal Vanguard Trousers","armor":7,"hp":12,"mana":5,"power":2},
     ]
     for piece in pieces:
+        piece["unbreakable"]=true
         var exists:=false
         for item in bag_slots:
             if item.get("id","")==piece.id: exists=true
@@ -825,7 +856,7 @@ func give_travel_torch() -> void:
 
 
 func give_royal_staff() -> void:
-    var staff := {"id":"royal_vanguard_staff","slot":"mainhand","icon":6,"name":"Royal Vanguard Staff","armor":2,"hp":0,"mana":18,"power":12,"description":"A ruby-focused royal staff. Must be equipped to cast Spark, Nova, Blink, or Orb."}
+    var staff := {"id":"royal_vanguard_staff","slot":"mainhand","icon":6,"name":"Royal Vanguard Staff","armor":2,"hp":0,"mana":18,"power":12,"unbreakable":true,"description":"A ruby-focused royal staff. Must be equipped to cast Spark, Nova, Blink, or Orb."}
     for item in bag_slots:
         if item.get("id","")==staff.id:return
     if equipment_slots.get("mainhand",{}).get("id","")==staff.id:return
@@ -834,8 +865,8 @@ func give_royal_staff() -> void:
 
 func give_royal_warrior_weapons() -> void:
     var weapons := [
-        {"id":"royal_vanguard_sword","slot":"mainhand","icon":8,"name":"Royal Vanguard Sword","armor":0,"hp":8,"mana":0,"power":22,"description":"A balanced blue-steel longsword made for decisive close combat."},
-        {"id":"royal_vanguard_shield","slot":"offhand","icon":9,"name":"Royal Vanguard Shield","armor":18,"hp":28,"mana":0,"power":5,"description":"A fitted royal heater shield. Required for Shield Bash and Vanguard Guard."},
+        {"id":"royal_vanguard_sword","slot":"mainhand","icon":8,"name":"Royal Vanguard Sword","armor":0,"hp":8,"mana":0,"power":22,"unbreakable":true,"description":"A balanced blue-steel longsword made for decisive close combat. Royal equipment never loses durability."},
+        {"id":"royal_vanguard_shield","slot":"offhand","icon":9,"name":"Royal Vanguard Shield","armor":18,"hp":28,"mana":0,"power":5,"unbreakable":true,"description":"A fitted royal heater shield. Royal equipment never loses durability."},
     ]
     for weapon in weapons:
         var exists:=false
@@ -893,10 +924,20 @@ func has_fishing_pole_equipped()->bool:
     return equipment_slots.get("mainhand",{}).get("id","")=="starter_fishing_pole"
 
 
+func has_equipment_effect(effect_name:String)->bool:
+    for item_value in equipment_slots.values():
+        var item:Dictionary=item_value
+        if str(item.get("effect",""))==effect_name and not _item_is_broken(item):return true
+    return false
+
+
 func use_bag_item_id(item_id:String)->bool:
     for i in range(bag_slots.size()):
         var item:Dictionary=bag_slots[i]
         if item.get("id","")!=item_id:continue
+        if str(item.get("use","")).begins_with("world_"):
+            world_item_requested.emit(str(item.get("use","")),item_id)
+            return true
         if item.get("use","")!="food":
             equip_armor_from_bag(i)
             return true
@@ -921,7 +962,11 @@ func is_warrior() -> bool:
 
 
 func has_warrior_weapons_equipped() -> bool:
-    return equipment_slots.get("mainhand",{}).get("id","")=="royal_vanguard_sword" and equipment_slots.get("offhand",{}).get("id","")=="royal_vanguard_shield"
+    var mainhand:Dictionary=equipment_slots.get("mainhand",{})
+    var offhand:Dictionary=equipment_slots.get("offhand",{})
+    var main_id:=(str(mainhand.get("visual",""))+" "+str(mainhand.get("id",""))+" "+str(mainhand.get("name",""))).to_lower()
+    var off_id:=(str(offhand.get("visual",""))+" "+str(offhand.get("id",""))+" "+str(offhand.get("name",""))).to_lower()
+    return ("sword" in main_id or "cleaver" in main_id) and "shield" in off_id and not _item_is_broken(mainhand) and not _item_is_broken(offhand)
 
 
 func switch_hero_class() -> String:
@@ -943,10 +988,15 @@ func has_magic_staff_equipped() -> bool:
     return equipment_slots.get("mainhand",{}).get("id","")=="royal_vanguard_staff"
 
 
-func equip_armor_from_bag(index: int) -> bool:
+func equip_armor_from_bag(index: int,target_slot:String="") -> bool:
     if index<0 or index>=bag_slots.size(): return false
     var item:Dictionary=bag_slots[index]
-    var slot:String=item.get("slot","chest")
+    var slot:String=target_slot if not target_slot.is_empty() else item.get("slot","chest")
+    if str(item.get("slot","" )).begins_with("ring_") and slot.begins_with("ring_"):
+        item["slot"]=slot
+    elif not target_slot.is_empty() and str(item.get("slot","chest"))!=slot:
+        return false
+    _ensure_item_condition(item)
     if not equipment_slots.has(slot):equipment_slots[slot]={}
     if not equipment_slots[slot].is_empty(): bag_slots.append(equipment_slots[slot])
     equipment_slots[slot]=item;bag_slots.remove_at(index);_refresh_equipment_stats();return true
@@ -964,6 +1014,13 @@ func unequip_slot(slot:String)->void:
 func equip_item_id(item_id:String)->void:
     for i in range(bag_slots.size()):
         if bag_slots[i].get("id","")==item_id:equip_armor_from_bag(i);return
+
+
+func equip_item_id_to_slot(item_id:String,slot:String)->void:
+    for i in range(bag_slots.size()):
+        if bag_slots[i].get("id","")==item_id:
+            equip_armor_from_bag(i,slot)
+            return
 
 
 func equip_royal_armor() -> void:
@@ -984,7 +1041,9 @@ func equip_royal_armor() -> void:
 func _refresh_equipment_stats() -> void:
     var hp_fraction:=hp/maxf(1.0,max_hp); var mana_fraction:=mana/maxf(1.0,max_mana)
     var hp_bonus:=0.0;var mana_bonus:=0.0
-    for item in equipment_slots.values():hp_bonus+=float(item.get("hp",0));mana_bonus+=float(item.get("mana",0))
+    for item in equipment_slots.values():
+        if _item_is_broken(item):continue
+        hp_bonus+=float(item.get("hp",0));mana_bonus+=float(item.get("mana",0))
     max_hp=base_max_hp+hp_bonus;max_mana=base_max_mana+mana_bonus
     hp=max_hp*hp_fraction; mana=max_mana*mana_fraction
     if _visual.has_method("set_equipment_pieces"): _visual.set_equipment_pieces(equipment_slots)
@@ -992,9 +1051,72 @@ func _refresh_equipment_stats() -> void:
 
 func get_equipment_state() -> Dictionary:
     var armor:=0;var power:=8
-    for item in equipment_slots.values():armor+=int(item.get("armor",0));power+=int(item.get("power",0))
+    for item in equipment_slots.values():
+        if _item_is_broken(item):continue
+        armor+=int(item.get("armor",0));power+=int(item.get("power",0))
     power+=food_power_bonus
     return {"equipped":equipped_armor,"slots":equipment_slots,"bag":bag_slots,"armor":armor,"power":power}
+
+
+func _ensure_item_condition(item:Dictionary)->void:
+    if item.is_empty():return
+    var item_id:=str(item.get("id","")).to_lower()
+    if item_id.begins_with("royal_"):
+        item["unbreakable"]=true
+    if bool(item.get("unbreakable",false)):
+        item.erase("durability")
+        item.erase("max_durability")
+        return
+    var slot:=str(item.get("slot",""))
+    if slot not in ["head","chest","shoulders","hands","feet","pants","mainhand","offhand","ring_left","ring_right"]:return
+    var default_max:=150.0 if slot in ["mainhand","offhand"] else (110.0 if slot.begins_with("ring_") else 180.0)
+    item["max_durability"]=maxf(1.0,float(item.get("max_durability",default_max)))
+    item["durability"]=clampf(float(item.get("durability",item.max_durability)),0.0,float(item.max_durability))
+
+
+func _item_is_broken(item:Dictionary)->bool:
+    return not item.is_empty() and not bool(item.get("unbreakable",false)) and item.has("durability") and float(item.get("durability",1.0))<=0.0
+
+
+func damage_equipment(slot:String,amount:float)->bool:
+    if amount<=0.0 or not equipment_slots.has(slot):return false
+    var item:Dictionary=equipment_slots.get(slot,{})
+    if item.is_empty():return false
+    _ensure_item_condition(item)
+    if bool(item.get("unbreakable",false)) or not item.has("durability"):return false
+    var before:=float(item.durability)
+    item.durability=maxf(0.0,before-amount)
+    if before>0.0 and float(item.durability)<=0.0:_refresh_equipment_stats()
+    return before!=float(item.durability)
+
+
+func get_repair_cost()->int:
+    var missing:=0.0
+    for item in equipment_slots.values():
+        _ensure_item_condition(item)
+        if bool(item.get("unbreakable",false)) or not item.has("durability"):continue
+        missing+=maxf(0.0,float(item.max_durability)-float(item.durability))
+    return ceili(missing*.18)
+
+
+func repair_all_equipment()->int:
+    var repaired:=0
+    for item in equipment_slots.values():
+        _ensure_item_condition(item)
+        if bool(item.get("unbreakable",false)) or not item.has("durability"):continue
+        if float(item.durability)<float(item.max_durability):
+            item.durability=float(item.max_durability)
+            repaired+=1
+    if repaired>0:_refresh_equipment_stats()
+    return repaired
+
+
+func migrate_equipment_schema()->void:
+    for slot in ["head","chest","shoulders","hands","feet","pants","mainhand","offhand","ring_left","ring_right"]:
+        if not equipment_slots.has(slot):equipment_slots[slot]={}
+        _ensure_item_condition(equipment_slots[slot])
+    for item in bag_slots:_ensure_item_condition(item)
+    _refresh_equipment_stats()
 
 
 func _get_input_vector() -> Vector2:

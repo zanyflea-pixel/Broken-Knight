@@ -58,13 +58,15 @@ func _build_bag_tile()->void:
         badge.add_theme_constant_override("outline_size",4)
         badge.mouse_filter=Control.MOUSE_FILTER_IGNORE
         add_child(badge)
-    tooltip_text="%s%s\n%s\nArmor +%d   HP +%d   Power +%d"%[
+    var condition_text:="Unbreakable" if item.get("unbreakable",false) else ("Durability %d / %d"%[roundi(float(item.get("durability",0))),roundi(float(item.get("max_durability",0)))] if item.has("durability") else "")
+    tooltip_text="%s%s\n%s\nArmor +%d   HP +%d   Power +%d%s"%[
         item.get("name","Item"),
         " x%d"%quantity if quantity>1 else "",
         item.get("description",""),
         item.get("armor",0),
         item.get("hp",0),
-        item.get("power",0)
+        item.get("power",0),
+        "\n%s"%condition_text if not condition_text.is_empty() else ""
     ]
 
 
@@ -88,9 +90,10 @@ func _build_equipment_row()->void:
         modulate=Color(.58,.63,.70)
     else:
         icon.texture=_item_icon_texture(item)
-        label.text="%s\n%s | Armor +%d | Power +%d"%[
+        var condition:="∞" if item.get("unbreakable",false) else ("%d/%d"%[roundi(float(item.get("durability",0))),roundi(float(item.get("max_durability",0)))] if item.has("durability") else "—")
+        label.text="%s\n%s | Armor +%d | Power +%d | %s"%[
             item.get("name","Item"),slot_key.capitalize(),
-            item.get("armor",0),item.get("power",0)
+            item.get("armor",0),item.get("power",0),condition
         ]
 
 
@@ -111,12 +114,15 @@ func _can_drop_data(_at:Vector2,data:Variant)->bool:
     if origin=="equip":
         for bag_item in hero.bag_slots:
             if bag_item.get("id","")==data.get("item_id",""):
-                return bag_item.get("slot","chest")==slot_key
+                var source_slot:=str(bag_item.get("slot","chest"))
+                return source_slot==slot_key or (source_slot.begins_with("ring_") and slot_key.begins_with("ring_"))
     return origin=="bag" and data.get("origin","")=="equip"
 
 
 func _drop_data(_at:Vector2,data:Variant)->void:
-    if origin=="equip":hero.equip_item_id(data.item_id)
+    if origin=="equip":
+        if hero.has_method("equip_item_id_to_slot"):hero.equip_item_id_to_slot(data.item_id,slot_key)
+        else:hero.equip_item_id(data.item_id)
     elif data.origin=="equip":hero.unequip_slot(data.slot)
     menu.refresh()
 
@@ -162,7 +168,7 @@ func _item_icon_texture(data:Dictionary)->Texture2D:
 
 func _visual_kind(data:Dictionary)->String:
     var combined:=(str(data.get("visual",""))+" "+str(data.get("id",""))+" "+str(data.get("name",""))+" "+str(data.get("material",""))).to_lower()
-    for kind in ["fishing","pickaxe","axe","sword","shield","staff","torch","fish","berries","log","ore","crystal","herb","mushroom","resin","leather","cloth","stone","scrap","essence","key","potion"]:
+    for kind in ["campfire","fishing","pickaxe","axe","sword","shield","staff","torch","ring","fish","food","berries","log","ore","crystal","herb","mushroom","resin","leather","cloth","stone","scrap","essence","key","potion"]:
         if kind in combined:return kind
     var slot:=str(data.get("slot",""))
     if slot=="head":return "helmet"
@@ -185,6 +191,9 @@ func _svg_shape(kind:String,accent:String)->String:
         "shield":return '<path d="M48 17L75 28V49Q72 70 48 80Q24 70 21 49V28Z" fill="#%s" stroke="%s" stroke-width="4"/><path d="M48 24V72M29 43H67" stroke="#e4bd51" stroke-width="4"/>'%[accent,metal]
         "staff":return '<path d="M37 77L58 28" stroke="%s" stroke-width="7" stroke-linecap="round"/><path d="M58 28L70 18M58 28L48 16" stroke="#d8b64e" stroke-width="5"/><circle cx="59" cy="27" r="8" fill="#b92635" stroke="#ffd66b" stroke-width="3"/>'%dark
         "torch":return '<path d="M43 47L52 78" stroke="%s" stroke-width="9"/><path d="M35 46L56 42 54 54 39 57Z" fill="#6a4321"/><path d="M46 43Q27 31 44 16Q60 27 53 43Z" fill="#f19a25"/><path d="M46 38Q38 31 47 23Q55 31 51 39Z" fill="#ffe06c"/>'%dark
+        "ring":return '<ellipse cx="48" cy="55" rx="25" ry="19" fill="none" stroke="%s" stroke-width="8"/><path d="M38 34L48 18 59 34 48 45Z" fill="#%s" stroke="#e9f5ff" stroke-width="3"/><path d="M31 55Q48 67 65 55" fill="none" stroke="#f0c95b" stroke-width="3"/>'%[metal,accent]
+        "campfire":return '<path d="M25 70L71 70M31 77L65 61M31 61L65 77" stroke="%s" stroke-width="7" stroke-linecap="round"/><path d="M48 61Q27 47 45 20Q63 38 54 60Z" fill="#ef6e22"/><path d="M48 56Q39 46 48 32Q57 43 53 56Z" fill="#ffe16a"/>'%dark
+        "food":return '<path d="M22 48Q48 78 74 48Z" fill="#8d4927" stroke="#d7b780" stroke-width="4"/><path d="M25 46Q48 34 71 46Q48 58 25 46Z" fill="#6ea343"/><path d="M37 28Q31 37 38 42M51 25Q45 35 52 41M63 29Q57 37 63 43" fill="none" stroke="#edf0d5" stroke-width="3"/>'
         "fish":return '<path d="M22 51Q40 27 67 43L80 33 78 59 67 51Q42 70 22 51Z" fill="#%s" stroke="#d5edf1" stroke-width="3"/><circle cx="60" cy="43" r="3" fill="#101820"/>'%accent
         "berries":return '<path d="M49 32Q52 19 65 18" fill="none" stroke="#557c37" stroke-width="5"/><circle cx="35" cy="49" r="13" fill="#9f294b"/><circle cx="55" cy="45" r="14" fill="#bd3158"/><circle cx="48" cy="63" r="14" fill="#79213f"/>'
         "log":return '<rect x="19" y="38" width="59" height="27" rx="12" fill="#704928" stroke="#b37b3b" stroke-width="4"/><circle cx="72" cy="51" r="11" fill="#b77f42"/><path d="M67 51q5-7 10 0q-5 7-10 0" fill="none" stroke="#6c4929" stroke-width="2"/>'

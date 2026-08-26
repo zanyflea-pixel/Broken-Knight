@@ -1,0 +1,93 @@
+extends SceneTree
+
+const WorldProfile = preload("res://scripts/world/WorldProfile.gd")
+const TerrainBuilder = preload("res://scripts/world/TerrainBuilder.gd")
+const WorldPreviewBuilder = preload("res://scripts/world/WorldPreviewBuilder.gd")
+
+const POPULATION_ROOT_NAMES := ["RiverRoot", "RoadRoot", "BridgeRoot", "TownRoot", "PropsRoot"]
+
+
+func _initialize() -> void:
+    call_deferred("_build_bake")
+
+
+func _build_bake() -> void:
+    var started_usec := Time.get_ticks_usec()
+    var world := Node3D.new()
+    world.name = "StartingRealmVisualBake"
+    root.add_child(world)
+    for child_name in ["TerrainRoot", "RiverRoot", "RoadRoot", "BridgeRoot", "TownRoot", "PropsRoot"]:
+        var child := Node3D.new()
+        child.name = child_name
+        world.add_child(child)
+
+    var profile: Dictionary = WorldProfile.new().make_zone_profile("starting_realm")
+    var terrain_result: Dictionary = TerrainBuilder.new().generate_world(world.get_node("TerrainRoot"), profile)
+    WorldPreviewBuilder.new().populate(world, profile, terrain_result)
+
+    var terrain_root := world.get_node("TerrainRoot")
+    world.remove_child(terrain_root)
+    terrain_root.free()
+    world.set_meta("world_visual_bake_version", WorldPreviewBuilder.STARTING_VISUAL_BAKE_VERSION)
+    world.set_meta("world_visual_bake_signature", WorldPreviewBuilder.starting_visual_bake_signature())
+    world.set_meta("zone_id", "starting_realm")
+    world.set_meta("population_root_names", POPULATION_ROOT_NAMES)
+    world.set_meta("baked_utc", Time.get_datetime_string_from_system(true))
+
+    # Runtime tree and ore registries contain direct references to their
+    # MultiMesh nodes. NodePath is stable inside the packed scene; Main resolves
+    # these paths back to live nodes after instancing the bake.
+    for root_name in POPULATION_ROOT_NAMES:
+        var population_root := world.get_node(root_name)
+        for meta_name in population_root.get_meta_list():
+            population_root.set_meta(meta_name, _encode_node_references(population_root.get_meta(meta_name), world))
+
+    _assign_owner_recursive(world, world)
+    var packed := PackedScene.new()
+    var pack_error := packed.pack(world)
+    if pack_error != OK:
+        push_error("Unable to pack starter visual bake: %s" % error_string(pack_error))
+        quit(1)
+        return
+    var output_path: String = WorldPreviewBuilder.STARTING_VISUAL_BAKE_PATH
+    var absolute_output := ProjectSettings.globalize_path(output_path)
+    DirAccess.make_dir_recursive_absolute(absolute_output.get_base_dir())
+    var save_error := ResourceSaver.save(packed, output_path, ResourceSaver.FLAG_COMPRESS)
+    if save_error != OK:
+        push_error("Unable to save starter visual bake: %s" % error_string(save_error))
+        quit(1)
+        return
+    var file_size := FileAccess.get_file_as_bytes(output_path).size()
+    var elapsed_ms := float(Time.get_ticks_usec() - started_usec) / 1000.0
+    print("STARTING_WORLD_VISUAL_BAKE|path=%s|size_mb=%.2f|build_ms=%.1f|nodes=%d" % [output_path, float(file_size) / 1048576.0, elapsed_ms, _count_nodes(world)])
+    quit()
+
+
+func _encode_node_references(value: Variant, bake_root: Node) -> Variant:
+    if value is Node:
+        return bake_root.get_path_to(value as Node)
+    if value is Dictionary:
+        var encoded: Dictionary = {}
+        for key in value:
+            encoded[key] = _encode_node_references(value[key], bake_root)
+        return encoded
+    if value is Array:
+        var encoded_array: Array = []
+        encoded_array.resize(value.size())
+        for index in range(value.size()):
+            encoded_array[index] = _encode_node_references(value[index], bake_root)
+        return encoded_array
+    return value
+
+
+func _assign_owner_recursive(node: Node, scene_owner: Node) -> void:
+    for child in node.get_children():
+        child.owner = scene_owner
+        _assign_owner_recursive(child, scene_owner)
+
+
+func _count_nodes(node: Node) -> int:
+    var count := 1
+    for child in node.get_children():
+        count += _count_nodes(child)
+    return count

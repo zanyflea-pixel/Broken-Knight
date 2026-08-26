@@ -81,7 +81,11 @@ func _run()->void:
 
     var road_root:=Node3D.new();root.add_child(road_root)
     WorldPreviewBuilder.new().call("_build_road_ribbons",road_root,roads,terrain,profile)
-    if road_root.get_child_count()!=roads.size():failures.append("not every road produced a continuous in-world ribbon")
+    var rendered_routes:=0
+    for road_value in roads:
+        var road:Dictionary=road_value
+        if road_root.get_node_or_null(str(road.get("name","Road")))!=null:rendered_routes+=1
+    if rendered_routes!=roads.size():failures.append("not every road produced a continuous in-world ribbon")
     var major_color:=Color.TRANSPARENT
     var secondary_color:=Color.TRANSPARENT
     for child in road_root.get_children():
@@ -107,7 +111,7 @@ func _run()->void:
         class_counts.major,class_counts.secondary,class_counts.local,connected.size(),roads.size(),
         worst_grade.major,worst_grade.secondary,worst_grade.local,
         worst_turn.major,worst_turn.secondary,worst_turn.local,
-        road_root.get_child_count(),failures.size(),
+        rendered_routes,failures.size(),
     ])
     for failure in failures:push_error(failure)
     quit(0 if failures.is_empty() else 1)

@@ -3,13 +3,23 @@ extends Node3D
 signal vendor_requested(vendor_data: Dictionary)
 signal crafting_requested(station_data:Dictionary)
 signal notification_requested(message:String,color:Color)
+signal lore_requested(title:String,body:String)
 signal zone_travel_requested(zone_id:String,entry_edge:String)
 
 const IMP_SCENE: PackedScene = preload("res://assets/enemies/imp_enemy.glb")
 const DRAGON_SCENE: PackedScene = preload("res://assets/enemies/cave_dragon.glb")
 const ASHFANG_SCENE: PackedScene = preload("res://assets/enemies/ashfang_hound.glb")
 const GRAVEBOUND_SCENE:PackedScene=preload("res://assets/enemies/gravebound_zombie.glb")
+const FROST_TROLL_SCENE:PackedScene=preload("res://assets/enemies/frost_troll_v1.glb")
+const RIMECRAWLER_SCENE:PackedScene=preload("res://assets/enemies/rimecrawler_v1.glb")
+const ASHSCALE_BASILISK_SCENE:PackedScene=preload("res://assets/enemies/ashscale_basilisk_v1.glb")
+const RIME_CHITIN_DROP_SCENE:PackedScene=preload("res://assets/items/rime_chitin_pickup_v1.glb")
+const DEER_SCENE:PackedScene=preload("res://assets/animals/highland_deer_v1.glb")
+const HARE_SCENE:PackedScene=preload("res://assets/animals/highland_hare_v1.glb")
+const GROUSE_SCENE:PackedScene=preload("res://assets/animals/highland_grouse_v1.glb")
+const VENISON_SCENE:PackedScene=preload("res://assets/animals/venison_cut_v1.glb")
 const GRAVEBOUND_CAMPAIGN_SCRIPT:=preload("res://scripts/gameplay/GraveboundCampaign.gd")
+const OATHBOUND_CAMPAIGN_SCRIPT:=preload("res://scripts/gameplay/OathboundCampaign.gd")
 const ZOMBIE_GROAN:AudioStream=preload("res://assets/audio/gravebound/groan.wav")
 const ZOMBIE_ATTACK:AudioStream=preload("res://assets/audio/gravebound/attack.wav")
 const ZOMBIE_HIT:AudioStream=preload("res://assets/audio/gravebound/hit.wav")
@@ -60,8 +70,9 @@ var _magic_requirement_time := 0.0
 var _interactables:Array[Dictionary]=[]
 var _nearby_interactable:Dictionary={}
 var _nearby_loot:Dictionary={}
-var _gathered_counts:Dictionary={"herbs":0,"logs":0,"ore":0,"crafted":0,"dungeons":0,"ashfangs":0,"fish":0}
+var _gathered_counts:Dictionary={"herbs":0,"logs":0,"ore":0,"crafted":0,"dungeons":0,"ashfangs":0,"ashscale_basilisks":0,"rimecrawlers":0,"rimecraft":0,"marcher_threats":0,"marcher_secrets":0,"rainward_threats":0,"rainward_secrets":0,"stormbreak_threats":0,"stormbreak_secrets":0,"skeld_threats":0,"skeld_secrets":0,"fish":0}
 var _quest_claimed:Dictionary={}
+var _quest_baselines:Dictionary={"road_imps":0}
 var _stream_tick:=0.0
 var _stream_transition_queue:Array[Dictionary]=[]
 var _stream_transition_sequence:=0
@@ -100,16 +111,30 @@ var _mineable_rocks:Array[Dictionary]=[]
 var _mineable_rock_buckets:Dictionary={}
 var _nearby_world_rock:Dictionary={}
 var _gravebound_campaign:Node3D
+var _oathbound_campaign:Node3D
+var _player_campfires:Array[Node3D]=[]
+var _townfolk:Array[Dictionary]=[]
+var _townfolk_tick_accumulator:=0.0
 
 const QUESTS:=[
-    {"id":"road_imps","chapter":"I","giver":"Captain Elowen, Riverwatch","title":"The Road to Crownspire","counter":"kills","goal":8,"requires":"","story":"The king's courier vanished on the river road. Elowen needs the route cleared before she can search for the royal dispatch.","description":"Defeat hostile imps threatening the river roads.","reward":"35 gold and a health potion"},
-    {"id":"field_medicine","chapter":"II","giver":"Sister Mara, Riverwatch","title":"Remedies for the Ford","counter":"herbs","goal":8,"requires":"road_imps","story":"The recovered dispatch bears blood from an unknown attacker. Mara asks for river herbs to treat the wounded scouts.","description":"Gather medicinal herbs from meadows and riverbanks.","reward":"30 gold and two health potions"},
-    {"id":"river_provision","chapter":"III","giver":"Old Garran, West Ford","title":"The River Remembers","counter":"fish","goal":4,"requires":"field_medicine","story":"Garran saw torchlight moving beneath the old bridge. Feed his patrol and he will reveal the cave trail used by the smugglers.","description":"Catch four fish. Equip the Fishing Pole, cast with E, then reel on the bite.","reward":"45 gold and a royal crystal"},
+    {"id":"road_imps","chapter":"I","giver":"Captain Elowen, Riverwatch","title":"The Road to Crownspire","counter":"kills","goal":8,"requires":"","story":"The king's courier vanished on the capital road. Elowen needs the route cleared before she can recover the royal dispatch.","description":"Defeat hostile imps threatening the Crownspire road.","reward":"35 gold and a health potion"},
+    {"id":"field_medicine","chapter":"II","giver":"Sister Mara, Riverwatch","title":"Mercy Before Rank","counter":"herbs","goal":8,"requires":"road_imps","story":"The recovered dispatch bears blood from an unknown attacker. Mara treats scouts, travelers, and suspected deserters before asking their allegiance.","description":"Gather medicinal herbs from the surrounding meadows.","reward":"30 gold and two health potions"},
+    {"id":"river_provision","chapter":"III","giver":"Old Garran, West Ford","title":"A Patrol Must Eat","counter":"fish","goal":4,"requires":"field_medicine","story":"Garran saw forbidden torchlight under the old bridge. Feed his patrol and he will reveal the smugglers' trail toward Crownspire.","description":"Catch four fish. Equip the Fishing Pole, cast with E, then reel on the bite.","reward":"45 gold and a royal crystal"},
     {"id":"winter_wood","chapter":"IV","giver":"Warden Brann, Crownspire","title":"Timber for the Ramparts","counter":"logs","goal":10,"requires":"river_provision","story":"Someone has cut the northern watch platforms. Brann needs fresh timber before the saboteurs return.","description":"Chop trees and recover their fallen logs.","reward":"45 gold and a forester axe"},
     {"id":"first_forging","chapter":"V","giver":"Master Iven, Crownspire","title":"Reforge the Broken Seal","counter":"crafted","goal":4,"requires":"winter_wood","story":"Fragments from the watchtower carry the mark of the Broken Crown. Iven can restore the seal after testing your hand at the forge.","description":"Use town crafting stations to make four useful items.","reward":"55 gold and refined ore"},
     {"id":"deep_delver","chapter":"VI","giver":"Archivist Vale, Crownspire","title":"Keys Below","counter":"dungeons","goal":2,"requires":"first_forging","story":"The restored seal opens two forgotten vaults. Their final chests contain the proof Vale needs to name the traitor.","description":"Open the final reward chest in two dungeons.","reward":"90 gold and arcane essence"},
     {"id":"elite_hunt","chapter":"VII","giver":"Regent Aveline, Crownspire","title":"Champions of the Hollow King","counter":"elites","goal":5,"requires":"deep_delver","story":"The Hollow King's champions are gathering beyond the roads. Break their circle before they march on Crownspire.","description":"Defeat elite or boss monsters.","reward":"120 gold and a royal crystal"},
     {"id":"ashfang_packs","chapter":"Hunt","giver":"Warden Brann","title":"Ashfang Pack Hunt","counter":"ashfangs","goal":10,"requires":"road_imps","story":"Charred hounds have followed the Hollow King's spoor into the settled lands.","description":"Break the charred hound packs prowling beyond the settled roads.","reward":"80 gold and six pieces of leather"},
+    {"id":"marcher_beacon","chapter":"East I","giver":"Marshal Teren, March Keep","title":"Ash Beneath the Beacon","counter":"marcher_threats","goal":10,"requires":"road_imps","story":"Cinderwatch has answered March Keep with the wrong flame: three short fires where one steady beacon should burn. Teren believes the new basilisk brood is being driven down Embercrag by someone searching the old signal vaults.","description":"Defeat ten hostiles in the Eastern Marches and clear the Dawnway approaches to Cinderwatch.","reward":"145 gold, basalt iron, and a Marchwarden lamellar"},
+    {"id":"marcher_oath","chapter":"East II","giver":"Keeper Sava, Cinderwatch","title":"What Ember Span Swore","counter":"marcher_secrets","goal":2,"requires":"marcher_beacon","story":"The bridge oath names two witnesses: the tollmaster who watched the west road and the barrow keeper who watched the dead. Sava needs both surviving records before she relights Cinderwatch under the Broken Crown.","description":"Recover two concealed Eastern Marches caches tied to the old bridge oath.","reward":"190 gold and the Emberglass Oath Band"},
+    {"id":"rainward_patrol","chapter":"West I","giver":"Warden Maelin, Oakrest","title":"Bells in the Rain","counter":"rainward_threats","goal":8,"requires":"road_imps","story":"The bell at Old Rainward Abbey has sounded three times without a hand on its rope. Maelin's patrols found claw marks leading from the ruined cloister toward the realmway.","description":"Defeat eight hostiles in the Western Reaches and make the road safe for Rainhaven's caravans.","reward":"105 gold, treated leather, and the Rainward patrol mark"},
+    {"id":"rainward_reliquary","chapter":"West II","giver":"Brother Hale, Rainhaven","title":"The Abbot's Last Crossing","counter":"rainward_secrets","goal":1,"requires":"rainward_patrol","story":"The abbey ledger names a reliquary hidden above the flood line. Hale believes it contains the old wardens' proof that the Rainfall River once marked a royal boundary.","description":"Find one concealed cache in the Western Reaches.","reward":"135 gold and a Tideglass Signet"},
+    {"id":"stormbreak_beacon","chapter":"Highlands I","giver":"Warden Cael, Stormbreak Hold","title":"Fire on Stormscar","counter":"stormbreak_threats","goal":10,"requires":"rainward_patrol","story":"Stormscar Beacon has gone dark while ashfangs and old dead gather around its road. Cael cannot signal Greyfen or Galehorn until the ridge is cleared.","description":"Defeat ten hostiles in the Stormbreak Highlands and reopen the beacon roads.","reward":"150 gold, highland iron, and a Stormward mantle"},
+    {"id":"stormbreak_choir","chapter":"Highlands II","giver":"Keeper Eira, Moorwatch","title":"The Hymn Beneath Thunder","counter":"stormbreak_secrets","goal":2,"requires":"stormbreak_beacon","story":"The Shattered Choir sang once before every crown war. Eira believes its lost undercrypt and the beacon keeper's strongbox contain the two halves of a warning meant for Crownspire.","description":"Find two concealed caches in the Stormbreak Highlands.","reward":"185 gold and the Tempest Choir Band"},
+    {"id":"skeld_lantern","chapter":"Coast I","giver":"Harbormaster Sigrun, Frostharbor","title":"Light Against the Grey","counter":"skeld_threats","goal":12,"requires":"stormbreak_choir","story":"Cape Keld's lantern still burns, but no keeper has reached Frostharbor in nine nights. Trolls, crawlers, and the chapel dead have cut every road between the harbor and the headland.","description":"Defeat twelve hostiles on the Skeld Coast and reopen the lightkeeper roads.","reward":"210 gold, saltsteel, and a Cape Keld watchcoat"},
+    {"id":"skeld_bones","chapter":"Coast II","giver":"Cantor Yrsa, Whalebone Chapel","title":"The Bones Remember","counter":"skeld_secrets","goal":2,"requires":"skeld_lantern","story":"The old canticle says Cape Keld's light was built to watch something beneath the Grey Sea, not ships upon it. Yrsa needs the lightkeeper's storm record and the chapel reliquary before she can translate the final verse.","description":"Recover two concealed records from Cape Keld and Whalebone Chapel.","reward":"260 gold and the Greywake Lantern Band"},
+    {"id":"rimecrawler_hunt","chapter":"VIII","giver":"Warden Ysra, Icewatch Hold","title":"Chitin Under Rime","counter":"rimecrawlers","goal":5,"requires":"elite_hunt","story":"The retreating ice has opened old brood tunnels beneath the Rimewater moraine. Ysra needs proof that the crawlers have not reached the road shelters.","description":"Investigate the marked nesting grounds and defeat five Rimecrawlers.","reward":"140 gold, two royal crystals, and the Icewatch Signet"},
+    {"id":"last_light_armor","chapter":"IX","giver":"Armorer Kael, Icewatch Hold","title":"Armor for Last Light","counter":"rimecraft","goal":1,"requires":"rimecrawler_hunt","story":"Kael recognizes the shell as natural frostward. Bind it into field armor before the Last Light expedition climbs beyond Rimefall.","description":"Craft Rimecrawler Bracers at a town crafting yard.","reward":"160 gold and two arcane essence"},
 ]
 
 const RECIPES:=[
@@ -129,16 +154,32 @@ const RECIPES:=[
     {"id":"trail_boots","category":"Armor","name":"Trailwarden Boots","cost":{"leather":5,"cloth":2,"resin":1},"kind":"gear","slot":"feet","icon":4,"armor":5,"hp":8,"description":"Gripped boots made for mountain paths."},
     {"id":"iron_gauntlets","category":"Armor","name":"Iron Gauntlets","cost":{"ore":5,"leather":2},"kind":"gear","slot":"hands","icon":3,"armor":6,"power":3,"description":"Articulated iron hand protection."},
     {"id":"warm_trousers","category":"Armor","name":"Highland Trousers","cost":{"cloth":5,"leather":2},"kind":"gear","slot":"pants","icon":7,"armor":4,"hp":10,"description":"Warm reinforced traveling trousers."},
+    {"id":"rimecrawler_bracers","category":"Glacial Craft","name":"Rimecrawler Bracers","cost":{"chitin":4,"crystal":2,"leather":2},"kind":"gear","slot":"hands","visual":"hands","effect":"frostward","icon":3,"armor":11,"hp":14,"power":5,"description":"Layered crawler plates bound over warm leather. The blue carapace carries a visible frostward."},
+    {"id":"marchwarden_lamellar","category":"Marcher Craft","name":"Marchwarden Lamellar","cost":{"ore":11,"leather":6,"cloth":3},"kind":"gear","slot":"chest","visual":"chest","icon":1,"armor":21,"hp":31,"mana":0,"power":5,"description":"Overlapping basalt-iron scales laced over ochre leather for long patrols between Ember Span and Cinderwatch."},
+    {"id":"emberglass_oath_band","category":"Marcher Craft","name":"Emberglass Oath Band","cost":{"crystal":3,"ore":4,"essence":2},"kind":"gear","slot":"ring_right","visual":"magic ring","ring_design":"split_band","effect":"emberpulse","icon":10,"armor":3,"hp":14,"mana":8,"power":10,"description":"Two dark iron arcs hold a living bead of Embercrag glass. Its orange ward pulses when danger draws close."},
+    {"id":"saltmeadow_roundshield","category":"Marcher Craft","name":"Saltmeadow Roundshield","cost":{"logs":5,"leather":4,"ore":5,"resin":2},"kind":"gear","slot":"offhand","visual":"shield","icon":9,"armor":15,"hp":24,"mana":0,"power":4,"description":"Poplar boards, rawhide, and a basalt-iron rim built for the exposed northern meadow road."},
+    {"id":"rainward_cloak","category":"Rainward Craft","name":"Rainward Waxed Cloak","cost":{"cloth":5,"resin":3,"leather":2},"kind":"gear","slot":"shoulders","visual":"shoulders","icon":2,"armor":7,"hp":16,"power":3,"description":"A waxed wool road-cloak cut by Oakrest's woodwardens for weeks of western rain."},
+    {"id":"mossglass_band","category":"Rainward Craft","name":"Mossglass Wayfinder Band","cost":{"crystal":2,"resin":2,"ore":3},"kind":"gear","slot":"ring_right","visual":"magic ring","ring_design":"spiral","effect":"windstep","icon":10,"armor":2,"hp":10,"mana":8,"power":6,"description":"Green river-glass turns within its silver setting and casts a visible wayfinding ward."},
+    {"id":"stonecross_jack","category":"Rainward Craft","name":"Stonecross Mason's Jack","cost":{"ore":10,"stone":8,"leather":4},"kind":"gear","slot":"chest","icon":1,"armor":19,"hp":30,"power":4,"description":"Overlapping iron and quarry-leather plates built to turn falling stone."},
+    {"id":"stormward_mantle","category":"Highland Craft","name":"Stormward Mantle","cost":{"cloth":6,"leather":4,"resin":3,"ore":2},"kind":"gear","slot":"shoulders","visual":"shoulders","effect":"windstep","icon":2,"armor":9,"hp":20,"power":5,"description":"Layered storm wool fastened with highland iron. Its split hem stays clear on steep roads."},
+    {"id":"blacktarn_band","category":"Highland Craft","name":"Blacktarn Compass Band","cost":{"crystal":3,"ore":4,"essence":1},"kind":"gear","slot":"ring_left","visual":"magic ring","ring_design":"crown","effect":"frostward","icon":10,"armor":4,"hp":14,"mana":10,"power":7,"description":"Dark tarn glass set beneath a broken compass needle. A pale ward points toward safe ground."},
+    {"id":"galehorn_spear","category":"Highland Craft","name":"Galehorn Road Spear","cost":{"ore":8,"logs":4,"leather":2},"kind":"gear","slot":"mainhand","visual":"sword","icon":7,"armor":2,"hp":8,"power":20,"description":"A long highland road blade balanced to keep ashfangs beyond shield reach."},
+    {"id":"skeld_harpoon","category":"Skeld Craft","name":"Frostharbor Saltsteel Harpoon","cost":{"ore":9,"logs":4,"leather":3},"kind":"gear","slot":"mainhand","visual":"sword","icon":7,"armor":2,"hp":10,"power":23,"description":"A long, narrow saltsteel point fitted to a tarred ash shaft for sea beasts and road fighting."},
+    {"id":"vardholm_watchcoat","category":"Skeld Craft","name":"Vardholm Sealhide Watchcoat","cost":{"leather":9,"cloth":6,"resin":4},"kind":"gear","slot":"chest","visual":"chest","effect":"frostward","icon":1,"armor":16,"hp":34,"mana":4,"power":4,"description":"Layered hide, dense wool, and waxed seams keep the Rimepass watch alive through freezing spray."},
+    {"id":"greywake_band","category":"Skeld Craft","name":"Greywake Lantern Band","cost":{"crystal":3,"ore":4,"essence":2},"kind":"gear","slot":"ring_left","visual":"magic ring","ring_design":"split_band","effect":"frostward","icon":10,"armor":5,"hp":18,"mana":14,"power":9,"description":"A pale sea-glass lantern turns inside a salt-dark silver band, shedding a visible ward in cold mist."},
     {"id":"torch_bundle","category":"Supplies","name":"Pitch Torch Bundle","cost":{"logs":2,"resin":2,"cloth":1},"kind":"item","slot":"offhand","icon":5,"description":"Three long-burning dungeon torches."},
     {"id":"lockpick_set","category":"Supplies","name":"Lockpick Set","cost":{"scrap":4,"cloth":1},"kind":"item","slot":"tool","icon":9,"description":"Fine picks for future locked caches."},
     {"id":"rope","category":"Supplies","name":"Climbing Rope","cost":{"cloth":4,"resin":1},"kind":"item","slot":"tool","icon":10,"description":"A sturdy coil for expeditions."},
-    {"id":"camp_kit","category":"Supplies","name":"Traveler Camp Kit","cost":{"logs":3,"cloth":4,"leather":2},"kind":"item","slot":"tool","icon":10,"description":"Bedroll, pegs and a compact cooking frame."},
+    {"id":"camp_kit","category":"Supplies","name":"Traveler Camp Kit","cost":{"logs":3,"cloth":4,"leather":2},"kind":"item","slot":"tool","icon":10,"use":"world_place_campfire","visual":"campfire","description":"Double-click from the bag on safe outdoor ground to build a cooking campfire."},
     {"id":"stone_block","category":"Materials","name":"Cut Stone Block","cost":{"stone":4},"kind":"material","material":"stone","amount":2,"description":"Two refined masonry blocks."},
     {"id":"steel_ingot","category":"Materials","name":"Steel Ingot","cost":{"ore":3,"scrap":2},"kind":"material","material":"ore","amount":2,"description":"Two purified metal ingots."},
     {"id":"treated_leather","category":"Materials","name":"Treated Leather","cost":{"leather":3,"resin":1},"kind":"material","material":"leather","amount":2,"description":"Two pieces of durable treated leather."},
     {"id":"royal_alloy","category":"Masterwork","name":"Royal Alloy Breastplate","cost":{"ore":18,"crystal":3,"essence":2,"leather":4},"kind":"gear","slot":"chest","icon":1,"armor":25,"hp":38,"mana":8,"power":7,"description":"Masterwork blue-steel plate bearing the Broken Crown crest."},
     {"id":"crest_shield","category":"Masterwork","name":"Broken Crown Crest Shield","cost":{"ore":10,"logs":5,"crystal":2,"resin":2},"kind":"gear","slot":"offhand","icon":9,"armor":19,"hp":27,"power":5,"description":"A royal shield carrying the realm's broken-crown-and-river crest."},
     {"id":"cooked_fish","category":"Cooking","name":"Cooked Fish","cost":{},"kind":"cook_food","ingredient_id":"raw_fish","description":"Cook one raw fish. Restores health and grants the strongest food buff."},
+    {"id":"herb_mushroom_stew","category":"Cooking","name":"Herb & Mushroom Stew","cost":{"herbs":2,"mushrooms":3},"kind":"cook_food","food_name":"Herb & Mushroom Stew","buff_name":"Trailwise","duration":300.0,"buff_power":5,"health_regen":.32,"stamina_regen":5.0,"heal":18.0,"description":"A long-lasting trail meal that improves stamina recovery for five minutes."},
+    {"id":"ember_roasted_mushrooms","category":"Cooking","name":"Ember-Roasted Mushrooms","cost":{"mushrooms":4,"resin":1},"kind":"cook_food","food_name":"Ember-Roasted Mushrooms","buff_name":"Emberwarm","duration":210.0,"buff_power":7,"health_regen":.20,"stamina_regen":3.0,"heal":12.0,"description":"A hot highland snack granting power and steady recovery."},
+    {"id":"hunter_venison","category":"Cooking","name":"Hunter's Roast Venison","cost":{"raw_meat":2,"resin":1,"herbs":1},"kind":"cook_food","food_name":"Hunter's Roast Venison","buff_name":"Well Fed","duration":420.0,"buff_power":8,"health_regen":.48,"stamina_regen":4.5,"heal":28.0,"description":"Game meat roasted over a campfire. Grants strong recovery and power for seven minutes."},
     {"id":"graveward_tonic","category":"Gravecraft","name":"Graveward Tonic","cost":{"herbs":2,"grave_tokens":2,"plague_samples":1},"kind":"health_potion","amount":2,"unlock":"gravebound","description":"Two strong healing draughts brewed from purified Gravebound residue."},
     {"id":"ossuary_buckler","category":"Gravecraft","name":"Ossuary Buckler","cost":{"ore":5,"grave_tokens":6},"kind":"gear","slot":"offhand","visual":"shield","icon":9,"armor":14,"hp":18,"power":4,"unlock":"gravebound","description":"A compact warded shield forged from recovered burial iron."},
     {"id":"graveglass_sword","category":"Gravecraft","name":"Graveglass Sword","cost":{"ore":7,"crystal":1,"grave_tokens":7},"kind":"gear","slot":"mainhand","visual":"sword","icon":8,"power":21,"hp":5,"unlock":"gravebound","description":"A keen road blade edged with blue graveglass."},
@@ -146,6 +187,37 @@ const RECIPES:=[
 ]
 
 func configure(hero: CharacterBody3D, height_call: Callable, walkable_call: Callable, world_profile: Dictionary = {}) -> void:
+    _begin_configuration(hero,height_call,walkable_call,world_profile)
+    var configure_started_usec:int=Time.get_ticks_usec()
+    for stage_index in range(get_configuration_stage_count()):
+        var step_started_usec:int=Time.get_ticks_usec()
+        run_configuration_stage(stage_index)
+        _profile_configure_step(get_configuration_stage_label(stage_index),configure_started_usec,step_started_usec)
+
+
+func configure_streamed(hero:CharacterBody3D,height_call:Callable,walkable_call:Callable,world_profile:Dictionary={})->void:
+    _begin_configuration(hero,height_call,walkable_call,world_profile)
+    var configure_started_usec:int=Time.get_ticks_usec()
+    for stage_index in range(get_configuration_stage_count()):
+        await get_tree().process_frame
+        var step_started_usec:int=Time.get_ticks_usec()
+        run_configuration_stage(stage_index)
+        _profile_configure_step(get_configuration_stage_label(stage_index),configure_started_usec,step_started_usec)
+
+
+func get_configuration_stage_count()->int:return 9
+
+
+func get_configuration_stage_label(stage_index:int)->String:
+    var labels:Array[String]=[
+        "enemies","town_services","dungeons","campaigns",
+        "gathering_services","tree_registry","prop_collisions",
+        "service_batching","initial_stream",
+    ]
+    return labels[stage_index] if stage_index>=0 and stage_index<labels.size() else "gameplay"
+
+
+func _begin_configuration(hero:CharacterBody3D,height_call:Callable,walkable_call:Callable,world_profile:Dictionary)->void:
     player = hero; height_sampler = height_call; walkable_sampler = walkable_call
     profile = world_profile
     _stream_scene_branches=OS.get_environment("BROKEN_KNIGHT_STREAM_SCENE_BRANCHES")=="1"
@@ -160,42 +232,400 @@ func configure(hero: CharacterBody3D, height_call: Callable, walkable_call: Call
     _vendors.clear()
     safe_zone_center = profile.get("spawn_site", {}).get("position", Vector2(player.global_position.x, player.global_position.z))
     rng.seed = 71291
-    # Keep the starting meadow readable and safe. The denser enemy groups now
-    # live in the starter well and the higher-rank cavern dungeons.
-    for i in range(3): _spawn_minion(920.0 + i * 46.0, float(i) * 2.399)
-    # A small number of solitary bramble wraiths inhabit the outer roads. They
-    # are deliberately sparse so the world gains variety without becoming a
-    # continuous combat field.
-    for i in range(4):_spawn_bramble_wraith(1120.0+float(i)*70.0,float(i)*2.217+.42)
-    # Four Ashfang leaders roam with two smaller runts each. Packs sit well
-    # outside the safe meadow and create recognizable outdoor combat pockets
-    # instead of evenly carpeting the map with enemies.
-    for pack in range(3):
-        var pack_distance:=1370.0+float(pack)*125.0
-        var pack_angle:=.68+float(pack)*1.47
-        _spawn_ashfang(pack_distance,pack_angle,false)
-        _spawn_ashfang(pack_distance+5.0,pack_angle-.075,true)
-        _spawn_ashfang(pack_distance+8.0,pack_angle+.090,true)
-    _build_town_services()
-    _build_dungeon_network()
-    _gravebound_campaign=GRAVEBOUND_CAMPAIGN_SCRIPT.new()
-    add_child(_gravebound_campaign)
-    _gravebound_campaign.configure(self,player,profile)
-    _build_crafting_stations()
-    _scatter_gathering_nodes()
-    _build_fishing_spots()
-    _register_house_doors()
-    _build_zone_exits()
-    _configure_harvestable_world_trees()
-    _configure_local_prop_collisions()
-    _batch_static_service_geometry()
-    # Hide distant dungeons and service clusters before the first playable
-    # frame instead of briefly drawing the whole realm at startup.
-    _stream_local_gameplay(true)
+    if player.has_signal("world_item_requested") and not player.world_item_requested.is_connected(_on_world_item_requested):
+        player.world_item_requested.connect(_on_world_item_requested)
 
 
-func clear_for_zone_reload()->void:
-    if is_instance_valid(player) and player.has_method("is_mounted") and player.is_mounted():player.dismount_horse()
+func run_configuration_stage(stage_index:int)->void:
+    match stage_index:
+        0:
+            _build_region_encounters()
+            _build_region_wildlife()
+        1:_build_town_services()
+        2:_build_dungeon_network()
+        3:
+            _gravebound_campaign=GRAVEBOUND_CAMPAIGN_SCRIPT.new()
+            add_child(_gravebound_campaign)
+            _gravebound_campaign.configure(self,player,profile)
+            _oathbound_campaign=OATHBOUND_CAMPAIGN_SCRIPT.new()
+            add_child(_oathbound_campaign)
+            _oathbound_campaign.configure(self,player,profile)
+        4:
+            _build_crafting_stations()
+            _scatter_gathering_nodes()
+            _build_fishing_spots()
+            _register_house_doors()
+            _build_zone_exits()
+            _build_region_discovery_sites()
+        5:
+            _configure_harvestable_world_trees()
+        6:_configure_local_prop_collisions()
+        7:_batch_static_service_geometry()
+        8:
+            # Hide distant dungeons and service clusters before play resumes.
+            _stream_local_gameplay(true)
+
+
+func _build_region_encounters()->void:
+    var authored:Array=profile.get("encounter_sites",[])
+    if authored.is_empty():
+        # Legacy starting-region fallback. It remains deliberately well beyond
+        # the safe spawn and is replaced automatically as that profile gains
+        # authored encounter sites.
+        for i in range(3):_spawn_minion(920.0+i*46.0,float(i)*2.399)
+        for i in range(4):_spawn_bramble_wraith(1120.0+float(i)*70.0,float(i)*2.217+.42)
+        for pack in range(3):
+            var pack_distance:=1370.0+float(pack)*125.0
+            var pack_angle:=.68+float(pack)*1.47
+            _spawn_ashfang(pack_distance,pack_angle,false)
+            _spawn_ashfang(pack_distance+5.0,pack_angle-.075,true)
+            _spawn_ashfang(pack_distance+8.0,pack_angle+.090,true)
+        return
+    for site_index in range(authored.size()):
+        var site:Dictionary=authored[site_index]
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var count:=clampi(int(site.get("count",3)),1,8)
+        var radius:=maxf(8.0,float(site.get("radius",36.0)))
+        var rank:=maxi(1,int(site.get("rank",int(profile.get("danger_tier",1)))))
+        var enemy_kind:=str(site.get("enemy","imp"))
+        for member in range(count):
+            var angle:=float(member)*TAU/float(count)+float(site_index)*1.117
+            var distance:=radius*(.34+.45*float((member*5+site_index)%7)/6.0)
+            var point:=center+Vector2(cos(angle),sin(angle))*distance
+            var position:=Vector3(point.x,0.0,point.y)
+            if _inside_safe_zone(position):continue
+            match enemy_kind:
+                "ashfang":_spawn_ashfang(0.0,angle,member>0,position,rank)
+                "bramble_wraith":_spawn_bramble_wraith(0.0,angle,position,rank)
+                "frost_troll":_spawn_frost_troll(position,rank,member)
+                "rimecrawler":_spawn_rimecrawler(position,rank,member)
+                "ashscale_basilisk":_spawn_ashscale_basilisk(position,rank,member)
+                "gravebound":
+                    var variants:Array[String]=["runner","common","graveguard","carrier"]
+                    _spawn_zombie(point,variants[member%variants.size()],str(site.get("name","regional_patrol")))
+                    _scale_latest_region_enemy(rank)
+                _:_spawn_minion(0.0,angle,position,rank)
+
+
+func _build_region_wildlife()->void:
+    # Wildlife is profile-authored so future biomes can declare their own
+    # species and density without another hard-coded world-building branch.
+    var sites:Array=profile.get("wildlife_sites",[])
+    for site_index in range(sites.size()):
+        var site:Dictionary=sites[site_index]
+        var species:=str(site.get("species","deer"))
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var population:=clampi(int(site.get("count",4)),1,12)
+        var range_radius:=maxf(35.0,float(site.get("radius",240.0)))
+        for member in range(population):
+            var angle:=fmod(float(member)*2.39996323+float(site_index)*.817,TAU)
+            var distance:=range_radius*(.18+.66*float((member*7+site_index*3)%11)/10.0)
+            var point:=center+Vector2(cos(angle),sin(angle))*distance
+            var spawn:=Vector3(point.x,0.0,point.y)
+            for attempt in range(7):
+                if (not walkable_sampler.is_valid() or walkable_sampler.call(spawn.x,spawn.z)) and not _inside_safe_zone(spawn):break
+                angle+=.61
+                distance=minf(range_radius*.92,distance+13.0)
+                spawn=Vector3(center.x+cos(angle)*distance,0.0,center.y+sin(angle)*distance)
+            if walkable_sampler.is_valid() and not walkable_sampler.call(spawn.x,spawn.z):continue
+            _spawn_wildlife(species,spawn,center,range_radius,member)
+
+
+func _spawn_wildlife(species:String,position:Vector3,home_center:Vector2,home_radius:float,member:int)->void:
+    var scene:PackedScene=DEER_SCENE
+    var scale_value:=.82
+    var health:=48.0
+    var flee_speed:=7.4
+    match species:
+        "hare":scene=HARE_SCENE;scale_value=.70;health=12.0;flee_speed=6.8
+        "grouse":scene=GROUSE_SCENE;scale_value=.76;health=9.0;flee_speed=5.4
+    var root:=Node3D.new()
+    root.name="Wildlife_%s_%02d"%[species.capitalize(),member]
+    root.set_meta("always_streamed",true)
+    add_child(root)
+    root.global_position=_ground(position)
+    root.scale=Vector3.ONE*scale_value
+    var visual:=scene.instantiate() as Node3D
+    if visual==null:
+        root.queue_free()
+        return
+    visual.name="WildlifeVisual"
+    root.add_child(visual)
+    var body:=AnimatableBody3D.new()
+    body.name="WildlifeCollision"
+    body.collision_layer=1
+    body.collision_mask=0
+    body.sync_to_physics=true
+    root.add_child(body)
+    var shape_node:=CollisionShape3D.new()
+    var capsule:=CapsuleShape3D.new()
+    capsule.radius=.36 if species=="deer" else .24
+    capsule.height=1.72 if species=="deer" else .72
+    shape_node.shape=capsule
+    shape_node.position=Vector3(0,.86 if species=="deer" else .35,0)
+    body.add_child(shape_node)
+    minions.append({
+        "node":root,"hp":health,"max_hp":health,"phase":rng.randf_range(0,TAU),"attack":0.0,"windup":0.0,"knockback":Vector3.ZERO,
+        "elite":false,"base_scale":scale_value,"animation":null,"anim_lock":0.0,"flash_time":0.0,"flash_material":null,"dead":false,"death_time":0.0,
+        "dungeon":false,"floor_y":root.global_position.y,"bounds":Rect2(),"rank":1,"kind":"wildlife_%s"%species,"species":species,"collision":body,
+        "home":home_center,"home_radius":home_radius,"wander_direction":Vector2(cos(float(member)*1.71),sin(float(member)*1.71)),
+        "wander_time":rng.randf_range(1.5,5.5),"flee_speed":flee_speed,"moving":false,
+    })
+
+
+func _build_region_discovery_sites()->void:
+    # Authored expedition camps are functional anchors, not decoration. Their
+    # visible fire is built by WorldPreviewBuilder; this companion interaction
+    # opens the existing cooking/rest system when the player reaches it.
+    for camp_value in profile.get("camp_sites",[]):
+        var camp:Dictionary=camp_value
+        var camp_point:Vector2=camp.get("position",Vector2.ZERO)
+        var camp_position:=_ground(Vector3(camp_point.x,0.0,camp_point.y))
+        _interactables.append({
+            "action":"campfire","position":camp_position,"radius":4.2,
+            "label":"Cook and rest at %s"%camp.get("name","expedition camp"),
+            "active":true,
+            "station":{"name":camp.get("name","Expedition Campfire"),"kind":"cooking"},
+        })
+    for site_value in profile.get("lore_sites",[]):
+        var site:Dictionary=site_value
+        var point:Vector2=site.get("position",Vector2.ZERO)
+        var root:=Node3D.new();root.name="Lore_%s"%str(site.get("name","Record")).validate_node_name();add_child(root)
+        root.global_position=_ground(Vector3(point.x,0.0,point.y))
+        var kind:=str(site.get("kind","book"))
+        if kind=="book":
+            _service_solid_box(root,Vector3(0,.52,0),Vector3(1.10,1.04,.70),Color(.20,.18,.15))
+            _service_box(root,Vector3(0,1.12,0),Vector3(.74,.09,.54),Color(.28,.055,.035))
+            _service_box(root,Vector3(0,1.18,-.01),Vector3(.64,.025,.46),Color(.75,.65,.45))
+        else:
+            _service_solid_box(root,Vector3(0,.80,0),Vector3(.92,1.60,.34),Color(.40,.42,.40))
+            var writing:=Label3D.new();writing.text="FIRST THAW\nCROWN  •  RIVER  •  ROAD";writing.position=Vector3(0,1.00,-.19);writing.font_size=22;writing.pixel_size=.006;writing.modulate=Color(.11,.09,.06);root.add_child(writing)
+        _set_geometry_range(root,120.0)
+        _interactables.append({
+            "action":"read_lore","position":root.global_position,"radius":3.2,
+            "label":"Read %s"%site.get("name","record"),"node":root,"active":true,
+            "title":site.get("name","Recovered Record"),"entry":site.get("entry",""),
+        })
+    for site_value in profile.get("secret_sites",[]):
+        var site:Dictionary=site_value
+        var secret_key:="secret_cache:%s"%str(site.get("name","cache"))
+        if bool(_quest_claimed.get(secret_key,false)):continue
+        var point:Vector2=site.get("position",Vector2.ZERO)
+        var cache:=Node3D.new();cache.name="HiddenCache_%s"%str(site.get("name","Cache")).validate_node_name();add_child(cache)
+        cache.global_position=_ground(Vector3(point.x,0.0,point.y))
+        _service_box(cache,Vector3(0,.25,0),Vector3(1.15,.48,.72),Color(.17,.085,.035))
+        var lid:=Node3D.new();lid.name="CacheLid";lid.position=Vector3(0,.50,.34);cache.add_child(lid)
+        _service_box(lid,Vector3(0,0,-.34),Vector3(1.18,.16,.74),Color(.22,.11,.045))
+        for x in [-.42,.42]:_service_box(cache,Vector3(x,.30,-.37),Vector3(.08,.58,.05),Color(.31,.27,.18))
+        _set_geometry_range(cache,95.0)
+        _interactables.append({
+            "action":"hidden_cache","position":cache.global_position,"radius":2.7,
+            "label":"Search concealed cache","node":cache,"lid":lid,"active":true,
+            "secret_key":secret_key,"loot_table":site.get("loot_table","frontier_cache"),"name":site.get("name","Hidden Cache"),
+        })
+
+
+func _lore_entry_text(entry:String)->String:
+    match entry:
+        "pinewatch_muster":
+            return "The seventeenth Pinewatch muster records thirty-two wardens at the pass and only eleven returning after the crown's winter summons. The final line was added in another hand:\n\n[i]Do not follow the blue fire beyond Crownfall. It wears the king's voice, but leaves no tracks in snow.[/i]"
+        "first_thaw":
+            return "Before Crownspire raised its walls, the first road followed this meltwater south. The tablet names the river a covenant: the White Crown keeps the winter, the valley carries its water, and the lowlands feed the realm. Whoever dams one part breaks all three."
+        "icewatch_ledger":
+            return "Day forty-one. The Rimewater still runs beneath the shelf ice, but the moraine trolls have crossed the blue markers. We relit Icewatch and barred the upper pass. Any expedition continuing north must carry fire, rope, and enough iron to return by a different road."
+        "frostline_notes":
+            return "Refuge rule: one bundle of split pine for every traveler, two for any party coming down from the Crown. Keep the eastern window clear. Rimefall mist freezes the latch before midnight, and the blue lights on the ridge are not signal lanterns."
+        "last_glacial_survey":
+            return "The observatory's final survey marks a hollow beneath Crown Glacier. The old astronomers called it the Blue Maw. Their compass needles turned toward the ice instead of north, and their last page records a second crown buried where no king could wear it."
+        "last_light_order":
+            return "Survey order seven: rope teams leave Last Light at dawn, follow the cairns to Rimefall, and return before the western wall loses the sun. No one crosses the Glacier Sentinel alone. Any crystal recovered from the blue ice belongs first to the refuge stores."
+        "oakrest_ledger":
+            return "Realmway ledger, rain-month seventeen. Oakrest sent twelve timber carts east and received only seven empty wagons back. The missing teams all crossed Warden's Span after the abbey bell sounded. Maelin has barred night traffic until someone follows the river road and returns with names."
+        "rainward_abbey":
+            return "The bell was not cast for worship. Its bronze bears flood marks and the old river oath: one toll for a safe ford, two for water over the lower stones, three when no road west remains. The final line is cut by a newer hand: [i]It rang three times beneath a clear sky.[/i]"
+        "galehorn_watch":
+            return "Galehorn Watch, last signal report. Rainhaven lantern answered at dusk. Stonecross answered at moonrise. The western coast gave no light. Something moved below the ridge in a line too straight for wolves and too quiet for soldiers. I have sent the bell key to the abbey reliquary."
+        "stormward_compact":
+            return "The Stormward Compact binds three roads and no throne: Greyfen keeps the east cairns, Galehorn keeps the southern descent, and Stormbreak keeps the beacon between them. If one light fails, no caravan crosses the high moor after dusk. The newest line is written in rain-bled ink: [i]Stormscar is dark, but someone still answers it.[/i]"
+        "shattered_choir":
+            return "We did not sing for the king. We sang so the mountains would return his thunder empty. On the seventh night the buried crown answered from beneath Blacktarn, and every compass in the choir turned north-west. Break the hymn in two. Hide one half with the beacon and one below the nave."
+        "blacktarn_notes":
+            return "Survey day nine. Blacktarn is fed by snow, rain, and a warmer current beneath the slate. Galehorn Run leaves the basin at a lawful grade, but the needle points into the headwall instead of downriver. We found boot prints ending at open water and none returning."
+        "frostharbor_tides":
+            return "Frostharbor tide ledger, grey-month twenty-three. Seven boats returned before the western bell. The eighth drifted through Skeldmouth with every net neatly folded and no hands aboard. The harbor chain stays raised after dusk until Cape Keld shows two lights: one for the channel, one for whatever follows beneath it."
+        "cape_keld_light":
+            return "This light is not a welcome. The first lens faces the sea road so sailors may live. The second faces straight down through the lantern floor. Keep both flames until dawn. If the lower glass turns black, ring Frostharbor once and leave the cape without looking west."
+        "whalebone_canticle":
+            return "The whale carried winter beneath the waves and laid its ribs upon Keld so the living might shelter inside them. Bone remembers every current. Glass remembers every star. When the drowned crown rises, light the cape, close the harbor, and sing no king's name into the western wind."
+        "dawnford_ledger":
+            return "Dawnford toll ledger, ember-month twelve. Every wagon bound for March Keep paid in grain, iron, or one hour repairing the realmroad. The final caravan carried no seal and cast no shadow at noon. Tollmaster Vey barred it. By morning his gate stood open and the ash on its wheels pointed east against the wind."
+        "ember_span_oath":
+            return "Let the Emberwash pass unchained beneath this span. Let the road cross once and honestly. Dawnford keeps the western stone; March Keep keeps the eastern. If the beacon burns three fires, close the bridge and seek the two witnesses before any crown commands passage."
+        "cinderwatch_record":
+            return "Beacon record, night of red rain. One flame for a clear Dawnway. Two for ash storm. Three for the thing beneath Embercrag. We lit three, but March Keep answered with one. At dawn we found fresh tool marks below the signal vault and basilisk scales warm enough to bend iron."
+        _:
+            return "Weather and war have erased most of this record. A repeated crest links it to the broken royal road and the old wardens of Crownspire."
+
+
+func _open_hidden_cache(data:Dictionary)->void:
+    data.active=false
+    _quest_claimed[str(data.get("secret_key","secret_cache"))]=true
+    var lid:=data.get("lid") as Node3D
+    if is_instance_valid(lid):create_tween().tween_property(lid,"rotation:x",-1.08,.48).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+    var position:Vector3=data.get("position",player.global_position)
+    var table:=str(data.get("loot_table","frontier_cache"))
+    if str(profile.get("zone_id",""))=="western_reaches":
+        _gathered_counts.rainward_secrets=int(_gathered_counts.get("rainward_secrets",0))+1
+    elif str(profile.get("zone_id",""))=="stormbreak_highlands":
+        _gathered_counts.stormbreak_secrets=int(_gathered_counts.get("stormbreak_secrets",0))+1
+    elif str(profile.get("zone_id",""))=="skeld_coast":
+        _gathered_counts.skeld_secrets=int(_gathered_counts.get("skeld_secrets",0))+1
+    elif str(profile.get("zone_id",""))=="east_marches":
+        _gathered_counts.marcher_secrets=int(_gathered_counts.get("marcher_secrets",0))+1
+    _spawn_world_drop(position+Vector3(.55,0,.25),{"kind":"gold","amount":48,"name":"Hidden Crown Coins"},true)
+    if table=="white_crown_relics":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"rimefinder_signet","name":"Rimefinder Signet","slot":"ring_left","visual":"magic ring","ring_design":"crown","effect":"frostward","icon":10,
+            "armor":4,"hp":18,"mana":6,"power":4,"max_durability":150.0,
+            "description":"A hidden Warden signet. Frostward reduces incoming damage while its pale ward circles the wearer.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"crystal","amount":2,"name":"Rime Crystal"},true)
+    elif table=="glacial_relics":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"aurora_surveyor_band","name":"Aurora Surveyor Band","slot":"ring_right","visual":"magic ring","ring_design":"spiral","effect":"windstep","icon":10,
+            "armor":3,"hp":14,"mana":12,"power":7,"max_durability":180.0,
+            "description":"The last surveyor's compass-ring. Its moving green ward quickens travel through the high passes.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"crystal","amount":4,"name":"Aurora Crystal"},true)
+    elif table=="glacial_supplies":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{"kind":"material","material":"crystal","amount":2,"name":"Rime Crystal"},true)
+        _spawn_world_drop(position+Vector3(.16,0,-.56),{"kind":"material","material":"resin","amount":4,"name":"Expedition Fire Resin"},false)
+        _spawn_world_drop(position+Vector3(.62,0,-.18),{
+            "kind":"item","id":"rimefall_trail_ration","stack_key":"item:rimefall_trail_ration","stackable":true,"quantity":2,
+            "name":"Rimefall Trail Ration","slot":"consumable","icon":10,"use":"food","buff_name":"Warm March","duration":240.0,
+            "buff_power":4,"health_regen":.28,"stamina_regen":3.0,"heal":22.0,
+            "description":"Two wax-wrapped expedition rations that restore health and steady stamina in the high pass.",
+        },false)
+    elif table=="blue_maw_hoard":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"blue_maw_cleaver","name":"Blue Maw Cleaver","slot":"mainhand","visual":"sword","icon":7,
+            "armor":0,"hp":12,"mana":0,"power":24,"max_durability":210.0,
+            "description":"A broad troll-forged blade with glacial iron along its edge.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"ore","amount":7,"name":"Glacial Iron"},true)
+    elif table=="marcher_supplies":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{"kind":"material","material":"ore","amount":5,"name":"Dawnway Basalt Iron"},true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"resin","amount":4,"name":"Caravan Wheel Pitch"},false)
+        _spawn_world_drop(position+Vector3(.50,0,-.12),{
+            "kind":"item","id":"amberfield_waybread","stack_key":"item:amberfield_waybread","stackable":true,"quantity":2,
+            "name":"Amberfield Waybread","slot":"consumable","icon":10,"use":"food","buff_name":"Long Road","duration":270.0,
+            "buff_power":4,"health_regen":.25,"stamina_regen":4.0,"heal":20.0,
+            "description":"Two dense loaves baked for the Dawnway caravans. Restores health and steadies stamina.",
+        },false)
+    elif table=="marcher_relics":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"barrow_witness_band","name":"Barrow Witness Band","slot":"ring_left","visual":"magic ring","ring_design":"crown","effect":"emberpulse","icon":10,
+            "armor":4,"hp":16,"mana":7,"power":9,"max_durability":195.0,
+            "description":"The eastern witness seal in basalt iron and old amber. A warm oath-mark circles its setting.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"essence","amount":3,"name":"Barrow Oath Ember"},true)
+    elif table=="cinderwatch_gear":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"cinderwatch_scale_jack","name":"Cinderwatch Scale Jack","slot":"chest","visual":"chest","icon":1,
+            "armor":22,"hp":32,"mana":0,"power":6,"max_durability":220.0,
+            "description":"Basalt-iron lamellae backed with heat-cured leather from the beacon survey stores.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"crystal","amount":3,"name":"Emberglass"},true)
+    elif table=="rainward_relics":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"abbots_tideglass_signet","name":"Abbot's Tideglass Signet","slot":"ring_left","visual":"magic ring","ring_design":"split_band","effect":"windstep","icon":10,
+            "armor":4,"hp":16,"mana":8,"power":7,"max_durability":175.0,
+            "description":"Rainfall glass set in the abbey's broken silver seal. A green-blue current circles the wearer.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"crystal","amount":3,"name":"Rainfall Glass"},true)
+    elif table=="warden_supplies":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"galehorn_patrol_cloak","name":"Galehorn Patrol Cloak","slot":"shoulders","visual":"shoulders","icon":2,
+            "armor":8,"hp":20,"mana":0,"power":4,"max_durability":160.0,
+            "description":"A waxed green patrol cloak carrying Galehorn's small silver bell clasp.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"resin","amount":5,"name":"Warden's Waxed Resin"},false)
+    elif table=="rainhaven_trade":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{"kind":"material","material":"cloth","amount":5,"name":"Rainhaven Sailcloth"},false)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"resin","amount":4,"name":"Riverboat Pitch"},false)
+    elif table=="stormbreak_beacon":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"stormscar_keeper_mantle","name":"Stormscar Keeper Mantle","slot":"shoulders","visual":"shoulders","effect":"windstep","icon":2,
+            "armor":10,"hp":22,"mana":0,"power":6,"max_durability":190.0,
+            "description":"A slate-grey beacon mantle pinned with a black-iron flame. Its ward parts the high wind around the wearer.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"ore","amount":6,"name":"Stormscar Iron"},true)
+    elif table=="stormbreak_relics":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"tempest_choir_band","name":"Tempest Choir Band","slot":"ring_right","visual":"magic ring","ring_design":"spiral","effect":"windstep","icon":10,
+            "armor":5,"hp":18,"mana":12,"power":9,"max_durability":205.0,
+            "description":"Two joined silver hymn-lines turn around a core of Blacktarn glass, leaving a visible storm-blue wake.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"essence","amount":3,"name":"Choir Resonance"},true)
+    elif table=="stormbreak_supplies":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{"kind":"material","material":"resin","amount":5,"name":"Highland Fire Resin"},false)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"cloth","amount":5,"name":"Storm Wool"},false)
+    elif table=="skeld_lighthouse":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"cape_keld_watchcoat","name":"Cape Keld Watchcoat","slot":"chest","visual":"chest","effect":"frostward","icon":1,
+            "armor":17,"hp":36,"mana":6,"power":5,"max_durability":225.0,
+            "description":"Salt-dark hide and storm wool worn by Cape Keld's missing keeper. Its pale ward strengthens in cold spray.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"crystal","amount":4,"name":"Lantern Sea-Glass"},true)
+    elif table=="skeld_relics":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{
+            "kind":"item","id":"greywake_lantern_band","name":"Greywake Lantern Band","slot":"ring_left","visual":"magic ring","ring_design":"split_band","effect":"frostward","icon":10,
+            "armor":5,"hp":18,"mana":14,"power":9,"max_durability":220.0,
+            "description":"The chapel's lower lantern in miniature. Cold green light follows its sea-glass setting.",
+        },true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"essence","amount":4,"name":"Whalebone Memory"},true)
+    elif table=="skeld_supplies":
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{"kind":"material","material":"ore","amount":7,"name":"Vardholm Saltsteel"},true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"resin","amount":5,"name":"Tarred Net Pitch"},false)
+        _spawn_world_drop(position+Vector3(.50,0,-.15),{
+            "kind":"item","id":"skeld_smoked_fish","stack_key":"item:skeld_smoked_fish","stackable":true,"quantity":2,
+            "name":"Skeld Smoked Fish","slot":"consumable","icon":10,"use":"food","buff_name":"Sea Legs","duration":300.0,
+            "buff_power":5,"health_regen":.34,"stamina_regen":4.2,"heal":26.0,
+            "description":"Two strips of juniper-smoked fish. Restores health and steadies stamina for a long coastal march.",
+        },false)
+    else:
+        _spawn_world_drop(position+Vector3(-.48,0,.20),{"kind":"material","material":"ore","amount":5,"name":"Greyfen Ore"},true)
+        _spawn_world_drop(position+Vector3(0,0,-.55),{"kind":"material","material":"essence","amount":2,"name":"Smuggled Essence"},true)
+    _check_quest_rewards()
+    _notify("Secret found: %s"%data.get("name","Hidden Cache"),Color(.72,.92,1.0))
+
+
+func _scale_latest_region_enemy(rank:int)->void:
+    if minions.is_empty():return
+    var enemy:Dictionary=minions[-1]
+    var base_rank:=maxi(1,int(enemy.get("rank",1)))
+    var difficulty:=maxf(1.0,float(profile.get("difficulty_multiplier",1.0)))
+    var rank_factor:=1.0+float(maxi(0,rank-base_rank))*.16
+    var factor:=difficulty*rank_factor
+    enemy["rank"]=maxi(base_rank,rank)
+    enemy["hp"]=float(enemy.get("hp",40.0))*factor
+    if enemy.has("max_hp"):enemy["max_hp"]=float(enemy.get("max_hp",enemy.hp))*factor
+    if enemy.has("attack_damage"):enemy["attack_damage"]=float(enemy.attack_damage)*(1.0+(factor-1.0)*.62)
+
+
+func _profile_configure_step(label:String,total_start_usec:int,step_start_usec:int)->void:
+    if OS.get_environment("BROKEN_KNIGHT_PROFILE_BUILD")!="1":return
+    var now_usec:int=Time.get_ticks_usec()
+    print("GAMEPLAY_CONFIG_PROFILE|%s|step_ms=%.1f|total_ms=%.1f"%[
+        label,float(now_usec-step_start_usec)/1000.0,float(now_usec-total_start_usec)/1000.0,
+    ])
+
+
+func clear_for_zone_reload(preserve_mount:bool=false)->void:
+    # Outdoor streamed regions share the same player and mount nodes. Forcing a
+    # dismount here made crossing the north preparation line look like the
+    # horse had thrown the player. Hard portal reloads keep the old behaviour.
+    if not preserve_mount and is_instance_valid(player) and player.has_method("is_mounted") and player.is_mounted():player.dismount_horse()
     for child in get_children():child.free()
     minions.clear();projectiles.clear();loot.clear();_vendors.clear();_portals.clear();_interactables.clear()
     _nearby_portal={};_nearby_interactable={};_nearby_loot={};nearby_vendor_data={};nearby_vendor=""
@@ -210,16 +640,46 @@ func clear_for_zone_reload()->void:
     _last_collision_refresh={}
     _service_material_cache.clear();_spawn_count=0
     _gravebound_campaign=null
+    _oathbound_campaign=null
+    _player_campfires.clear()
+    _townfolk.clear()
+
+
+func get_zone_transition_state()->Dictionary:
+    return {
+        "quest_complete":quest_complete,
+        "quest_goal":quest_goal,
+        "quest_claimed":_quest_claimed.duplicate(true),
+        "quest_baselines":_quest_baselines.duplicate(true),
+        "gathered_counts":_gathered_counts.duplicate(true),
+        "gravebound_campaign":_gravebound_campaign.get_save_state() if is_instance_valid(_gravebound_campaign) else {},
+        "oathbound_campaign":_oathbound_campaign.get_save_state() if is_instance_valid(_oathbound_campaign) else {},
+    }
+
+
+func load_zone_transition_state(data:Dictionary)->void:
+    quest_complete=bool(data.get("quest_complete",quest_complete))
+    quest_goal=maxi(1,int(data.get("quest_goal",quest_goal)))
+    _quest_claimed=data.get("quest_claimed",_quest_claimed).duplicate(true)
+    _quest_baselines=data.get("quest_baselines",_quest_baselines).duplicate(true)
+    _gathered_counts.merge(data.get("gathered_counts",{}),true)
+    if is_instance_valid(_gravebound_campaign):_gravebound_campaign.load_save_state(data.get("gravebound_campaign",{}))
+    if is_instance_valid(_oathbound_campaign):_oathbound_campaign.load_save_state(data.get("oathbound_campaign",{}))
 
 
 func _build_zone_exits()->void:
     var margin:=float(profile.get("world_size",7200.0))*.465
+    var region_origin:Vector2=profile.get("region_origin",Vector2.ZERO)
     for exit_data in profile.get("zone_exits",[]):
+        # Seamless outdoor regions are crossed in-world. A portal arch and E
+        # prompt would expose the streaming boundary and duplicate the road.
+        if bool(exit_data.get("seamless",false)):continue
         var edge:String=exit_data.get("edge","north")
         var point:=Vector2(0,-margin)
         if edge=="north":point=Vector2(0,margin)
         elif edge=="east":point=Vector2(margin,0)
         elif edge=="west":point=Vector2(-margin,0)
+        point+=region_origin
         var gate:=Node3D.new();gate.name="ZoneGate_%s"%edge.capitalize();add_child(gate);gate.global_position=_ground(Vector3(point.x,0,point.y))
         var stone:=Color(.42,.43,.40)
         for side in [-1.0,1.0]:_service_solid_box(gate,Vector3(side*4.0,3.2,0),Vector3(1.4,6.4,1.8),stone)
@@ -245,6 +705,11 @@ func _process(delta: float) -> void:
         _tick_minions(minion_delta)
     _tick_loot(delta)
     _tick_fishing(delta)
+    _townfolk_tick_accumulator+=delta
+    if _townfolk_tick_accumulator>=.10:
+        var townfolk_delta:=minf(_townfolk_tick_accumulator,.24)
+        _townfolk_tick_accumulator=0.0
+        _tick_townfolk(townfolk_delta)
     _portal_cooldown = maxf(0.0, _portal_cooldown - delta)
     _tick_auto_portal()
     _magic_requirement_time = maxf(0.0,_magic_requirement_time-delta)
@@ -333,9 +798,12 @@ func get_world_interaction_markers()->Array[Dictionary]:
 
 
 func get_story_map_markers()->Array[Dictionary]:
+    var result:Array[Dictionary]=[]
+    if is_instance_valid(_oathbound_campaign) and _oathbound_campaign.has_method("get_map_markers"):
+        result.append_array(_oathbound_campaign.get_map_markers())
     if is_instance_valid(_gravebound_campaign) and _gravebound_campaign.has_method("get_map_markers"):
-        return _gravebound_campaign.get_map_markers()
-    return []
+        result.append_array(_gravebound_campaign.get_map_markers())
+    return result
 
 
 func get_map_service_markers()->Array[Dictionary]:
@@ -357,7 +825,12 @@ func get_cooldowns() -> Array: return cooldowns
 func get_gameplay_state() -> Dictionary:
     var interaction:="Equip the Royal Vanguard Staff to cast magic." if _magic_requirement_time>0.0 else nearby_vendor
     var quests:=get_quest_state()
-    var active:Dictionary=quests[0] if not quests.is_empty() else {}
+    var active:Dictionary={}
+    for quest in quests:
+        if bool(quest.get("available",true)) and not bool(quest.get("claimed",false)):
+            active=quest
+            break
+    if active.is_empty() and not quests.is_empty():active=quests[0]
     var defeated:int=int(player.enemies_defeated) if is_instance_valid(player) else 0
     return {"quest":active.get("title",quest_title),"quest_description":active.get("description",""),"quest_current":active.get("current",mini(defeated,quest_goal)),"quest_goal":active.get("goal",quest_goal),"quest_complete":active.get("complete",quest_complete),"quests":quests,"loot":loot.size(),"minions":minions.size(),"interaction":interaction}
 
@@ -377,6 +850,7 @@ func _require_warrior_weapons()->bool:
 func _warrior_sword_slash()->void:
     if not _require_warrior_weapons() or cooldowns[0]>0.0 or player.stamina<12.0:return
     player.stamina-=12.0
+    player.damage_equipment("mainhand",.55)
     cooldowns[0]=.80;_hero_action("sword")
     await get_tree().create_timer(.23).timeout
     if not is_instance_valid(player):return
@@ -385,6 +859,7 @@ func _warrior_sword_slash()->void:
 func _warrior_shield_bash()->void:
     if not _require_warrior_weapons() or cooldowns[1]>0.0 or player.stamina<20.0:return
     player.stamina-=20.0
+    player.damage_equipment("offhand",.72)
     cooldowns[1]=1.15;_hero_action("shield")
     _damage_cone(3.2,.88,18.0+float(player.get_equipment_state().get("power",0))*.32,13.0)
     _burst(player.global_position+_combat_forward()*1.3,Color(.35,.58,1.0),2.2)
@@ -392,6 +867,7 @@ func _warrior_shield_bash()->void:
 func _warrior_charge()->void:
     if not _require_warrior_weapons() or cooldowns[2]>0.0 or player.stamina<28.0:return
     player.stamina-=28.0
+    player.damage_equipment("mainhand",.86)
     cooldowns[2]=2.4;_hero_action("charge")
     var start:=player.global_position;var direction:=_combat_forward();var target:=start+direction*7.5
     if not walkable_sampler.is_valid() or walkable_sampler.call(target.x,target.z):player.global_position=_ground(target)
@@ -551,7 +1027,7 @@ func _spawn_minion(distance: float, angle: float, fixed_position: Variant = null
     var root := Node3D.new();root.set_meta("always_streamed",true);add_child(root)
     _spawn_count += 1
     var elite := _spawn_count % 5 == 0
-    var in_dungeon := fixed_position is Vector3
+    var in_dungeon := fixed_position is Vector3 and dungeon_bounds.has_area()
     root.name = ("Cavern " if rank >= 3 else ("Well " if in_dungeon else "")) + ("Elite Imp" if elite else "Imp")
     var visual := _build_low_cost_imp(elite)
     visual.name = "ImpVisual"
@@ -576,9 +1052,9 @@ func _spawn_minion(distance: float, angle: float, fixed_position: Variant = null
     if elite:
         _add_elite_imp_effect(root)
     var pos: Vector3
-    if in_dungeon:
+    if fixed_position is Vector3:
         pos = fixed_position
-        root.global_position = pos
+        root.global_position = pos if in_dungeon else _ground(pos)
     else:
         var origin2 := Vector2(player.global_position.x,player.global_position.z)
         if origin2.distance_to(safe_zone_center)<safe_zone_radius:
@@ -591,7 +1067,7 @@ func _spawn_minion(distance: float, angle: float, fixed_position: Variant = null
             pos=player.global_position+Vector3(cos(retry_angle),0,sin(retry_angle))*retry_distance
         root.global_position=_ground(pos)
     var rank_scale := 1.0 + float(maxi(0, rank - 1)) * 0.72
-    minions.append({"node":root,"hp":(90.0 if elite else 38.0)*rank_scale,"phase":rng.randf_range(0,TAU),"attack":0.0,"windup":0.0,"knockback":Vector3.ZERO,"elite":elite,"base_scale":base_scale,"animation":animation_player,"anim_lock":0.0,"flash_time":0.0,"flash_material":flash_material,"dead":false,"death_time":0.0,"dungeon":in_dungeon,"floor_y":pos.y,"bounds":dungeon_bounds,"rank":rank})
+    minions.append({"node":root,"hp":(90.0 if elite else 38.0)*rank_scale,"phase":rng.randf_range(0,TAU),"attack":0.0,"windup":0.0,"knockback":Vector3.ZERO,"elite":elite,"base_scale":base_scale,"animation":animation_player,"anim_lock":0.0,"flash_time":0.0,"flash_material":flash_material,"dead":false,"death_time":0.0,"dungeon":in_dungeon,"floor_y":root.global_position.y,"bounds":dungeon_bounds,"rank":rank,"kind":"imp"})
 
 
 func _build_low_cost_imp(elite:bool)->Node3D:
@@ -642,13 +1118,14 @@ func _spawn_dragon(position:Vector3,rank:int,bounds:Rect2,boss_id:String)->void:
     var flash:=StandardMaterial3D.new();flash.albedo_color=Color(1,.07,.01);flash.emission_enabled=true;flash.emission=Color(1,.015,.002);flash.emission_energy_multiplier=3.5
     minions.append({"node":root,"hp":2200.0+float(rank)*240.0,"phase":0.0,"attack":1.5,"windup":0.0,"knockback":Vector3.ZERO,"elite":true,"base_scale":1.0,"animation":animation_player,"anim_lock":0.0,"flash_time":0.0,"flash_material":flash,"dead":false,"death_time":0.0,"dungeon":true,"floor_y":position.y,"bounds":bounds,"rank":rank,"kind":"dragon","boss_id":boss_id})
 
-func _spawn_bramble_wraith(distance:float,angle:float)->void:
+func _spawn_bramble_wraith(distance:float,angle:float,fixed_position:Variant=null,rank:int=2)->void:
     if not is_instance_valid(player):return
     var root:=Node3D.new();root.name="Bramble Wraith";root.set_meta("always_streamed",true);add_child(root)
-    var pos:=player.global_position+Vector3(cos(angle),0,sin(angle))*distance
-    for attempt in range(10):
-        if (not walkable_sampler.is_valid() or walkable_sampler.call(pos.x,pos.z)) and not _inside_safe_zone(pos):break
-        var retry:=angle+float(attempt+1)*.51;pos=player.global_position+Vector3(cos(retry),0,sin(retry))*(distance+float(attempt)*11.0)
+    var pos:Vector3=fixed_position if fixed_position is Vector3 else player.global_position+Vector3(cos(angle),0,sin(angle))*distance
+    if not (fixed_position is Vector3):
+        for attempt in range(10):
+            if (not walkable_sampler.is_valid() or walkable_sampler.call(pos.x,pos.z)) and not _inside_safe_zone(pos):break
+            var retry:=angle+float(attempt+1)*.51;pos=player.global_position+Vector3(cos(retry),0,sin(retry))*(distance+float(attempt)*11.0)
     root.global_position=_ground(pos)
     var visual:=Node3D.new();visual.name="WraithVisual";root.add_child(visual)
     var bark:=Color(.075,.095,.055);var bark_light:=Color(.15,.19,.085);var moss:=Color(.16,.30,.10);var thorn:=Color(.30,.25,.12);var glow:=Color(.42,1.0,.12)
@@ -671,20 +1148,22 @@ func _spawn_bramble_wraith(distance:float,angle:float)->void:
         var tx:=-.20+float(tuft)*.10
         _dragon_cone(visual,Vector3(tx,1.75,.08),.045,.34,moss,Vector3(0,0,tx*2.0))
     var flash:=StandardMaterial3D.new();flash.albedo_color=Color(.55,1,.14);flash.emission_enabled=true;flash.emission=Color(.25,1,.04);flash.emission_energy_multiplier=2.2
-    minions.append({"node":root,"hp":78.0,"phase":rng.randf_range(0,TAU),"attack":0.0,"windup":0.0,"knockback":Vector3.ZERO,"elite":false,"base_scale":1.0,"animation":null,"anim_lock":0.0,"flash_time":0.0,"flash_material":flash,"dead":false,"death_time":0.0,"dungeon":false,"floor_y":root.global_position.y,"bounds":Rect2(),"rank":2,"kind":"bramble_wraith"})
+    var danger:=maxf(1.0,float(profile.get("difficulty_multiplier",1.0)))
+    minions.append({"node":root,"hp":78.0*danger*(1.0+float(maxi(0,rank-2))*.14),"phase":rng.randf_range(0,TAU),"attack":0.0,"windup":0.0,"knockback":Vector3.ZERO,"elite":rank>=4,"base_scale":1.0,"animation":null,"anim_lock":0.0,"flash_time":0.0,"flash_material":flash,"dead":false,"death_time":0.0,"dungeon":false,"floor_y":root.global_position.y,"bounds":Rect2(),"rank":rank,"kind":"bramble_wraith","attack_damage":9.0*danger})
 
 
-func _spawn_ashfang(distance:float,angle:float,runt:bool)->void:
+func _spawn_ashfang(distance:float,angle:float,runt:bool,fixed_position:Variant=null,rank_override:int=0)->void:
     if not is_instance_valid(player):return
     var root:=Node3D.new()
     root.name="Ashfang Runt" if runt else "Ashfang Pack Leader"
     root.set_meta("always_streamed",true)
     add_child(root)
-    var pos:=player.global_position+Vector3(cos(angle),0,sin(angle))*distance
-    for attempt in range(10):
-        if (not walkable_sampler.is_valid() or walkable_sampler.call(pos.x,pos.z)) and not _inside_safe_zone(pos):break
-        var retry_angle:=angle+float(attempt+1)*.43
-        pos=player.global_position+Vector3(cos(retry_angle),0,sin(retry_angle))*(distance+float(attempt)*8.0)
+    var pos:Vector3=fixed_position if fixed_position is Vector3 else player.global_position+Vector3(cos(angle),0,sin(angle))*distance
+    if not (fixed_position is Vector3):
+        for attempt in range(10):
+            if (not walkable_sampler.is_valid() or walkable_sampler.call(pos.x,pos.z)) and not _inside_safe_zone(pos):break
+            var retry_angle:=angle+float(attempt+1)*.43
+            pos=player.global_position+Vector3(cos(retry_angle),0,sin(retry_angle))*(distance+float(attempt)*8.0)
     root.global_position=_ground(pos)
     var visual:=ASHFANG_SCENE.instantiate() as Node3D
     if visual==null:
@@ -711,9 +1190,12 @@ func _spawn_ashfang(distance:float,angle:float,runt:bool)->void:
     flash.emission=Color(1.0,.035,.002)
     flash.emission_energy_multiplier=3.2
     flash.roughness=.68
+    var enemy_rank:=rank_override if rank_override>0 else (2 if runt else 3)
+    var danger:=maxf(1.0,float(profile.get("difficulty_multiplier",1.0)))
+    var rank_factor:=1.0+float(maxi(0,enemy_rank-(2 if runt else 3)))*.16
     minions.append({
         "node":root,
-        "hp":56.0 if runt else 165.0,
+        "hp":(56.0 if runt else 165.0)*danger*rank_factor,
         "phase":rng.randf_range(0,TAU),
         "attack":rng.randf_range(.2,.9),
         "windup":0.0,
@@ -729,7 +1211,7 @@ func _spawn_ashfang(distance:float,angle:float,runt:bool)->void:
         "dungeon":false,
         "floor_y":root.global_position.y,
         "bounds":Rect2(),
-        "rank":2 if runt else 3,
+        "rank":enemy_rank,
         "kind":"ashfang_runt" if runt else "ashfang",
         "move_speed":4.05 if runt else 3.55,
         "aggro_range":39.0,
@@ -737,8 +1219,176 @@ func _spawn_ashfang(distance:float,angle:float,runt:bool)->void:
         "attack_cooldown":1.15 if runt else 1.55,
         "windup_duration":.24 if runt else .34,
         "anim_lock_duration":.52 if runt else .68,
-        "attack_damage":7.0 if runt else 13.0,
+        "attack_damage":(7.0 if runt else 13.0)*danger,
     })
+
+
+func _spawn_frost_troll(position:Vector3,rank:int,member:int=0)->void:
+    if not is_instance_valid(player):return
+    var root:=Node3D.new()
+    root.name="Frost Troll"
+    root.set_meta("always_streamed",true)
+    add_child(root)
+    root.global_position=_ground(position)
+    var visual:=FROST_TROLL_SCENE.instantiate() as Node3D
+    if visual==null:
+        root.queue_free()
+        push_error("The authored Frost Troll failed to instantiate.")
+        return
+    visual.name="FrostTrollModel"
+    visual.rotation.y=PI
+    root.add_child(visual)
+    var base_scale:=.78+float(member%2)*.045
+    root.scale=Vector3.ONE*base_scale
+    var flash:=StandardMaterial3D.new()
+    flash.albedo_color=Color(.43,.88,1.0)
+    flash.emission_enabled=true
+    flash.emission=Color(.12,.52,.72)
+    flash.emission_energy_multiplier=2.6
+    flash.roughness=.58
+    var danger:=maxf(1.0,float(profile.get("difficulty_multiplier",1.0)))
+    var rank_factor:=1.0+float(maxi(0,rank-4))*.18
+    minions.append({
+        "node":root,
+        "hp":285.0*danger*rank_factor,
+        "max_hp":285.0*danger*rank_factor,
+        "phase":rng.randf_range(0,TAU),
+        "attack":rng.randf_range(.35,1.1),
+        "windup":0.0,
+        "knockback":Vector3.ZERO,
+        "elite":rank>=6,
+        "base_scale":base_scale,
+        "animation":null,
+        "anim_lock":0.0,
+        "flash_time":0.0,
+        "flash_material":flash,
+        "dead":false,
+        "death_time":0.0,
+        "dungeon":false,
+        "floor_y":root.global_position.y,
+        "bounds":Rect2(),
+        "rank":rank,
+        "kind":"frost_troll",
+        "move_speed":1.72,
+        "aggro_range":45.0,
+        "attack_range":3.25,
+        "attack_cooldown":2.15,
+        "windup_duration":.72,
+        "anim_lock_duration":1.08,
+        "attack_damage":22.0*danger,
+    })
+
+
+func _animate_frost_troll(enemy:Dictionary,moving:bool)->void:
+    var model:=enemy.node.get_node_or_null("FrostTrollModel") as Node3D
+    if not is_instance_valid(model):return
+    var left:=model.find_child("ArmPivotL",true,false) as Node3D
+    var right:=model.find_child("ArmPivotR",true,false) as Node3D
+    var club:=model.find_child("ClubPivot",true,false) as Node3D
+    var neck:=model.find_child("NeckPivot",true,false) as Node3D
+    var phase:=float(enemy.get("phase",0.0))
+    var stride:=sin(phase*.72)*(.16 if moving else .035)
+    var winding:=float(enemy.get("windup",0.0))>0.0
+    if left:left.rotation.x=lerpf(left.rotation.x,-stride,.22)
+    if right:right.rotation.x=lerpf(right.rotation.x,stride+(-.82 if winding else 0.0),.22)
+    if club:club.rotation.x=lerpf(club.rotation.x,-.90 if winding else stride*.35,.24)
+    if neck:neck.rotation.z=sin(phase*.31)*.025
+
+
+func _spawn_rimecrawler(position:Vector3,rank:int,member:int=0)->void:
+    if not is_instance_valid(player):return
+    var root:=Node3D.new();root.name="Rimecrawler";root.set_meta("always_streamed",true);add_child(root)
+    root.global_position=_ground(position)
+    var visual:=RIMECRAWLER_SCENE.instantiate() as Node3D
+    if visual==null:
+        root.queue_free();push_error("The authored Rimecrawler failed to instantiate.");return
+    visual.name="RimecrawlerModel";visual.rotation.y=PI;root.add_child(visual)
+    var base_scale:=.86+float(member%3)*.035
+    root.scale=Vector3.ONE*base_scale
+    var collision_body:=AnimatableBody3D.new();collision_body.name="RimecrawlerCollision";collision_body.collision_layer=1;collision_body.collision_mask=0;collision_body.sync_to_physics=true;root.add_child(collision_body)
+    var collision_shape:=CollisionShape3D.new();var capsule:=CapsuleShape3D.new();capsule.radius=1.0;capsule.height=1.45;collision_shape.shape=capsule;collision_shape.position=Vector3(0,.68,0);collision_body.add_child(collision_shape)
+    var flash:=StandardMaterial3D.new();flash.albedo_color=Color(.38,.88,1.0);flash.emission_enabled=true;flash.emission=Color(.08,.46,.68);flash.emission_energy_multiplier=2.8;flash.roughness=.46
+    var danger:=maxf(1.0,float(profile.get("difficulty_multiplier",1.0)))
+    var rank_factor:=1.0+float(maxi(0,rank-4))*.15
+    var health:=148.0*danger*rank_factor
+    minions.append({
+        "node":root,"hp":health,"max_hp":health,"phase":rng.randf_range(0,TAU),"attack":rng.randf_range(.2,.9),
+        "windup":0.0,"knockback":Vector3.ZERO,"elite":rank>=6,"base_scale":base_scale,"animation":null,"anim_lock":0.0,
+        "flash_time":0.0,"flash_material":flash,"dead":false,"death_time":0.0,"dungeon":false,"floor_y":root.global_position.y,
+        "bounds":Rect2(),"rank":rank,"kind":"rimecrawler","move_speed":3.18,"aggro_range":37.0,"attack_range":2.35,
+        "attack_cooldown":1.42,"windup_duration":.34,"anim_lock_duration":.60,"attack_damage":14.0*danger,
+    })
+
+
+func _animate_rimecrawler(enemy:Dictionary,moving:bool)->void:
+    var model:=enemy.node.get_node_or_null("RimecrawlerModel") as Node3D
+    if not is_instance_valid(model):return
+    var phase:=float(enemy.get("phase",0.0))
+    var winding:=float(enemy.get("windup",0.0))>0.0
+    for side_name in ["L","R"]:
+        var side_phase:=0.0 if side_name=="L" else PI
+        for leg_index in range(3):
+            var pivot:=model.find_child("LegPivot_%s%d"%[side_name,leg_index],true,false) as Node3D
+            if not pivot:continue
+            var gait:=sin(phase+side_phase+float(leg_index)*1.72)*(.30 if moving else .045)
+            pivot.rotation.x=lerpf(pivot.rotation.x,gait+(-.18 if winding and leg_index==0 else 0.0),.28)
+            pivot.rotation.z=lerpf(pivot.rotation.z,sin(phase*.52+float(leg_index))*.035,.18)
+    var thorax:=model.find_child("Thorax",true,false) as Node3D
+    if thorax:thorax.rotation.z=sin(phase*.44)*.028
+    for side_name in ["L","R"]:
+        var mandible:=model.find_child("Mandible_%s"%side_name,true,false) as Node3D
+        if mandible:mandible.rotation.y=lerpf(mandible.rotation.y,(.28 if winding else .04)*(1.0 if side_name=="L" else -1.0),.24)
+
+
+func _spawn_ashscale_basilisk(position:Vector3,rank:int,member:int=0)->void:
+    if not is_instance_valid(player):return
+    var root:=Node3D.new();root.name="Ashscale Basilisk";root.set_meta("always_streamed",true);add_child(root)
+    root.global_position=_ground(position)
+    var visual:=ASHSCALE_BASILISK_SCENE.instantiate() as Node3D
+    if visual==null:
+        root.queue_free();push_error("The authored Ashscale Basilisk failed to instantiate.");return
+    visual.name="AshscaleBasiliskModel";visual.rotation.y=PI;root.add_child(visual)
+    var base_scale:=.78+float(member%3)*.035
+    root.scale=Vector3.ONE*base_scale
+    var collision_body:=AnimatableBody3D.new();collision_body.name="AshscaleCollision";collision_body.collision_layer=1;collision_body.collision_mask=0;collision_body.sync_to_physics=true;root.add_child(collision_body)
+    var collision_shape:=CollisionShape3D.new();var capsule:=CapsuleShape3D.new();capsule.radius=.88;capsule.height=1.60;collision_shape.shape=capsule;collision_shape.position=Vector3(0,.72,0);collision_body.add_child(collision_shape)
+    var flash:=StandardMaterial3D.new();flash.albedo_color=Color(1.0,.43,.08);flash.emission_enabled=true;flash.emission=Color(.82,.08,.01);flash.emission_energy_multiplier=2.9;flash.roughness=.52
+    var danger:=maxf(1.0,float(profile.get("difficulty_multiplier",1.0)))
+    var rank_factor:=1.0+float(maxi(0,rank-4))*.16
+    var health:=172.0*danger*rank_factor
+    minions.append({
+        "node":root,"hp":health,"max_hp":health,"phase":rng.randf_range(0,TAU),"attack":rng.randf_range(.25,.95),
+        "windup":0.0,"knockback":Vector3.ZERO,"elite":rank>=6,"base_scale":base_scale,"animation":null,"anim_lock":0.0,
+        "flash_time":0.0,"flash_material":flash,"dead":false,"death_time":0.0,"dungeon":false,"floor_y":root.global_position.y,
+        "bounds":Rect2(),"rank":rank,"kind":"ashscale_basilisk","move_speed":2.82,"aggro_range":39.0,"attack_range":2.65,
+        "attack_cooldown":1.58,"windup_duration":.42,"anim_lock_duration":.72,"attack_damage":16.0*danger,
+    })
+
+
+func _animate_ashscale_basilisk(enemy:Dictionary,moving:bool)->void:
+    var model:=enemy.node.get_node_or_null("AshscaleBasiliskModel") as Node3D
+    if not is_instance_valid(model):return
+    var phase:=float(enemy.get("phase",0.0))
+    var winding:=float(enemy.get("windup",0.0))>0.0
+    for side_name in ["L","R"]:
+        var side_phase:=0.0 if side_name=="L" else PI
+        for leg_name in ["F","R"]:
+            var leg_phase:=0.0 if leg_name=="F" else PI
+            var pivot:=model.find_child("LegPivot_%s%s"%[side_name,leg_name],true,false) as Node3D
+            if not pivot:continue
+            var gait:=sin(phase+side_phase+leg_phase)*(.24 if moving else .035)
+            pivot.rotation.x=lerpf(pivot.rotation.x,gait,.26)
+            pivot.rotation.z=lerpf(pivot.rotation.z,sin(phase*.47+side_phase)*.025,.18)
+    var jaw:=model.find_child("JawPivot",true,false) as Node3D
+    if jaw:jaw.rotation.x=lerpf(jaw.rotation.x,.40 if winding else .035+sin(phase*.31)*.018,.25)
+    var tail_0:=model.find_child("TailPivot_0",true,false) as Node3D
+    var tail_1:=model.find_child("TailPivot_1",true,false) as Node3D
+    if tail_0:tail_0.rotation.y=sin(phase*.52)*(.18 if moving else .07)
+    if tail_1:tail_1.rotation.y=sin(phase*.52+.78)*(.25 if moving else .10)
+    var throat:=model.find_child("EmberThroat",true,false) as Node3D
+    if throat:
+        var pulse:=1.0+sin(phase*.38)*.055+(.10 if winding else 0.0)
+        throat.scale=Vector3.ONE*pulse
 
 
 func _spawn_zombie(world_point:Vector2,variant:String,encounter_id:String,dungeon:=false,fixed_position:Vector3=Vector3(INF,INF,INF),dungeon_bounds:Rect2=Rect2())->void:
@@ -890,6 +1540,9 @@ func _tick_minions(delta: float) -> void:
                 m.node.queue_free()
                 minions.remove_at(i)
             continue
+        if str(m.get("kind","")).begins_with("wildlife_"):
+            _tick_wildlife(m,delta)
+            continue
         # Dormant enemies do not need animation, overlay traversal, pathing or
         # terrain sampling. Previously every imp in every sealed dungeon paid
         # those costs 30 times per second even when kilometres away.
@@ -928,7 +1581,8 @@ func _tick_minions(delta: float) -> void:
             if outward.length_squared()<0.001:outward=Vector2.RIGHT
             outward=outward.normalized()*(safe_zone_radius+3.0)
             m.node.global_position=_ground(Vector3(safe_zone_center.x+outward.x,0.0,safe_zone_center.y+outward.y))
-        m.phase += delta*(7.0 if kind.begins_with("ashfang") else 5.0); m.attack=maxf(0.0,m.attack-delta)
+        var phase_speed:=7.8 if kind=="rimecrawler" else (6.3 if kind=="ashscale_basilisk" else (7.0 if kind.begins_with("ashfang") else (3.2 if kind=="frost_troll" else 5.0)))
+        m.phase += delta*phase_speed; m.attack=maxf(0.0,m.attack-delta)
         var knockback:Vector3=m.get("knockback",Vector3.ZERO)
         if knockback.length_squared()>0.001:
             var pushed:Vector3=m.node.global_position+knockback*delta
@@ -984,6 +1638,9 @@ func _tick_minions(delta: float) -> void:
         var aggro_range:float=float(m.get("aggro_range",32.0))
         var attack_range:float=float(m.get("attack_range",1.85))
         var move_speed:float=float(m.get("move_speed",2.25))
+        if kind=="frost_troll":_animate_frost_troll(m,windup<=0.0 and not player_in_safe_zone and dist<aggro_range and dist>attack_range)
+        elif kind=="rimecrawler":_animate_rimecrawler(m,windup<=0.0 and not player_in_safe_zone and dist<aggro_range and dist>attack_range)
+        elif kind=="ashscale_basilisk":_animate_ashscale_basilisk(m,windup<=0.0 and not player_in_safe_zone and dist<aggro_range and dist>attack_range)
         if windup<=0.0 and not player_in_safe_zone and dist < aggro_range and dist > attack_range:
             var dir: Vector3 = Vector3(delta_pos.x,0,delta_pos.z).normalized(); var next: Vector3 = m.node.global_position+dir*move_speed*delta
             if in_dungeon:
@@ -1010,8 +1667,85 @@ func _tick_minions(delta: float) -> void:
         elif float(m.get("anim_lock",0.0)) <= 0.0:
             _play_minion_animation(m, "Idle")
         if float(m.get("windup",0.0))<=0.0:m.node.scale=m.node.scale.lerp(Vector3.ONE*float(m.get("base_scale",.62)),delta*7.0)
-        var locomotion_bob:=0.0 if kind.begins_with("ashfang") else sin(m.phase)*.018
+        var locomotion_bob:=0.0 if kind.begins_with("ashfang") or kind in ["rimecrawler","ashscale_basilisk"] else sin(m.phase)*.018
         m.node.position.y=(float(m.floor_y) if in_dungeon else _ground(m.node.global_position).y)+locomotion_bob
+
+
+func _tick_wildlife(animal:Dictionary,delta:float)->void:
+    var root:Node3D=animal.node
+    var offset:Vector3=root.global_position-player.global_position
+    var distance_squared:=offset.length_squared()
+    if distance_squared>22500.0:
+        root.visible=false
+        return
+    root.visible=true
+    var distance:=sqrt(distance_squared)
+    var species:=str(animal.get("species","deer"))
+    animal.phase=float(animal.get("phase",0.0))+delta
+    animal.wander_time=float(animal.get("wander_time",0.0))-delta
+    var direction2:Vector2=animal.get("wander_direction",Vector2.UP)
+    var moving:=false
+    var speed:=0.0
+    if distance<22.0:
+        direction2=Vector2(offset.x,offset.z).normalized()
+        if direction2.length_squared()<.01:direction2=Vector2.RIGHT
+        speed=float(animal.get("flee_speed",6.0))
+        moving=true
+        animal.wander_time=rng.randf_range(2.0,4.0)
+    else:
+        var home:Vector2=animal.get("home",Vector2.ZERO)
+        var planar_position:=Vector2(root.global_position.x,root.global_position.z)
+        var home_offset:=home-planar_position
+        if home_offset.length()>float(animal.get("home_radius",220.0))*.88:
+            direction2=home_offset.normalized()
+            speed=1.55 if species=="deer" else 1.15
+            moving=true
+        elif float(animal.wander_time)<=0.0:
+            var heading:=rng.randf_range(-PI,PI)
+            direction2=Vector2(cos(heading),sin(heading))
+            animal.wander_time=rng.randf_range(2.2,6.5)
+            animal.moving=rng.randf()<.68
+        else:
+            moving=bool(animal.get("moving",false))
+            speed=(1.30 if species=="deer" else .92) if moving else 0.0
+    animal.wander_direction=direction2
+    animal.moving=moving
+    if moving and direction2.length_squared()>.01:
+        var move_direction:=Vector3(direction2.x,0.0,direction2.y).normalized()
+        var next:=root.global_position+move_direction*speed*delta
+        var allowed:bool=not walkable_sampler.is_valid() or bool(walkable_sampler.call(next.x,next.z))
+        if allowed:
+            var next_ground:=_ground(next)
+            if absf(next_ground.y-root.global_position.y)<1.15:
+                root.global_position=next_ground
+                root.look_at(root.global_position+move_direction,Vector3.UP)
+            else:
+                animal.wander_direction=direction2.rotated(1.91)
+                animal.wander_time=.35
+        else:
+            animal.wander_direction=direction2.rotated(1.57)
+            animal.wander_time=.35
+    else:
+        root.global_position=_ground(root.global_position)
+    _animate_wildlife(animal,moving,speed)
+
+
+func _animate_wildlife(animal:Dictionary,moving:bool,speed:float)->void:
+    var visual:Node3D=animal.node.get_node_or_null("WildlifeVisual") as Node3D
+    if visual==null:return
+    var species:=str(animal.get("species","deer"))
+    var phase:=float(animal.get("phase",0.0))*(8.5 if moving else 2.0)*(1.0+speed*.06)
+    var swing:=sin(phase)*(.48 if moving else .035)
+    var names:Array[String]=["FrontLegL","FrontLegR","RearLegL","RearLegR"] if species!="grouse" else ["LegL","LegR"]
+    for index in range(names.size()):
+        var pivot:=visual.find_child(names[index],true,false) as Node3D
+        if pivot:pivot.rotation.x=swing*(-1.0 if index%2==0 else 1.0)
+    for ear_name in ["EarL","EarR"]:
+        var ear:=visual.find_child(ear_name,true,false) as Node3D
+        if ear:ear.rotation.z=sin(phase*.27+float(ear_name.length()))*.055
+    var tail:=visual.find_child("TailPivot",true,false) as Node3D
+    if tail:tail.rotation.z=sin(phase*.42)*(.16 if moving else .045)
+    visual.position.y=(absf(sin(phase))*.035 if moving else sin(phase*.22)*.012)
 
 
 func _inside_dungeon_bounds(minion: Dictionary, position: Vector3) -> bool:
@@ -1055,15 +1789,38 @@ func _damage(m: Dictionary, amount: float, hit_direction:Vector3=Vector3.ZERO) -
         kind=m.get("kind","")
         m.dead=true
         m.death_elapsed=0.0
-        m.death_time=3.5 if is_dragon else (2.1 if kind=="bramble_wraith" else (2.0 if kind.begins_with("ashfang") else 1.45))
+        m.death_time=3.5 if is_dragon else (2.45 if kind=="frost_troll" else (2.25 if kind=="ashscale_basilisk" else (2.20 if kind=="rimecrawler" else (2.1 if kind=="bramble_wraith" else (2.0 if kind.begins_with("ashfang") else 1.45)))))
         m.node.scale=Vector3.ONE*base_scale
         if is_instance_valid(health_fill) and is_instance_valid(health_fill.get_parent()):health_fill.get_parent().visible=false
         _play_minion_animation(m,"Death",true)
+        if kind.begins_with("wildlife_"):
+            var wildlife_collision:=m.get("collision") as CollisionObject3D
+            if is_instance_valid(wildlife_collision):wildlife_collision.collision_layer=0
+            var species:=str(m.get("species","deer"))
+            var meat_amount:=3 if species=="deer" else 1
+            _spawn_world_drop(death_pos,{"kind":"material","material":"raw_meat","amount":meat_amount,"name":"Raw Game Meat"},false)
+            if species in ["deer","hare"]:
+                _spawn_world_drop(death_pos+Vector3(.48,0,.20),{"kind":"material","material":"leather","amount":2 if species=="deer" else 1,"name":"Untreated Hide"},false)
+            player.give_xp(3 if species=="deer" else 1)
+            _notify("Hunted %s — collect and cook the meat at a campfire."%species.capitalize(),Color(.90,.74,.42))
+            return
         if kind.begins_with("zombie_"):_play_zombie_sound(m,ZOMBIE_DEATH)
         player.enemies_defeated += 1
         if was_elite: player.elites_defeated += 1
         if kind.begins_with("ashfang"):
             _gathered_counts.ashfangs=int(_gathered_counts.get("ashfangs",0))+1
+        elif kind=="rimecrawler":
+            _gathered_counts.rimecrawlers=int(_gathered_counts.get("rimecrawlers",0))+1
+        elif kind=="ashscale_basilisk":
+            _gathered_counts.ashscale_basilisks=int(_gathered_counts.get("ashscale_basilisks",0))+1
+        if str(profile.get("zone_id",""))=="western_reaches":
+            _gathered_counts.rainward_threats=int(_gathered_counts.get("rainward_threats",0))+1
+        elif str(profile.get("zone_id",""))=="stormbreak_highlands":
+            _gathered_counts.stormbreak_threats=int(_gathered_counts.get("stormbreak_threats",0))+1
+        elif str(profile.get("zone_id",""))=="skeld_coast":
+            _gathered_counts.skeld_threats=int(_gathered_counts.get("skeld_threats",0))+1
+        elif str(profile.get("zone_id",""))=="east_marches":
+            _gathered_counts.marcher_threats=int(_gathered_counts.get("marcher_threats",0))+1
         _check_quest_rewards()
         var rank:int=int(m.get("rank",1))
         player.give_xp((120 if is_dragon else (12 if was_elite else 4))*rank)
@@ -1078,14 +1835,25 @@ func _damage(m: Dictionary, amount: float, hit_direction:Vector3=Vector3.ZERO) -
                 _burst(death_pos,Color(.36,.78,.10),4.0)
                 if death_pos.distance_to(player.global_position)<4.2:_damage_player(6.0)
             if is_instance_valid(_gravebound_campaign):_gravebound_campaign.enemy_defeated(m)
+            if is_instance_valid(_oathbound_campaign):_oathbound_campaign.enemy_defeated(m)
         else:
             _spawn_loot(death_pos,was_elite,rank,is_dragon)
         if kind.begins_with("ashfang"):
             _spawn_world_drop(death_pos+Vector3(.42,0,.18),{"kind":"material","material":"leather","amount":2 if was_elite else 1,"name":"Ashfang Hide"},was_elite)
-        if player.enemies_defeated >= quest_goal and not quest_complete:
-            quest_complete = true
-            player.hero_gold += 35
-            player.health_potions += 1
+        elif kind=="frost_troll":
+            _spawn_world_drop(death_pos+Vector3(.48,0,.20),{"kind":"material","material":"crystal","amount":2 if was_elite else 1,"name":"Rime Crystal"},true)
+            _spawn_world_drop(death_pos+Vector3(-.48,0,.12),{"kind":"material","material":"ore","amount":3 if was_elite else 2,"name":"Moraine Iron"},was_elite)
+        elif kind=="rimecrawler":
+            _spawn_world_drop(death_pos+Vector3(.44,0,.18),{"kind":"material","material":"chitin","amount":2 if was_elite else 1,"name":"Rime Chitin"},was_elite)
+            if was_elite or rng.randf()<.42:_spawn_world_drop(death_pos+Vector3(-.44,0,.14),{"kind":"material","material":"crystal","amount":1,"name":"Crawler Ice Plate"},true)
+        elif kind=="ashscale_basilisk":
+            _spawn_world_drop(death_pos+Vector3(.44,0,.18),{"kind":"material","material":"leather","amount":3 if was_elite else 2,"name":"Ashscale Hide"},was_elite)
+            _spawn_world_drop(death_pos+Vector3(-.44,0,.14),{"kind":"material","material":"ore","amount":2 if was_elite else 1,"name":"Basalt Iron Scale"},was_elite)
+            if was_elite or rng.randf()<.22:
+                _spawn_world_drop(death_pos+Vector3(0,0,-.58),{"kind":"material","material":"crystal","amount":1,"name":"Warm Emberglass"},true)
+        # Counter quests award through _check_quest_rewards(). The old starter
+        # payout here duplicated the Road to Crownspire reward on kill eight.
+        quest_complete=bool(_quest_claimed.get("road_imps",false))
     else:
         m.anim_lock=.26
         if kind.begins_with("zombie_"):_play_zombie_sound(m,ZOMBIE_HIT)
@@ -1243,8 +2011,15 @@ func admin_give_potions() -> void: player.health_potions+=5; player.mana_potions
 func admin_equip_armor() -> void: player.equip_royal_armor()
 func admin_switch_class() -> void:
     if is_instance_valid(player) and player.has_method("switch_hero_class"):player.switch_hero_class()
-func admin_complete_quest() -> void: player.enemies_defeated=maxi(player.enemies_defeated,quest_goal); quest_complete=true; player.hero_gold+=35
-func admin_reset_quest() -> void: quest_complete=false; player.enemies_defeated=0; quest_goal+=2
+func admin_complete_quest() -> void:
+    var baseline:=int(_quest_baselines.get("road_imps",0))
+    player.enemies_defeated=maxi(player.enemies_defeated,baseline+quest_goal)
+    _check_quest_rewards()
+
+func admin_reset_quest() -> void:
+    _quest_claimed.erase("road_imps")
+    _quest_baselines["road_imps"]=player.enemies_defeated
+    quest_complete=false
 func admin_save() -> void: _save_game()
 func admin_load() -> void: _load_game()
 
@@ -1301,8 +2076,17 @@ func craft_recipe(recipe_id:String)->String:
             crafted.erase("category");crafted.erase("cost");crafted.erase("kind");crafted.erase("amount")
             player.add_bag_item(crafted)
         "cook_food":
-            player.add_bag_item({"id":"cooked_fish_%d"%Time.get_ticks_msec(),"name":"Cooked Fish","slot":"consumable","icon":10,"use":"food","buff_name":"Well Fed","duration":240.0,"buff_power":8,"health_regen":.45,"stamina_regen":4.0,"heal":24.0,"description":"A hot meal. Double-click to eat: heal 24 and gain Power +8, regeneration, and stamina recovery for four minutes."})
+            var food_name:=str(recipe.get("food_name","Cooked Fish"))
+            player.add_bag_item({
+                "id":"cooked_%s_%d"%[recipe_id,Time.get_ticks_msec()],"name":food_name,"slot":"consumable","icon":10,"use":"food",
+                "visual":"cooked fish" if recipe_id=="cooked_fish" else "food bowl",
+                "buff_name":recipe.get("buff_name","Well Fed"),"duration":recipe.get("duration",240.0),
+                "buff_power":recipe.get("buff_power",8),"health_regen":recipe.get("health_regen",.45),
+                "stamina_regen":recipe.get("stamina_regen",4.0),"heal":recipe.get("heal",24.0),
+                "description":"A prepared camp meal. Double-click to eat and gain its listed recovery buff.",
+            })
     _gathered_counts.crafted=int(_gathered_counts.get("crafted",0))+1
+    if recipe_id=="rimecrawler_bracers":_gathered_counts.rimecraft=int(_gathered_counts.get("rimecraft",0))+1
     _check_quest_rewards()
     _notify("Crafted %s"%recipe.get("name","item"),Color(.96,.74,.25))
     return "Crafted %s."%recipe.get("name","item")
@@ -1320,11 +2104,14 @@ func get_quest_state()->Array[Dictionary]:
     var result:Array[Dictionary]=[]
     if is_instance_valid(_gravebound_campaign) and _gravebound_campaign.has_method("get_active_state"):
         result.append(_gravebound_campaign.get_active_state())
+    if is_instance_valid(_oathbound_campaign) and _oathbound_campaign.has_method("get_active_state"):
+        result.append(_oathbound_campaign.get_active_state())
     for definition in QUESTS:
         var quest:Dictionary=definition.duplicate(true)
-        var current:=_quest_counter(str(quest.counter))
         var requirement:=str(quest.get("requires",""))
         var available:=requirement.is_empty() or bool(_quest_claimed.get(requirement,false))
+        _ensure_quest_baseline(quest,available)
+        var current:=_quest_progress(quest) if available else 0
         quest["current"]=mini(current,int(quest.goal))
         quest["available"]=available
         quest["complete"]=available and current>=int(quest.goal)
@@ -1341,12 +2128,30 @@ func _quest_counter(counter:String)->int:
         _:return int(_gathered_counts.get(counter,0))
 
 
+func _quest_progress(quest:Dictionary)->int:
+    var quest_id:=str(quest.get("id",""))
+    if bool(_quest_claimed.get(quest_id,false)):return int(quest.get("goal",0))
+    var baseline:=int(_quest_baselines.get(quest_id,0))
+    return maxi(0,_quest_counter(str(quest.get("counter","")))-baseline)
+
+
+func _ensure_quest_baseline(quest:Dictionary,available:bool)->void:
+    var quest_id:=str(quest.get("id",""))
+    if not available or _quest_baselines.has(quest_id):return
+    # Start newly revealed chapters at zero. Work done for an unrelated,
+    # locked chapter no longer completes it immediately when its prerequisite
+    # is turned in.
+    _quest_baselines[quest_id]=_quest_counter(str(quest.get("counter","")))
+
+
 func _check_quest_rewards()->void:
     for quest in QUESTS:
         var quest_id:String=quest.id
         var requirement:=str(quest.get("requires",""))
-        if not requirement.is_empty() and not bool(_quest_claimed.get(requirement,false)):continue
-        if _quest_claimed.get(quest_id,false) or _quest_counter(str(quest.counter))<int(quest.goal):continue
+        var available:=requirement.is_empty() or bool(_quest_claimed.get(requirement,false))
+        if not available:continue
+        _ensure_quest_baseline(quest,true)
+        if _quest_claimed.get(quest_id,false) or _quest_progress(quest)<int(quest.goal):continue
         _quest_claimed[quest_id]=true
         match quest_id:
             "road_imps":player.hero_gold+=35;player.health_potions+=1
@@ -1359,11 +2164,45 @@ func _check_quest_rewards()->void:
             "deep_delver":player.hero_gold+=90;player.add_material("essence",2)
             "elite_hunt":player.hero_gold+=120;player.add_material("crystal",1)
             "ashfang_packs":player.hero_gold+=80;player.add_material("leather",6)
+            "marcher_beacon":
+                player.hero_gold+=145
+                player.add_material("ore",6)
+                player.add_bag_item({"id":"marchwarden_reward_lamellar","name":"Marchwarden Lamellar","slot":"chest","visual":"chest","icon":1,"armor":21,"hp":31,"mana":0,"power":5,"max_durability":215.0,"description":"Marshal Teren's basalt-iron road armor, laced over ochre leather for the exposed Dawnway."})
+            "marcher_oath":
+                player.hero_gold+=190
+                player.add_bag_item({"id":"emberglass_reward_oath_band","name":"Emberglass Oath Band","slot":"ring_right","visual":"magic ring","ring_design":"split_band","effect":"emberpulse","icon":10,"armor":4,"hp":17,"mana":9,"power":11,"max_durability":210.0,"description":"The two witnesses' seals joined around a living bead of Embercrag glass."})
+            "rainward_patrol":
+                player.hero_gold+=105
+                player.add_material("leather",4)
+                player.add_material("resin",3)
+            "rainward_reliquary":
+                player.hero_gold+=135
+                player.add_bag_item({"id":"rainward_patrol_signet","name":"Rainward Patrol Signet","slot":"ring_right","visual":"magic ring","ring_design":"split_band","effect":"windstep","icon":10,"armor":3,"hp":14,"mana":5,"power":6,"max_durability":170.0,"description":"The old west-road patrol mark. Its tideglass current brightens when the road ahead is open."})
+            "stormbreak_beacon":
+                player.hero_gold+=150
+                player.add_material("ore",5)
+                player.add_bag_item({"id":"stormward_patrol_mantle","name":"Stormward Patrol Mantle","slot":"shoulders","visual":"shoulders","effect":"windstep","icon":2,"armor":9,"hp":20,"mana":0,"power":5,"max_durability":180.0,"description":"The road wardens' weather-dark mantle, clasped with the three-road compact."})
+            "stormbreak_choir":
+                player.hero_gold+=185
+                player.add_bag_item({"id":"tempest_choir_reward_band","name":"Tempest Choir Band","slot":"ring_right","visual":"magic ring","ring_design":"spiral","effect":"windstep","icon":10,"armor":5,"hp":18,"mana":12,"power":9,"max_durability":205.0,"description":"The restored highland hymn in silver and Blacktarn glass."})
+            "skeld_lantern":
+                player.hero_gold+=210
+                player.add_material("ore",6)
+                player.add_bag_item({"id":"cape_keld_reward_watchcoat","name":"Cape Keld Watchcoat","slot":"chest","visual":"chest","effect":"frostward","icon":1,"armor":17,"hp":36,"mana":6,"power":5,"max_durability":225.0,"description":"The lightkeeper's salt-dark watchcoat, warded against freezing spray."})
+            "skeld_bones":
+                player.hero_gold+=260
+                player.add_bag_item({"id":"greywake_reward_band","name":"Greywake Lantern Band","slot":"ring_left","visual":"magic ring","ring_design":"split_band","effect":"frostward","icon":10,"armor":5,"hp":18,"mana":14,"power":9,"max_durability":220.0,"description":"The completed Whalebone canticle in sea-glass and salt-dark silver."})
+            "rimecrawler_hunt":
+                player.hero_gold+=140
+                player.add_material("crystal",2)
+                player.add_bag_item({"id":"icewatch_signet","name":"Icewatch Signet","slot":"ring_1","visual":"ring","ring_design":"split_band","effect":"frostward","icon":11,"armor":6,"hp":18,"power":4,"description":"Ysra's silver-blue signet. A cold ward shimmers across its broken-crown face."})
+            "last_light_armor":player.hero_gold+=160;player.add_material("essence",2)
+        if quest_id=="road_imps":quest_complete=true
         _notify("Quest complete: %s"%quest.title,Color(1.0,.78,.24))
 
 
 func _build_crafting_stations()->void:
-    for site in profile.get("town_sites",[]):
+    for site in _town_service_sites():
         var center:Vector2=site.get("position",Vector2.ZERO)
         var station_point:=center+Vector2(-12.0,12.0)
         var station:=Node3D.new();station.name="%s Crafting Yard"%site.get("name","Town");add_child(station);station.global_position=_ground(Vector3(station_point.x,0,station_point.y))
@@ -1483,7 +2322,7 @@ func _register_rideable_horses()->void:
         var horse:=horse_value as Node3D
         var horse_name:=str(horse.get_meta("horse_name","Riverwatch Courser"))
         _interactables.append({
-            "action":"mount_horse","position":horse.global_position,"radius":3.4,
+            "action":"mount_horse","position":horse.global_position,"radius":1.8,
             "label":"Ride %s"%horse_name,"node":horse,
             "active":not bool(horse.get_meta("mounted",false)),
         })
@@ -1601,9 +2440,7 @@ func _configure_harvestable_world_trees()->void:
     _forest_trees.clear();_tree_buckets.clear();_nearby_world_tree={}
     var world_root:=get_parent().get_node_or_null("WorldRoot")
     if not world_root:return
-    for root_path in ["PropsRoot","TownRoot"]:
-        var source_root:=world_root.get_node_or_null(root_path)
-        if not source_root:continue
+    for source_root in _world_population_roots(world_root,["PropsRoot","TownRoot"]):
         for tree_data in source_root.get_meta("harvestable_tree_registry",[]):
             if not tree_data is Dictionary:continue
             var tree:Dictionary=tree_data
@@ -1622,9 +2459,8 @@ func _configure_local_prop_collisions()->void:
     _nearby_world_rock={}
     var world_root:=get_parent().get_node_or_null("WorldRoot")
     if world_root:
-        var props_root:=world_root.get_node_or_null("PropsRoot")
-        if props_root:
-            _rock_collision_registry=props_root.get_meta("collision_prop_registry",[])
+        for props_root in _world_population_roots(world_root,["PropsRoot"]):
+            _rock_collision_registry.append_array(props_root.get_meta("collision_prop_registry",[]))
             for rock_value in props_root.get_meta("mineable_rock_registry",[]):
                 if not rock_value is Dictionary:continue
                 var rock:Dictionary=rock_value
@@ -1652,6 +2488,20 @@ func _configure_local_prop_collisions()->void:
             _local_prop_collision_shapes.append(collision)
     _reset_local_prop_collision_slots()
     _refresh_local_prop_collisions(true)
+
+
+func _world_population_roots(world_root:Node,root_names:Array[String])->Array[Node]:
+    var result:Array[Node]=[]
+    for root_name in root_names:
+        var direct:=world_root.get_node_or_null(root_name)
+        if direct!=null:result.append(direct)
+    var streamed_regions:=world_root.get_node_or_null("StreamedRegions")
+    if streamed_regions!=null:
+        for region in streamed_regions.get_children():
+            for root_name in root_names:
+                var nested:=region.get_node_or_null(root_name)
+                if nested!=null:result.append(nested)
+    return result
 
 
 func _reset_local_prop_collision_slots()->void:
@@ -1958,6 +2808,8 @@ func _activate_interactable(data:Dictionary)->void:
     match data.get("action",""):
         "gravebound_story":
             if is_instance_valid(_gravebound_campaign):_gravebound_campaign.activate(data)
+        "oathbound_story":
+            if is_instance_valid(_oathbound_campaign):_oathbound_campaign.activate(data)
         "mount_horse":
             var horse:=data.get("node") as Node3D
             if not is_instance_valid(horse):return
@@ -1967,13 +2819,31 @@ func _activate_interactable(data:Dictionary)->void:
                 var horse_name:=str(horse.get_meta("horse_name","Riverwatch Courser"))
                 _notify("Mounted %s — Shift gallops, E dismounts"%horse_name,Color(.88,.75,.42))
         "craft":crafting_requested.emit(data.get("station",{}))
+        "campfire":
+            camp_rest()
+            crafting_requested.emit(data.get("station",{"name":"Travel Campfire","kind":"cooking"}))
+            _notify("Rested by the fire",Color(1.0,.72,.34))
         "door":
             var door:Node3D=data.get("node")
             if not is_instance_valid(door):return
             var opening:bool=not bool(data.get("open",false))
+            var player_local:=door.to_local(player.global_position)
+            var door_width:=float(door.get_meta("door_width",2.25))
+            # Refuse to close a solid leaf through the hero. The player can
+            # step clear and press E again instead of becoming wedged in the
+            # collision while the tween completes.
+            if not opening and player_local.x>-.45 and player_local.x<door_width+.45 and absf(player_local.z)<1.15:
+                _notify("Step clear of the doorway before closing it",Color(1.0,.76,.32))
+                return
             data.open=opening
             door.set_meta("door_open",opening)
-            var tween:=create_tween();tween.tween_property(door,"rotation:y",-1.62 if opening else 0.0,.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+            if opening:
+                # Swing into the side opposite the player. The old fixed
+                # direction drove many front-facing doors directly through a
+                # player standing at the interaction point.
+                data["open_angle"]=1.62 if player_local.z>=0.0 else -1.62
+            var target_angle:=float(data.get("open_angle",1.62)) if opening else 0.0
+            var tween:=create_tween();tween.tween_property(door,"rotation:y",target_angle,.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
             data.label="Close door" if opening else "Open door"
         "secret_wall":
             var secret_wall:Node3D=data.get("node")
@@ -1983,6 +2853,10 @@ func _activate_interactable(data:Dictionary)->void:
             if is_instance_valid(secret_marker):secret_marker.visible=false
             var secret_tween:=create_tween();secret_tween.tween_property(secret_wall,"position:y",secret_wall.position.y-6.5,.85).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
             _notify("A concealed passage opens",Color(.80,.68,.42))
+        "read_lore":
+            lore_requested.emit(str(data.get("title","Recovered Record")),_lore_entry_text(str(data.get("entry",""))))
+        "hidden_cache":
+            _open_hidden_cache(data)
         "gather":
             var material_kind:String=data.get("material","herbs")
             var amount:int=int(data.get("amount",1))
@@ -2192,6 +3066,19 @@ func _stream_local_gameplay(force_immediate:bool=false)->void:
     _refresh_local_prop_collisions()
 
 
+func prepare_after_surface_teleport()->void:
+    # The map keeps the scene paused during this call. Rebuild only the small
+    # nearby collision pool now instead of making the first unpaused movement
+    # frame discover and replace the entire previous area's set.
+    _stream_tick=0.0
+    _refresh_local_prop_collisions(true)
+    _stream_transition_queue.clear()
+    # Build the transition queue under the map. Main briefly advances it with
+    # player input disabled before returning control; forcing every branch in
+    # one call produced a larger single-frame render spike.
+    _stream_local_gameplay(false)
+
+
 func _apply_stream_transitions(max_transitions:int)->void:
     var applied:=0
     var inspected:=0
@@ -2260,9 +3147,53 @@ func camp_rest() -> void:
     player.hp=minf(player.max_hp,player.hp+maxf(16.0,player.max_hp*.18))
     player.mana=minf(player.max_mana,player.mana+maxf(10.0,player.max_mana*.22))
 
+
+func _on_world_item_requested(action:String,item_id:String)->void:
+    if action=="world_place_campfire":_place_player_campfire(item_id)
+
+
+func _place_player_campfire(item_id:String)->void:
+    _player_campfires=_player_campfires.filter(func(camp:Node3D)->bool:return is_instance_valid(camp))
+    if _player_campfires.size()>=3:
+        _notify("Only three travel campfires may remain active in this region",Color(1.0,.68,.28));return
+    if player.has_method("is_interior_mode") and player.is_interior_mode():
+        _notify("Build campfires outdoors on open ground",Color(1.0,.68,.28));return
+    if player.has_method("is_mounted") and player.is_mounted():
+        _notify("Dismount before building a camp",Color(1.0,.68,.28));return
+    var forward:Vector3=player.get_combat_forward() if player.has_method("get_combat_forward") else Vector3.FORWARD
+    var target:=player.global_position+Vector3(forward.x,0.0,forward.z).normalized()*3.6
+    if walkable_sampler.is_valid() and not bool(walkable_sampler.call(target.x,target.z)):
+        _notify("That ground is not safe for a campfire",Color(1.0,.68,.28));return
+    var ground:=_ground(target)
+    var maximum_delta:=0.0
+    for offset in [Vector2(-1.2,0),Vector2(1.2,0),Vector2(0,-1.2),Vector2(0,1.2)]:
+        maximum_delta=maxf(maximum_delta,absf(_ground(Vector3(target.x+offset.x,0,target.z+offset.y)).y-ground.y))
+    if maximum_delta>.65:
+        _notify("Find flatter ground before building the campfire",Color(1.0,.68,.28));return
+    if not player.consume_bag_item(item_id,1):return
+    var camp:=Node3D.new();camp.name="Player Travel Campfire";add_child(camp);camp.global_position=ground
+    var timber:=Color(.29,.15,.055);var stone_color:=Color(.31,.30,.27)
+    for yaw in [-.70,.70]:
+        var log_mesh:=_service_box(camp,Vector3(0,.18,0),Vector3(2.0,.26,.30),timber);log_mesh.rotation.y=yaw
+    for i in range(9):
+        var angle:=TAU*float(i)/9.0
+        _service_rock(camp,Vector3(cos(angle)*1.05,.18,sin(angle)*1.05),Vector3(.42,.34,.48),stone_color.lightened(float(i%3)*.035))
+    var flame_material:=_service_material(Color(1.0,.22,.025)).duplicate() as StandardMaterial3D
+    flame_material.emission_enabled=true;flame_material.emission=Color(1.0,.12,.01);flame_material.emission_energy_multiplier=3.2
+    var flame:=MeshInstance3D.new();var flame_mesh:=SphereMesh.new();flame_mesh.radius=.32;flame_mesh.height=.95;flame_mesh.radial_segments=10;flame_mesh.rings=6;flame.mesh=flame_mesh;flame.position=Vector3(0,.64,0);flame.material_override=flame_material;camp.add_child(flame)
+    var light:=OmniLight3D.new();light.position=Vector3(0,1.25,0);light.light_color=Color(1.0,.43,.16);light.light_energy=1.35;light.omni_range=10.0;light.shadow_enabled=false;camp.add_child(light)
+    var marker:=Label3D.new();marker.text="TRAVEL CAMP\nE — COOK & REST";marker.position=Vector3(0,2.15,0);marker.font_size=22;marker.pixel_size=.009;marker.modulate=Color(1.0,.76,.33);marker.outline_size=6;marker.billboard=BaseMaterial3D.BILLBOARD_ENABLED;camp.add_child(marker)
+    _player_campfires.append(camp)
+    _interactables.append({"action":"campfire","position":camp.global_position,"radius":3.4,"label":"Cook and rest","node":camp,"active":true,"station":{"name":"Travel Campfire","kind":"cooking"}})
+    _notify("Campfire built — press E beside it to cook or rest",Color(1.0,.76,.34))
+
 func _damage_player(amount:float)->void:
     if _admin_god_mode:return
+    if player.has_method("has_equipment_effect") and player.has_equipment_effect("frostward"):amount*=.90
     player.hp=maxf(0.0,player.hp-maxf(0.0,amount))
+    if amount>0.0 and player.has_method("damage_equipment"):
+        var armor_slots:Array[String]=["head","chest","shoulders","hands","feet","pants"]
+        player.damage_equipment(armor_slots[rng.randi_range(0,armor_slots.size()-1)],.18+amount*.018)
 
 func apply_environment_damage(amount:float,source:String="environment")->void:
     if _admin_god_mode:return
@@ -2281,7 +3212,11 @@ func get_admin_status() -> Dictionary:
 func teleport_to_town(index:int)->void:
     var towns:Array=profile.get("town_sites",[])
     if index>=0 and index<towns.size():
-        var p:Vector2=towns[index].get("position",Vector2.ZERO);player.set_interior_mode(false);player.global_position=_ground(Vector3(p.x,0,p.y))
+        var p:Vector2=towns[index].get("position",Vector2.ZERO)
+        var destination:=_ground(Vector3(p.x,0,p.y))
+        if player.has_method("teleport_to_surface"):player.teleport_to_surface(destination)
+        else:player.set_interior_mode(false);player.global_position=destination
+        prepare_after_surface_teleport()
 
 func teleport_to_nearest_bridge()->void:
     var bridge_sites:Array=profile.get("ford_sites",[])
@@ -2300,8 +3235,10 @@ func teleport_to_nearest_bridge()->void:
     var approach_a:=nearest_point+road_direction*70.0
     var approach_b:=nearest_point-road_direction*70.0
     var destination:=approach_a if player_point.distance_squared_to(approach_a)<player_point.distance_squared_to(approach_b) else approach_b
-    player.set_interior_mode(false)
-    player.global_position=_ground(Vector3(destination.x,0.0,destination.y))
+    var ground_destination:=_ground(Vector3(destination.x,0.0,destination.y))
+    if player.has_method("teleport_to_surface"):player.teleport_to_surface(ground_destination)
+    else:player.set_interior_mode(false);player.global_position=ground_destination
+    prepare_after_surface_teleport()
 
 func _road_direction_at(point:Vector2)->Vector2:
     var best_direction:=Vector2(0.0,1.0)
@@ -2324,10 +3261,34 @@ func _road_direction_at(point:Vector2)->Vector2:
 
 func _build_town_services()->void:
     var town_index:=0
-    for site in profile.get("town_sites",[]):
+    for site in _town_service_sites():
         var p:Vector2=site.get("position",Vector2.ZERO)
         var types:Array[String]=["provisioner","armorer"]
-        if site.get("capital",false):types=["alchemist","armorer","provisioner","arcanist"]
+        var architecture_set:=str(site.get("architecture_set",""))
+        if architecture_set=="icewatch_hold":types=["glacial_outfitter","armorer","provisioner"]
+        elif architecture_set=="rimegate_lodge":types=["rime_smith","alchemist"]
+        elif architecture_set=="rainward_timber":
+            if str(site.get("name",""))=="Rainhaven":types.assign(["river_trader","alchemist"])
+            else:types.assign(["woodwright","provisioner"])
+        elif architecture_set=="rainward_stone":types=["quarry_mason","armorer"]
+        elif architecture_set=="stormbreak_highland":
+            var highland_town:=str(site.get("name",""))
+            if highland_town=="Stormbreak Hold":types.assign(["storm_warden","highland_smith","provisioner"])
+            elif highland_town=="Moorwatch":types.assign(["peatwright","alchemist"])
+            else:types.assign(["drover","armorer"])
+        elif architecture_set=="skeld_coast":
+            var skeld_town:=str(site.get("name",""))
+            if skeld_town=="Frostharbor":types=["skeld_harbormaster","skeld_netwright","provisioner"]
+            elif skeld_town=="Vardholm":types=["rime_warden","skeld_smith","provisioner"]
+            else:types=["skeld_netwright","alchemist"]
+        elif architecture_set=="marcher_stone":
+            var marcher_stone_town:=str(site.get("name",""))
+            if marcher_stone_town=="March Keep":types=["march_warden","ember_smith","provisioner"]
+            else:types=["march_factor","provisioner"]
+        elif architecture_set=="marcher_timber":
+            if str(site.get("name",""))=="Amberfield":types=["grain_factor","alchemist"]
+            else:types=["saltmonger","armorer"]
+        elif site.get("capital",false):types=["alchemist","armorer","provisioner","arcanist"]
         elif town_index%2==0:types=["provisioner","alchemist"]
         for i in range(types.size()):
             var angle:=float(i)*TAU/maxf(1.0,types.size())+.35
@@ -2347,12 +3308,24 @@ func _build_town_services()->void:
             vendor.set_meta("stream_keep_visible",true)
             vendor.set_meta("always_streamed",true)
             _configure_resident_stream_visuals(vendor)
-        # Ordinary townsfolk stay out until they have real movement schedules.
+        # A small scheduled population makes settlements feel inhabited. Only
+        # nearby citizens think or animate; distant towns cost a visibility
+        # check at 10 Hz and nothing more.
+        _add_townfolk(site,10 if site.get("capital",false) else 4)
         town_index+=1
     for p in [Vector2(-2700,1700),Vector2(2620,-1800)]:
         var cave:=Node3D.new();cave.name="MountainsideCaveEntranceWest" if p.x<0 else "MountainsideCaveEntranceEast";add_child(cave);cave.global_position=_ground(Vector3(p.x,0,p.y))
         if p.x < 0: cave.rotation.y=PI
         _build_recessed_cave(cave)
+
+
+func _town_service_sites()->Array:
+    var sites:Array=[]
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if not spawn_site.is_empty() and not spawn_site.get("starter",false):
+        sites.append(spawn_site)
+    for site in profile.get("town_sites",[]):sites.append(site)
+    return sites
 
 
 func _build_recessed_cave(cave:Node3D)->void:
@@ -2660,6 +3633,62 @@ func _add_secret_dungeon_wall(root:Node3D,position:Vector3,size:Vector3,secret_n
     var marker:=Label3D.new();marker.text="CRACKED STONE\nE - INSPECT";marker.position=position+Vector3(0,.35,-size.z*.52);marker.font_size=20;marker.pixel_size=.008;marker.modulate=Color(.62,.57,.48);marker.outline_size=5;marker.billboard=BaseMaterial3D.BILLBOARD_ENABLED;marker.visibility_range_end=13.0;root.add_child(marker)
     _interactables.append({"action":"secret_wall","position":root.to_global(position),"radius":4.2,"label":"Inspect cracked stone","node":wall,"marker":marker,"active":true})
 
+func _tick_townfolk(delta:float)->void:
+    if not is_instance_valid(player):return
+    var space:=get_world_3d().direct_space_state
+    for index in range(_townfolk.size()-1,-1,-1):
+        var citizen:Dictionary=_townfolk[index]
+        var node:=citizen.get("node") as Node3D
+        if not is_instance_valid(node):_townfolk.remove_at(index);continue
+        var distance_squared:=node.global_position.distance_squared_to(player.global_position)
+        if distance_squared>22500.0:
+            node.visible=false
+            continue
+        node.visible=true
+        citizen.pause=float(citizen.get("pause",0.0))-delta
+        citizen.phase=float(citizen.get("phase",0.0))+delta
+        var current:=Vector2(node.global_position.x,node.global_position.z)
+        var target:Vector2=citizen.get("target",current)
+        if current.distance_to(target)<1.2:
+            if float(citizen.pause)<=0.0:
+                var heading:=rng.randf_range(-PI,PI)
+                var distance:=rng.randf_range(8.0,float(citizen.get("radius",36.0)))
+                var center:Vector2=citizen.get("center",current)
+                citizen.target=center+Vector2(cos(heading),sin(heading))*distance
+                citizen.pause=rng.randf_range(1.2,5.0)
+            _animate_townsperson(node,float(citizen.phase),false)
+            continue
+        var direction2:=(target-current).normalized()
+        var direction:=Vector3(direction2.x,0.0,direction2.y)
+        var next:=node.global_position+direction*float(citizen.get("speed",1.35))*delta
+        var exclusions:Array[RID]=[]
+        if is_instance_valid(player):exclusions.append(player.get_rid())
+        var body:=citizen.get("body") as CollisionObject3D
+        if is_instance_valid(body):exclusions.append(body.get_rid())
+        var query:=PhysicsRayQueryParameters3D.create(node.global_position+Vector3.UP*.72,next+direction*.52+Vector3.UP*.72,1,exclusions)
+        var blocked:=not space.intersect_ray(query).is_empty()
+        if not blocked and (not walkable_sampler.is_valid() or bool(walkable_sampler.call(next.x,next.z))):
+            node.global_position=_ground(next)
+            node.look_at(node.global_position+direction,Vector3.UP)
+            _animate_townsperson(node,float(citizen.phase),true)
+        else:
+            var center:Vector2=citizen.get("center",current)
+            var turn:=direction2.rotated(1.72 if index%2==0 else -1.72)
+            citizen.target=center+(current-center)*.65+turn*12.0
+            citizen.pause=.4
+            _animate_townsperson(node,float(citizen.phase),false)
+
+
+func _animate_townsperson(node:Node3D,phase:float,moving:bool)->void:
+    var swing:=sin(phase*7.5)*(.40 if moving else .025)
+    for name in ["CitizenLegL","CitizenArmR"]:
+        var limb:=node.get_node_or_null(name) as Node3D
+        if limb:limb.rotation.x=swing
+    for name in ["CitizenLegR","CitizenArmL"]:
+        var limb:=node.get_node_or_null(name) as Node3D
+        if limb:limb.rotation.x=-swing
+
+
 func _add_townfolk(site:Dictionary,count:int)->void:
     var center:Vector2=site.get("position",Vector2.ZERO)
     var colors:=[Color(.27,.38,.22),Color(.38,.20,.16),Color(.16,.29,.42),Color(.42,.34,.14)]
@@ -2669,7 +3698,15 @@ func _add_townfolk(site:Dictionary,count:int)->void:
         var p:=center+Vector2(cos(angle),sin(angle))*distance
         var citizen:=Node3D.new();citizen.name="Townsperson_%d"%i;add_child(citizen);citizen.global_position=_ground(Vector3(p.x,0,p.y));citizen.rotation.y=-angle+PI*.5
         citizen.scale=Vector3.ONE*(.88+float(i%3)*.035)
+        citizen.set_meta("always_streamed",true)
         _add_service_person(citizen,colors[i%colors.size()],false)
+        var body:=AnimatableBody3D.new();body.name="TownspersonCollision";body.collision_layer=1;body.collision_mask=0;body.sync_to_physics=true;citizen.add_child(body)
+        var shape_node:=CollisionShape3D.new();var capsule:=CapsuleShape3D.new();capsule.radius=.30;capsule.height=1.72;shape_node.shape=capsule;shape_node.position=Vector3(0,.88,0);body.add_child(shape_node)
+        _townfolk.append({
+            "node":citizen,"body":body,"center":center,"radius":maxf(26.0,float(site.get("radius",54.0))*.72),
+            "target":center+Vector2(cos(angle+.8),sin(angle+.8))*distance,"pause":rng.randf_range(.2,2.4),
+            "phase":float(i)*1.37,"speed":1.25+float(i%3)*.16,
+        })
 
 
 func _add_service_person(root:Node3D,cloth:Color,vendor:bool)->void:
@@ -2686,9 +3723,9 @@ func _add_service_person(root:Node3D,cloth:Color,vendor:bool)->void:
     _service_box(root,Vector3(0,1.08,.275),Vector3(.50,.11,.045),Color(.18,.10,.045)).cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     var limb_mesh:=CapsuleMesh.new();limb_mesh.radius=.075;limb_mesh.height=.72;limb_mesh.radial_segments=6;limb_mesh.rings=2
     for x in [-.16,.16]:
-        var leg:=MeshInstance3D.new();leg.mesh=limb_mesh;leg.position=Vector3(x,.42,0);leg.material_override=_service_material(leather);leg.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;root.add_child(leg)
+        var leg:=MeshInstance3D.new();leg.name="CitizenLegL" if x<0 else "CitizenLegR";leg.mesh=limb_mesh;leg.position=Vector3(x,.42,0);leg.material_override=_service_material(leather);leg.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;root.add_child(leg)
     for x in [-.34,.34]:
-        var arm:=MeshInstance3D.new();arm.mesh=limb_mesh;arm.position=Vector3(x,1.18,0);arm.rotation.z=.12*(1.0 if x<0 else -1.0);arm.material_override=_service_material(cloth.darkened(.12));arm.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;root.add_child(arm)
+        var arm:=MeshInstance3D.new();arm.name="CitizenArmL" if x<0 else "CitizenArmR";arm.mesh=limb_mesh;arm.position=Vector3(x,1.18,0);arm.rotation.z=.12*(1.0 if x<0 else -1.0);arm.material_override=_service_material(cloth.darkened(.12));arm.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;root.add_child(arm)
     if vendor:
         _service_box(root,Vector3(0,1.18,.255),Vector3(.46,.54,.035),cloth.lightened(.12)).cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
@@ -2701,10 +3738,24 @@ func _add_vendor_counter(root:Node3D,kind:String,color:Color)->void:
     _service_box(root,Vector3(0,3.34,-1.12),Vector3(4.1,.16,1.15),color)
     if kind=="alchemist":
         for x in [-.72,0.0,.72]:_service_rock(root,Vector3(x,1.60,-1.05),Vector3(.28,.42,.28),Color(.38,.18+.16*(x+.72),.58))
-    elif kind=="armorer":
+    elif kind in ["armorer","rime_smith","skeld_smith","ember_smith"]:
         _service_box(root,Vector3(-.55,1.72,-1.05),Vector3(.72,.82,.12),Color(.48,.52,.56));_service_box(root,Vector3(.55,1.62,-1.05),Vector3(.16,.95,.10),Color(.68,.70,.72))
+        if kind in ["rime_smith","skeld_smith"]:_service_rock(root,Vector3(0,1.58,-1.15),Vector3(.36,.26,.24),Color(.30,.62,.74) if kind=="rime_smith" else Color(.42,.51,.54))
+        elif kind=="ember_smith":_service_rock(root,Vector3(0,1.58,-1.15),Vector3(.38,.27,.24),Color(.82,.24,.055))
+    elif kind in ["grain_factor","saltmonger"]:
+        for x in [-.72,-.24,.24,.72]:
+            _service_box(root,Vector3(x,1.58,-1.05),Vector3(.34,.24,.34),Color(.62,.46,.19) if kind=="grain_factor" else Color(.78,.72,.56))
+    elif kind=="skeld_netwright":
+        for x in [-.72,-.24,.24,.72]:
+            var cord_color:=Color(.33,.25,.13) if x<0.0 else Color(.52,.47,.32)
+            _service_box(root,Vector3(x,1.58,-1.05),Vector3(.34,.18,.34),cord_color)
+    elif kind in ["skeld_harbormaster","rime_warden"]:
+        _service_box(root,Vector3(-.58,1.56,-1.05),Vector3(.66,.20,.46),Color(.74,.66,.43))
+        _service_rock(root,Vector3(.50,1.72,-1.05),Vector3(.32,.46,.32),Color(.42,.75,.86))
     elif kind=="arcanist":
         _service_rock(root,Vector3(0,1.72,-1.05),Vector3(.42,.58,.42),Color(.18,.58,1.0))
+    elif kind=="glacial_outfitter":
+        for x in [-.72,0.0,.72]:_service_box(root,Vector3(x,1.54,-1.05),Vector3(.52,.30,.30),Color(.50,.45,.37) if x<.5 else Color(.33,.43,.45))
     else:
         for x in [-.75,-.25,.25,.75]:_service_rock(root,Vector3(x,1.55,-1.05),Vector3(.28,.22,.28),Color(.48,.66,.18) if x<0 else Color(.72,.42,.12))
 
@@ -2997,6 +4048,132 @@ func _boss_alive(boss_id:String)->bool:
 
 
 func _vendor_catalog(kind:String,town:String)->Dictionary:
+    if kind=="march_factor":
+        return {"id":"%s_march_factor"%town,"name":"Veyra Tollhand","type_name":"Dawnford Caravan Factor","color":Color(.58,.37,.13),"greeting":"Every honest road leaves a ledger. Every useful traveler leaves with supplies.","inventory":[
+            {"kind":"armor","id":"dawnway_caravan_blade","name":"Dawnway Caravan Blade","price":152,"description":"A broad road sword. Power +18, HP +7.","slot":"mainhand","visual":"sword","icon":7,"armor":0,"hp":7,"mana":0,"power":18,"max_durability":190.0},
+            {"kind":"armor","id":"dawnford_toll_buckler","name":"Dawnford Toll Buckler","price":128,"description":"A compact oak-and-iron shield. Armor +12, HP +18.","slot":"offhand","visual":"shield","icon":9,"armor":12,"hp":18,"mana":0,"power":3,"max_durability":185.0},
+            {"kind":"material","material":"cloth","amount":7,"name":"Ochre Caravan Canvas","price":34,"description":"Seven measures of tough marcher canvas."},
+            {"kind":"repair","name":"Caravan Gear Refit","price":33,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="march_warden":
+        return {"id":"%s_march_warden"%town,"name":"Marshal Teren","type_name":"March Keep Warden Stores","color":Color(.42,.35,.24),"greeting":"The bridge, the beacon, and every mile between them are kept with iron.","inventory":[
+            {"kind":"armor","id":"marchwarden_lamellar_shop","name":"Marchwarden Lamellar","price":218,"description":"Basalt-iron patrol armor. Armor +21, HP +31, Power +5.","slot":"chest","visual":"chest","icon":1,"armor":21,"hp":31,"mana":0,"power":5,"max_durability":215.0},
+            {"kind":"armor","id":"saltmeadow_roundshield_shop","name":"Saltmeadow Roundshield","price":184,"description":"A poplar and basalt-iron shield. Armor +15, HP +24.","slot":"offhand","visual":"shield","icon":9,"armor":15,"hp":24,"mana":0,"power":4,"max_durability":205.0},
+            {"kind":"material","material":"ore","amount":8,"name":"March Keep Basalt Iron","price":52,"description":"Eight billets of dark marcher iron."},
+            {"kind":"repair","name":"Warden Full Gear Repair","price":41,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="ember_smith":
+        return {"id":"%s_ember_smith"%town,"name":"Sava Emberhand","type_name":"Cinderwatch Signal Forge","color":Color(.47,.22,.09),"greeting":"Emberglass remembers heat. Basalt iron remembers the hammer. Both remember an oath.","inventory":[
+            {"kind":"armor","id":"cinderwatch_signal_blade","name":"Cinderwatch Signal Blade","price":226,"description":"A basalt-iron longsword. Power +24, Armor +2.","slot":"mainhand","visual":"sword","icon":7,"armor":2,"hp":8,"mana":0,"power":24,"max_durability":225.0},
+            {"kind":"armor","id":"emberglass_oath_band_shop","name":"Emberglass Oath Band","price":246,"description":"A living emberglass ring. HP +14, Mana +8, Power +10.","slot":"ring_right","visual":"magic ring","ring_design":"split_band","effect":"emberpulse","icon":10,"armor":3,"hp":14,"mana":8,"power":10,"max_durability":210.0},
+            {"kind":"material","material":"crystal","amount":4,"name":"Warm Emberglass Shards","price":76,"description":"Four heat-bright fragments from Embercrag."},
+            {"kind":"repair","name":"Signal-Forge Gear Repair","price":43,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="grain_factor":
+        return {"id":"%s_grain_factor"%town,"name":"Mera Goldsheaf","type_name":"Amberfield Grain Exchange","color":Color(.59,.45,.14),"greeting":"A road army marches on grain before iron. Take enough for the return journey.","inventory":[
+            {"kind":"health_potion","name":"Amberfield Restorative","price":27,"description":"Adds one health potion."},
+            {"kind":"armor","id":"amberfield_drovers_boots","name":"Amberfield Drover's Boots","price":126,"description":"High ochre road boots. Armor +7, HP +16, Power +3.","slot":"feet","visual":"boots","icon":4,"armor":7,"hp":16,"mana":0,"power":3,"max_durability":180.0},
+            {"kind":"material","material":"herbs","amount":7,"name":"Amber Sage Bundle","price":29,"description":"Seven measures of dry marcher sage."},
+            {"kind":"material","material":"leather","amount":6,"name":"Drover Leather Roll","price":35,"description":"Six pieces of road-cured leather."}
+        ]}
+    if kind=="saltmonger":
+        return {"id":"%s_saltmonger"%town,"name":"Orra Reedwise","type_name":"Saltwatch Meadow Trade","color":Color(.50,.49,.34),"greeting":"Salt keeps meat, leather, and promises from spoiling on the north road.","inventory":[
+            {"kind":"armor","id":"saltwatch_reedcloak","name":"Saltwatch Reedcloak","price":158,"description":"A pale meadow cloak. Armor +8, HP +21, Mana +4.","slot":"shoulders","visual":"shoulders","icon":2,"armor":8,"hp":21,"mana":4,"power":3,"max_durability":190.0},
+            {"kind":"health_potion","name":"Glassmere Bitter Tonic","price":28,"description":"Adds one health potion."},
+            {"kind":"material","material":"resin","amount":7,"name":"Salt-Cured Lamp Resin","price":37,"description":"Seven measures of slow-burning meadow resin."},
+            {"kind":"material","material":"cloth","amount":7,"name":"Reed-Woven Cloth Roll","price":34,"description":"Seven measures of tough pale cloth."}
+        ]}
+    if kind=="skeld_harbormaster":
+        return {"id":"%s_skeld_harbormaster"%town,"name":"Sigrun Tideward","type_name":"Frostharbor Harbour Office","color":Color(.15,.31,.36),"greeting":"Cape Keld names the channel. Frostharbor decides who may use it.","inventory":[
+            {"kind":"armor","id":"frostharbor_saltsteel_harpoon_shop","name":"Frostharbor Saltsteel Harpoon","price":236,"description":"A long coastal point. Power +23, Armor +2, HP +10.","slot":"mainhand","visual":"sword","icon":7,"armor":2,"hp":10,"mana":0,"power":23,"max_durability":230.0},
+            {"kind":"armor","id":"cape_keld_watchcoat_shop","name":"Cape Keld Watchcoat","price":248,"description":"A warded lightkeeper coat. Armor +17, HP +36, frostward.","slot":"chest","visual":"chest","effect":"frostward","icon":1,"armor":17,"hp":36,"mana":6,"power":5,"max_durability":225.0},
+            {"kind":"material","material":"crystal","amount":4,"name":"Lantern Sea-Glass Crate","price":74,"description":"Four pieces of cold sea-glass recovered below Cape Keld."},
+            {"kind":"repair","name":"Harbour Gear Overhaul","price":44,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="skeld_netwright":
+        return {"id":"%s_skeld_netwright"%town,"name":"Asta Netmaker","type_name":"Skeld Nets & Provisions","color":Color(.27,.36,.31),"greeting":"A sound net feeds a hall. A sound rope brings you home.","inventory":[
+            {"kind":"armor","id":"kelpwick_sealhide_boots","name":"Kelpwick Sealhide Boots","price":142,"description":"Waxed coastal boots. Armor +8, HP +18, Power +3.","slot":"feet","visual":"boots","icon":4,"armor":8,"hp":18,"mana":0,"power":3,"max_durability":190.0},
+            {"kind":"armor","id":"skeld_fishing_pole","name":"Skeld Fishing Pole","price":96,"description":"A salt-sealed ash fishing pole built for river mouths and ocean piers.","slot":"mainhand","visual":"fishing pole","icon":8,"armor":0,"hp":2,"mana":0,"power":4,"max_durability":170.0},
+            {"kind":"material","material":"cloth","amount":8,"name":"Tarred Net Cord","price":38,"description":"Eight measures of strong tarred cord."},
+            {"kind":"health_potion","name":"Juniper Fish Broth","price":31,"description":"Adds one health potion."}
+        ]}
+    if kind=="rime_warden":
+        return {"id":"%s_rime_warden"%town,"name":"Hakon Rimeward","type_name":"Vardholm Rimepass Stores","color":Color(.31,.37,.40),"greeting":"The east road climbs into ice. The south road falls into thunder. Choose with supplies.","inventory":[
+            {"kind":"armor","id":"vardholm_watchcoat_shop","name":"Vardholm Sealhide Watchcoat","price":224,"description":"A cold-weather road coat. Armor +16, HP +34, frostward.","slot":"chest","visual":"chest","effect":"frostward","icon":1,"armor":16,"hp":34,"mana":4,"power":4,"max_durability":215.0},
+            {"kind":"armor","id":"greywake_lantern_band_shop","name":"Greywake Lantern Band","price":268,"description":"A sea-glass ward ring. HP +18, Mana +14, Power +9.","slot":"ring_left","visual":"magic ring","ring_design":"split_band","effect":"frostward","icon":10,"armor":5,"hp":18,"mana":14,"power":9,"max_durability":220.0},
+            {"kind":"material","material":"resin","amount":8,"name":"Rimepass Fire Pitch","price":48,"description":"Eight measures of slow-burning coastal pitch."},
+            {"kind":"health_potion","name":"Vardholm Warming Draught","price":34,"description":"Adds one health potion."}
+        ]}
+    if kind=="skeld_smith":
+        return {"id":"%s_skeld_smith"%town,"name":"Torvi Saltiron","type_name":"Vardholm Saltsteel Forge","color":Color(.38,.40,.41),"greeting":"Sea salt ruins weak iron. Mine leaves the forge expecting it.","inventory":[
+            {"kind":"armor","id":"vardholm_saltsteel_helm","name":"Vardholm Saltsteel Helm","price":182,"description":"A close coastal helm. Armor +14, HP +18, Power +3.","slot":"head","icon":0,"armor":14,"hp":18,"mana":0,"power":3,"max_durability":225.0},
+            {"kind":"armor","id":"skeld_breakwater_shield","name":"Skeld Breakwater Shield","price":214,"description":"A tarred oak and saltsteel shield. Armor +17, HP +30.","slot":"offhand","visual":"shield","icon":9,"armor":17,"hp":30,"mana":0,"power":4,"max_durability":240.0},
+            {"kind":"material","material":"ore","amount":9,"name":"Vardholm Saltsteel Crate","price":62,"description":"Nine pieces of coast-worked iron ore."},
+            {"kind":"repair","name":"Saltsteel Full Gear Repair","price":45,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="storm_warden":
+        return {"id":"%s_storm_warden"%town,"name":"Cael Stormward","type_name":"Stormbreak Warden Stores","color":Color(.28,.35,.34),"greeting":"Three roads meet here. Carry enough steel to return by any one of them.","inventory":[
+            {"kind":"armor","id":"stormward_patrol_mantle_shop","name":"Stormward Patrol Mantle","price":176,"description":"A highland road mantle. Armor +9, HP +20, Power +5, windstep.","slot":"shoulders","visual":"shoulders","effect":"windstep","icon":2,"armor":9,"hp":20,"mana":0,"power":5,"max_durability":180.0},
+            {"kind":"armor","id":"galehorn_road_spear_shop","name":"Galehorn Road Spear","price":184,"description":"A long highland blade. Power +20, Armor +2, HP +8.","slot":"mainhand","visual":"sword","icon":7,"armor":2,"hp":8,"mana":0,"power":20,"max_durability":205.0},
+            {"kind":"material","material":"resin","amount":7,"name":"Beacon Fire Resin","price":42,"description":"Seven measures of highland fire resin."},
+            {"kind":"repair","name":"Stormwarden Field Repair","price":36,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="highland_smith":
+        return {"id":"%s_highland_smith"%town,"name":"Brenn Slatehand","type_name":"Stormbreak Highland Forge","color":Color(.38,.39,.37),"greeting":"Wind cools iron quickly. That is why ours remembers the hammer.","inventory":[
+            {"kind":"armor","id":"stormbreak_slate_cuirass","name":"Stormbreak Slate Cuirass","price":205,"description":"Layered highland plate. Armor +22, HP +32, Power +5.","slot":"chest","icon":1,"armor":22,"hp":32,"mana":0,"power":5,"max_durability":230.0},
+            {"kind":"armor","id":"stormscar_buckler","name":"Stormscar Buckler","price":154,"description":"A black-iron road shield. Armor +14, HP +22.","slot":"offhand","visual":"shield","icon":9,"armor":14,"hp":22,"mana":0,"power":3,"max_durability":210.0},
+            {"kind":"material","material":"ore","amount":8,"name":"Highland Iron Crate","price":49,"description":"Eight pieces of cold highland iron."},
+            {"kind":"repair","name":"Highland Full Gear Repair","price":38,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="peatwright":
+        return {"id":"%s_peatwright"%town,"name":"Eira Moorwise","type_name":"Moorwatch Peat & Wool","color":Color(.39,.31,.20),"greeting":"Dry fuel, warm wool, and no promises about the weather.","inventory":[
+            {"kind":"armor","id":"moorwatch_wool_coat","name":"Moorwatch Wool Coat","price":148,"description":"A weatherproof coat. Armor +8, HP +24, Mana +5.","slot":"chest","icon":1,"armor":8,"hp":24,"mana":5,"power":3,"max_durability":165.0},
+            {"kind":"material","material":"cloth","amount":8,"name":"Storm Wool Roll","price":34,"description":"Eight measures of dense highland wool."},
+            {"kind":"material","material":"resin","amount":6,"name":"Peat-Fire Pitch","price":31,"description":"Six measures of slow-burning pitch."},
+            {"kind":"health_potion","name":"Moorwatch Warming Tonic","price":27,"description":"Adds one health potion."}
+        ]}
+    if kind=="drover":
+        return {"id":"%s_drover"%town,"name":"Tarin Cairnroad","type_name":"Cairnstead Drover Market","color":Color(.42,.34,.17),"greeting":"What survives Galehorn weather will survive most roads.","inventory":[
+            {"kind":"armor","id":"cairnstead_trail_boots","name":"Cairnstead Trail Boots","price":116,"description":"Hobnailed road boots. Armor +7, HP +14, Power +3.","slot":"feet","visual":"boots","icon":4,"armor":7,"hp":14,"mana":0,"power":3,"max_durability":175.0},
+            {"kind":"armor","id":"blacktarn_compass_band_shop","name":"Blacktarn Compass Band","price":198,"description":"A frostward compass ring. Mana +10, Power +7.","slot":"ring_left","visual":"magic ring","ring_design":"crown","effect":"frostward","icon":10,"armor":4,"hp":14,"mana":10,"power":7,"max_durability":190.0},
+            {"kind":"material","material":"leather","amount":7,"name":"Drover Hide Bundle","price":38,"description":"Seven pieces of road-cured leather."},
+            {"kind":"material","material":"logs","amount":6,"name":"Shelter Timber Bundle","price":30,"description":"Six lengths of dry highland timber."}
+        ]}
+    if kind=="woodwright":
+        return {"id":"%s_woodwright"%town,"name":"Edda Rainsaw","type_name":"Oakrest Woodwright","color":Color(.38,.29,.12),"greeting":"Western oak bends before it breaks. Good gear should do the same.","inventory":[
+            {"kind":"armor","id":"rainward_forester_axe","name":"Rainward Forester Axe","price":118,"description":"A balanced felling axe. Power +13, HP +6.","slot":"mainhand","visual":"axe","icon":8,"armor":0,"hp":6,"mana":0,"power":13,"max_durability":165.0},
+            {"kind":"armor","id":"waxed_oak_shield","name":"Waxed Oak Shield","price":102,"description":"A resin-sealed road shield. Armor +11, HP +20.","slot":"offhand","visual":"shield","icon":9,"armor":11,"hp":20,"mana":0,"power":2,"max_durability":180.0},
+            {"kind":"material","material":"logs","amount":8,"name":"Seasoned Oak Bundle","price":30,"description":"Eight dry Oakrest timbers."},
+            {"kind":"material","material":"resin","amount":5,"name":"Rainproof Resin","price":26,"description":"Five measures of boiled wood resin."}
+        ]}
+    if kind=="river_trader":
+        return {"id":"%s_river_trader"%town,"name":"Hale Fenwick","type_name":"Rainhaven River Trade","color":Color(.16,.36,.39),"greeting":"If it crossed the Rainfall dry, it was packed here.","inventory":[
+            {"kind":"health_potion","name":"Rainhaven Bitter Tonic","price":22,"description":"Adds one health potion."},
+            {"kind":"armor","id":"rainhaven_wading_boots","name":"Rainhaven Wading Boots","price":88,"description":"Waxed high boots. Armor +5, HP +14, Power +2.","slot":"feet","visual":"boots","icon":4,"armor":5,"hp":14,"mana":0,"power":2,"max_durability":150.0},
+            {"kind":"armor","id":"tideglass_traders_band","name":"Tideglass Trader's Band","price":142,"description":"A river-glass ring. Mana +7, Power +6, windstep.","slot":"ring_left","visual":"magic ring","ring_design":"spiral","effect":"windstep","icon":10,"armor":2,"hp":8,"mana":7,"power":6,"max_durability":165.0},
+            {"kind":"material","material":"cloth","amount":6,"name":"Waxed Sailcloth Roll","price":31,"description":"Six measures of weatherproof cloth."}
+        ]}
+    if kind=="quarry_mason":
+        return {"id":"%s_quarry_mason"%town,"name":"Torren Flint","type_name":"Stonecross Masonry","color":Color(.39,.40,.35),"greeting":"Good stone, honest iron, and nothing that rattles loose on a mountain road.","inventory":[
+            {"kind":"armor","id":"stonecross_masons_jack","name":"Stonecross Mason's Jack","price":154,"description":"Quarry plate. Armor +17, HP +28, Power +3.","slot":"chest","icon":1,"armor":17,"hp":28,"mana":0,"power":3,"max_durability":195.0},
+            {"kind":"armor","id":"stonecross_pick","name":"Stonecross War Pick","price":126,"description":"A compact iron pick. Power +15, Armor +2.","slot":"mainhand","visual":"pickaxe","icon":8,"armor":2,"hp":0,"mana":0,"power":15,"max_durability":180.0},
+            {"kind":"material","material":"stone","amount":8,"name":"Dressed Stone Stack","price":28,"description":"Eight squared blocks for advanced crafting."},
+            {"kind":"repair","name":"Mason's Full Gear Repair","price":29,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
+    if kind=="glacial_outfitter":
+        return {"id":"%s_outfitter"%town,"name":"Tova Icewise","type_name":"Glacial Outfitter","color":Color(.20,.40,.46),"greeting":"The high ice punishes poor preparation. Take what keeps you alive.","inventory":[
+            {"kind":"health_potion","name":"Icewatch Warming Tonic","price":28,"description":"Adds one health potion."},
+            {"kind":"armor","id":"icewatch_fur_mantle","name":"Icewatch Fur Mantle","price":124,"description":"A layered expedition mantle. Armor +7, HP +18, frostward.","slot":"shoulders","visual":"shoulders","effect":"frostward","icon":2,"armor":7,"hp":18,"mana":2,"power":3,"max_durability":150.0},
+            {"kind":"armor","id":"surveyors_climbing_boots","name":"Surveyor's Climbing Boots","price":92,"description":"Hobnailed glacial boots. Armor +6, HP +10, Power +3.","slot":"feet","visual":"boots","icon":4,"armor":6,"hp":10,"mana":0,"power":3,"max_durability":145.0},
+            {"kind":"material","material":"resin","amount":5,"name":"Coldproof Resin Bundle","price":32,"description":"Five measures of resin for camp and equipment crafting."}
+        ]}
+    if kind=="rime_smith":
+        return {"id":"%s_rime_smith"%town,"name":"Orik Moraineborn","type_name":"Glacial Ironworks","color":Color(.32,.40,.43),"greeting":"Rimegate iron holds an edge where southern steel turns brittle.","inventory":[
+            {"kind":"armor","id":"rimegate_glacial_sword","name":"Rimegate Glacial Sword","price":168,"description":"A glacial-iron longsword. Power +14, frostward.","slot":"mainhand","visual":"sword","effect":"frostward","icon":7,"armor":0,"hp":5,"mana":0,"power":14,"max_durability":175.0},
+            {"kind":"armor","id":"moraine_guard_shield","name":"Moraine Guard Shield","price":146,"description":"A stone-rimmed expedition shield. Armor +12, HP +22.","slot":"offhand","visual":"shield","icon":9,"armor":12,"hp":22,"mana":0,"power":2,"max_durability":190.0},
+            {"kind":"material","material":"ore","amount":8,"name":"Rimegate Ore Crate","price":44,"description":"Eight chunks of cold-worked ore."},
+            {"kind":"repair","name":"Cold-Hammer Gear Repair","price":32,"description":"Restore all equipped ordinary gear to full durability."}
+        ]}
     if kind=="alchemist":
         return {"id":"%s_alchemist"%town,"name":"Mira of %s"%town,"type_name":"Alchemy & Remedies","color":Color(.28,.15,.52),"greeting":"Elixirs, reagents, and remedies—carefully measured.","inventory":[
             {"kind":"health_potion","name":"Crimson Health Potion","price":18,"description":"Adds one health potion."},
@@ -3009,13 +4186,15 @@ func _vendor_catalog(kind:String,town:String)->Dictionary:
             {"kind":"armor","name":"Tempered Steel Helm","price":46,"description":"Head armor. Armor +7, HP +10.","slot":"head","icon":0,"armor":7,"hp":10,"mana":0,"power":2},
             {"kind":"armor","name":"Crown Guard Cuirass","price":82,"description":"Chest armor. Armor +14, HP +25.","slot":"chest","icon":1,"armor":14,"hp":25,"mana":2,"power":5},
             {"kind":"armor","name":"Knight's Gauntlets","price":42,"description":"Hand armor. Armor +5, Power +4.","slot":"hands","icon":3,"armor":5,"hp":7,"mana":0,"power":4},
-            {"kind":"armor","name":"Marching Greaves","price":40,"description":"Foot armor. Armor +5, HP +9.","slot":"feet","icon":4,"armor":5,"hp":9,"mana":0,"power":2}
+            {"kind":"armor","name":"Marching Greaves","price":40,"description":"Foot armor. Armor +5, HP +9.","slot":"feet","icon":4,"armor":5,"hp":9,"mana":0,"power":2},
+            {"kind":"repair","name":"Repair Equipped Gear","price":25,"description":"Restore all equipped ordinary gear to full durability. Royal equipment never needs repair."}
         ]}
     if kind=="arcanist":
         return {"id":"%s_arcanist"%town,"name":"Archivist Selene","type_name":"Arcane Curios","color":Color(.12,.35,.58),"greeting":"The crown permits these relics to leave the archive—for a price.","inventory":[
             {"kind":"mana_potion","name":"Scholar's Mana Tonic","price":21,"description":"Adds one mana potion."},
             {"kind":"material","material":"essence","amount":2,"name":"Twin Arcane Essences","price":70,"description":"Two refined essences."},
-            {"kind":"armor","name":"Runed Pauldrons","price":68,"description":"Shoulder armor. Mana +10, Power +5.","slot":"shoulders","icon":2,"armor":5,"hp":6,"mana":10,"power":5}
+            {"kind":"armor","name":"Runed Pauldrons","price":68,"description":"Shoulder armor. Mana +10, Power +5.","slot":"shoulders","icon":2,"armor":5,"hp":6,"mana":10,"power":5},
+            {"kind":"armor","id":"wayfarer_signet","name":"Wayfarer's Signet","price":96,"description":"A wind-marked ring. Power +4 and HP +8; its magic appears while equipped.","slot":"ring_left","visual":"magic ring","effect":"windstep","icon":10,"armor":1,"hp":8,"mana":3,"power":4,"max_durability":120.0}
         ]}
     return {"id":"%s_provisioner"%town,"name":"Rowan's Trading Post","type_name":"General Provisions","color":Color(.48,.29,.08),"greeting":"Road supplies, camp goods, and honest prices.","inventory":[
         {"kind":"health_potion","name":"Traveler's Health Potion","price":18,"description":"Adds one health potion."},
@@ -3029,6 +4208,7 @@ func purchase_vendor_item(vendor_data:Dictionary,index:int)->String:
     if index<0 or index>=inventory.size():return "That item is unavailable."
     var item:Dictionary=inventory[index]
     var price:int=int(item.get("price",0))
+    if item.get("kind","")=="repair" and player.get_repair_cost()<=0:return "Your equipped gear is already in good repair."
     if player.hero_gold<price:return "You do not have enough gold."
     if item.get("kind","")=="armor" and player.bag_slots.size()>=80:return "Your armor bag is full."
     player.hero_gold-=price
@@ -3038,7 +4218,10 @@ func purchase_vendor_item(vendor_data:Dictionary,index:int)->String:
         "material":
             var amount:int=int(item.get("amount",1));var material_name:String=str(item.get("material","herbs"));player.add_material(material_name,amount)
         "armor":
-            var armor_item:=item.duplicate(true);armor_item["id"]="shop_%s_%d"%[item.get("slot","armor"),Time.get_ticks_msec()];armor_item.erase("kind");armor_item.erase("price");player.bag_slots.append(armor_item)
+            var armor_item:=item.duplicate(true)
+            if str(armor_item.get("id","")).is_empty():armor_item["id"]="shop_%s_%d"%[item.get("slot","armor"),Time.get_ticks_msec()]
+            armor_item.erase("kind");armor_item.erase("price");player.add_bag_item(armor_item)
+        "repair":player.repair_all_equipment()
     return "Purchased %s for %d gold."%[item.get("name","item"),price]
 
 func _spawn_loot(pos:Vector3,elite:bool,rank:int=1,boss:bool=false)->void:
@@ -3046,6 +4229,15 @@ func _spawn_loot(pos:Vector3,elite:bool,rank:int=1,boss:bool=false)->void:
     var material_kind:String=material_pool[rng.randi_range(0,material_pool.size()-1)]
     _spawn_world_drop(pos,{"kind":"material","material":material_kind,"amount":2 if elite else 1,"name":material_kind.capitalize()},elite)
     _spawn_world_drop(pos+Vector3(.55,0,.35),{"kind":"gold","amount":40 if boss else (7 if elite else 2),"name":"Gold Coins"},elite)
+    if boss or (elite and rng.randf()<.18):
+        var ring_pool:Array[Dictionary]=[
+            {"id":"glacier_heart_ring_%d"%rng.randi(),"name":"Glacier-Heart Ring","effect":"frostward","ring_design":"crown","armor":3,"hp":14,"mana":8,"power":3,"description":"A crown-set silver ring cold to the touch. Its frostward becomes visible when equipped."},
+            {"id":"emberglass_band_%d"%rng.randi(),"name":"Emberglass Band","effect":"emberpulse","ring_design":"split_band","armor":1,"hp":8,"mana":3,"power":7,"description":"A split iron band holding warm emberglass. Its pulse becomes visible when equipped."},
+            {"id":"wayfarer_loop_%d"%rng.randi(),"name":"Wayfarer's Loop","effect":"windstep","ring_design":"spiral","armor":1,"hp":10,"mana":5,"power":5,"description":"An open spiral ring etched with the roads of the old realm."},
+        ]
+        var ring:=ring_pool[rng.randi_range(0,ring_pool.size()-1)].duplicate(true)
+        ring.merge({"kind":"item","slot":"ring_left","visual":"magic ring","icon":10,"max_durability":120.0},true)
+        _spawn_world_drop(pos+Vector3(0,0,-.72),ring,true)
     if boss or rng.randf()<(.42 if elite else .12):
         var slots:=["head","chest","hands","feet","pants","mainhand","offhand"]
         var slot:String=slots[rng.randi_range(0,slots.size()-1)]
@@ -3054,6 +4246,24 @@ func _spawn_loot(pos:Vector3,elite:bool,rank:int=1,boss:bool=false)->void:
         _spawn_world_drop(pos+Vector3(-.55,0,.25),gear,true)
     if boss:
         for extra in ["crystal","essence","leather"]:_spawn_world_drop(pos+Vector3(rng.randf_range(-1.2,1.2),0,rng.randf_range(-1.2,1.2)),{"kind":"material","material":extra,"amount":2,"name":extra.capitalize()},true)
+    if str(profile.get("zone_id",""))=="east_marches" and (elite or rng.randf()<.18):
+        var marcher_reward:Dictionary
+        if elite and rng.randf()<.28:
+            marcher_reward={"kind":"item","id":"cinderwatch_signal_knife_%d"%rng.randi(),"name":"Cinderwatch Signal Knife","slot":"mainhand","visual":"sword","icon":7,"armor":1,"hp":5+rank,"mana":0,"power":15+rank*2,"max_durability":185.0,"description":"A short basalt-iron blade carried by Eastern beacon patrols."}
+        elif rng.randf()<.48:
+            marcher_reward={"kind":"material","material":"ore","amount":2 if elite else 1,"name":"Marcher Basalt Iron"}
+        else:
+            marcher_reward={"kind":"item","id":"amberfield_waybread","stack_key":"item:amberfield_waybread","stackable":true,"quantity":1,"name":"Amberfield Waybread","slot":"consumable","icon":10,"use":"food","buff_name":"Long Road","duration":180.0,"buff_power":3,"health_regen":.22,"stamina_regen":3.4,"heal":17.0,"description":"Dense grain and salt baked for the Dawnway. Double-click to eat."}
+        _spawn_world_drop(pos+Vector3(.82,0,-.38),marcher_reward,elite)
+    if str(profile.get("zone_id",""))=="skeld_coast" and (elite or rng.randf()<.16):
+        var coastal_reward:Dictionary
+        if elite and rng.randf()<.24:
+            coastal_reward={"kind":"item","id":"skeld_raider_guard_%d"%rng.randi(),"name":"Skeld Breakwater Guard","slot":"offhand","visual":"shield","icon":9,"armor":12+rank,"hp":18+rank*2,"mana":0,"power":4+rank,"max_durability":195.0,"description":"A compact saltsteel-and-oak shield recovered on the Grey Sea road."}
+        elif rng.randf()<.48:
+            coastal_reward={"kind":"material","material":"resin","amount":2 if elite else 1,"name":"Coastal Net Pitch"}
+        else:
+            coastal_reward={"kind":"item","id":"skeld_smoked_fish","stack_key":"item:skeld_smoked_fish","stackable":true,"quantity":1,"name":"Skeld Smoked Fish","slot":"consumable","icon":10,"use":"food","buff_name":"Sea Legs","duration":180.0,"buff_power":3,"health_regen":.24,"stamina_regen":3.2,"heal":18.0,"description":"Juniper-smoked coastal fish. Double-click to eat."}
+        _spawn_world_drop(pos+Vector3(.82,0,-.38),coastal_reward,elite)
 
 
 func _spawn_zombie_loot(pos:Vector3,kind:String,elite:bool)->void:
@@ -3078,11 +4288,8 @@ func _spawn_world_drop(pos:Vector3,reward:Dictionary,rare:bool=false)->void:
     var material_name:String=reward.get("material","")
     var grounded_log:=material_name=="logs"
     var root:=Node3D.new();root.name="Dropped_%s"%reward.get("name","Item").replace(" ","_");add_child(root)
-    if grounded_log:
-        root.global_position=_ground(pos)+Vector3.UP*.16
-        root.rotation.y=rng.randf_range(-PI,PI)
-    else:
-        root.global_position=pos+Vector3.UP*.28
+    root.global_position=_ground(pos)+Vector3.UP*(.16 if grounded_log else .22)
+    root.rotation.y=rng.randf_range(-PI,PI) if grounded_log else 0.0
     var color:=Color(.46,.92,.34)
     if reward.get("kind","")=="gold":color=Color(1.0,.66,.10)
     elif reward.get("kind","")=="item":color=Color(.28,.52,1.0) if not rare else Color(.78,.28,1.0)
@@ -3091,11 +4298,16 @@ func _spawn_world_drop(pos:Vector3,reward:Dictionary,rare:bool=false)->void:
     elif reward.get("material","")=="crystal":color=Color(.26,.82,1.0)
     var item_id:String=reward.get("id","")
     var scene:PackedScene
-    if kind=="gold":scene=COIN_POUCH_SCENE
+    var custom_visual:=false
+    if str(reward.get("slot","")).begins_with("ring_"):
+        _add_magic_ring_drop_visual(root,reward);custom_visual=true
+    elif kind=="gold":scene=COIN_POUCH_SCENE
     elif item_id=="raw_fish":scene=FISH_SCENE
     elif item_id.begins_with("cooked_fish"):scene=COOKED_FISH_SCENE
     elif item_id.begins_with("berries"):scene=BERRIES_SCENE
     elif material_name=="logs":scene=LOG_SCENE
+    elif material_name=="raw_meat":scene=VENISON_SCENE
+    elif material_name=="chitin":scene=RIME_CHITIN_DROP_SCENE
     elif material_name=="crystal" or material_name=="essence":scene=CRYSTAL_DROP_SCENE
     elif material_name in ["grave_tokens","plague_samples"]:scene=CRYSTAL_DROP_SCENE if material_name=="plague_samples" else COIN_POUCH_SCENE
     elif material_name in ["ore","stone","scrap"]:scene=ORE_DROP_SCENE
@@ -3105,12 +4317,31 @@ func _spawn_world_drop(pos:Vector3,reward:Dictionary,rare:bool=false)->void:
     elif kind=="item":scene=ARMOR_DROP_SCENE
     elif material_name in ["herbs","mushrooms","resin"]:scene=BERRIES_SCENE
     else:scene=ORE_DROP_SCENE
-    if scene:
+    if scene and not custom_visual:
         var authored:=scene.instantiate() as Node3D;authored.name="BlenderPickup";authored.scale=Vector3.ONE*(.72 if material_name=="logs" else .82);root.add_child(authored)
     if not grounded_log:
         var marker:=Label3D.new();marker.text="E - PICK UP\n%s"%str(reward.get("name","Item")).to_upper();marker.position=Vector3(0,.85,0);marker.font_size=24;marker.pixel_size=.009;marker.modulate=Color(1,.86,.45) if rare else Color(.86,.95,.78);marker.outline_size=6;marker.billboard=BaseMaterial3D.BILLBOARD_ENABLED;root.add_child(marker)
     _set_geometry_range(root,170.0)
-    loot.append({"node":root,"reward":reward.duplicate(true),"phase":rng.randf_range(0,TAU),"floor_y":root.global_position.y,"grounded":grounded_log})
+    # Every drop now rests where it landed. The former bob-and-spin loop made
+    # weapons, food and ore read as arcade pickups instead of physical loot.
+    loot.append({"node":root,"reward":reward.duplicate(true),"phase":0.0,"floor_y":root.global_position.y,"grounded":true})
+
+
+func _add_magic_ring_drop_visual(root:Node3D,reward:Dictionary)->void:
+    var effect:=str(reward.get("effect","windstep"))
+    var color:=Color(.42,.78,1.0) if effect=="frostward" else (Color(1.0,.29,.055) if effect=="emberpulse" else Color(.50,1.0,.68))
+    var metal:=_service_material(Color(.72,.73,.70)).duplicate() as StandardMaterial3D
+    metal.metallic=.72;metal.roughness=.25
+    var gem:=_service_material(color).duplicate() as StandardMaterial3D
+    gem.emission_enabled=true;gem.emission=color;gem.emission_energy_multiplier=2.6;gem.roughness=.18
+    var band:=MeshInstance3D.new();var torus:=TorusMesh.new();torus.inner_radius=.17;torus.outer_radius=.29;torus.rings=16;torus.ring_segments=10;band.mesh=torus;band.rotation.x=PI*.5;band.position.y=.12;band.material_override=metal;root.add_child(band)
+    var stone:=MeshInstance3D.new()
+    if str(reward.get("ring_design",""))=="split_band":
+        var prism:=BoxMesh.new();prism.size=Vector3(.22,.18,.16);stone.mesh=prism;stone.rotation=Vector3(.12,.40,.18)
+    else:
+        var crystal_mesh:=SphereMesh.new();crystal_mesh.radius=.13;crystal_mesh.height=.22;crystal_mesh.radial_segments=8;crystal_mesh.rings=5;stone.mesh=crystal_mesh
+    stone.position=Vector3(0,.37,0);stone.material_override=gem;root.add_child(stone)
+    var glow:=OmniLight3D.new();glow.position=Vector3(0,.30,0);glow.light_color=color;glow.light_energy=.42;glow.omni_range=2.8;glow.shadow_enabled=false;root.add_child(glow)
 
 func _tick_loot(delta: float) -> void:
     for i in range(loot.size()-1,-1,-1):
@@ -3148,7 +4379,7 @@ func _collect_reward(reward:Dictionary)->void:
     _check_quest_rewards()
 
 func _save_game() -> void:
-    var data := {"position":[player.global_position.x,player.global_position.y,player.global_position.z],"class":player.active_class,"level":player.hero_level,"xp":player.hero_xp,"next_xp":player.next_xp,"hp":player.hp,"max_hp":player.max_hp,"mana":player.mana,"max_mana":player.max_mana,"gold":player.hero_gold,"shards":player.relic_shards,"hp_potions":player.health_potions,"mp_potions":player.mana_potions,"herbs":player.herbs,"scrap":player.scrap,"ore":player.ore,"essence":player.essence,"logs":player.logs,"leather":player.leather,"cloth":player.cloth,"stone":player.stone,"resin":player.resin,"mushrooms":player.mushrooms,"crystal":player.crystal,"grave_tokens":player.grave_tokens,"plague_samples":player.plague_samples,"kills":player.enemies_defeated,"elites":player.elites_defeated,"quest_complete":quest_complete,"quest_goal":quest_goal,"quest_claimed":_quest_claimed,"gathered_counts":_gathered_counts,"skill_levels":skill_levels,"skill_xp":skill_xp,"bag":player.bag_slots,"equipment_slots":player.equipment_slots,"gravebound_campaign":_gravebound_campaign.get_save_state() if is_instance_valid(_gravebound_campaign) else {}}
+    var data := {"position":[player.global_position.x,player.global_position.y,player.global_position.z],"class":player.active_class,"level":player.hero_level,"xp":player.hero_xp,"next_xp":player.next_xp,"hp":player.hp,"max_hp":player.max_hp,"mana":player.mana,"max_mana":player.max_mana,"gold":player.hero_gold,"shards":player.relic_shards,"hp_potions":player.health_potions,"mp_potions":player.mana_potions,"herbs":player.herbs,"scrap":player.scrap,"ore":player.ore,"essence":player.essence,"logs":player.logs,"leather":player.leather,"cloth":player.cloth,"stone":player.stone,"resin":player.resin,"mushrooms":player.mushrooms,"crystal":player.crystal,"chitin":player.chitin,"raw_meat":player.raw_meat,"grave_tokens":player.grave_tokens,"plague_samples":player.plague_samples,"kills":player.enemies_defeated,"elites":player.elites_defeated,"quest_complete":quest_complete,"quest_goal":quest_goal,"quest_claimed":_quest_claimed,"quest_baselines":_quest_baselines,"gathered_counts":_gathered_counts,"skill_levels":skill_levels,"skill_xp":skill_xp,"bag":player.bag_slots,"equipment_slots":player.equipment_slots,"gravebound_campaign":_gravebound_campaign.get_save_state() if is_instance_valid(_gravebound_campaign) else {},"oathbound_campaign":_oathbound_campaign.get_save_state() if is_instance_valid(_oathbound_campaign) else {}}
     var file:=FileAccess.open("user://broken_knight_save.json",FileAccess.WRITE)
     if file: file.store_string(JSON.stringify(data))
 
@@ -3158,15 +4389,27 @@ func _load_game() -> void:
     if not data is Dictionary: return
     var p:Array=data.get("position",[0,0,0]); player.global_position=_ground(Vector3(p[0],p[1],p[2]))
     player.hero_level=data.get("level",1); player.hero_xp=data.get("xp",0); player.next_xp=data.get("next_xp",25); player.hero_gold=data.get("gold",4); player.relic_shards=data.get("shards",0); player.health_potions=data.get("hp_potions",2); player.mana_potions=data.get("mp_potions",1); player.herbs=data.get("herbs",0); player.scrap=data.get("scrap",0); player.ore=data.get("ore",0); player.essence=data.get("essence",0); player.enemies_defeated=data.get("kills",0); player.elites_defeated=data.get("elites",0); quest_complete=data.get("quest_complete",false)
-    for material_kind in ["logs","leather","cloth","stone","resin","mushrooms","crystal","grave_tokens","plague_samples"]:player.set(material_kind,int(data.get(material_kind,0)))
+    for material_kind in ["logs","leather","cloth","stone","resin","mushrooms","crystal","chitin","raw_meat","grave_tokens","plague_samples"]:player.set(material_kind,int(data.get(material_kind,0)))
     if player.has_method("sync_material_inventory"):player.sync_material_inventory()
     _quest_claimed=data.get("quest_claimed",{})
     _gathered_counts.merge(data.get("gathered_counts",{}),true)
+    if data.has("quest_baselines"):
+        _quest_baselines=data.get("quest_baselines",{}).duplicate(true)
+    else:
+        # Old saves counted progress globally. Preserve any currently active
+        # chapter, while future chapters will receive a fresh baseline when
+        # their prerequisite is completed.
+        _quest_baselines={"road_imps":0}
+        for quest in QUESTS:
+            var requirement:=str(quest.get("requires",""))
+            if requirement.is_empty() or bool(_quest_claimed.get(requirement,false)):
+                _quest_baselines[str(quest.id)]=0
     quest_goal=maxi(1,int(data.get("quest_goal",quest_goal)))
     var loaded_levels:Array=data.get("skill_levels",skill_levels);var loaded_xp:Array=data.get("skill_xp",skill_xp)
     for i in range(4):skill_levels[i]=maxi(1,int(loaded_levels[i] if i<loaded_levels.size() else 1));skill_xp[i]=maxi(0,int(loaded_xp[i] if i<loaded_xp.size() else 0))
     player.bag_slots=data.get("bag",[])
     player.equipment_slots=data.get("equipment_slots",player.equipment_slots)
+    if player.has_method("migrate_equipment_schema"):player.migrate_equipment_schema()
     player.active_class=data.get("class","Warrior" if player.equipment_slots.get("mainhand",{}).get("id","")=="royal_vanguard_sword" else "Mage")
     player.hero_title="Royal Vanguard Warrior" if player.active_class=="Warrior" else "Royal Vanguard Mage"
     if not player.equipment_slots.has("offhand"):
@@ -3184,3 +4427,10 @@ func _load_game() -> void:
     player._refresh_equipment_stats()
     player.hp=minf(player.max_hp,data.get("hp",player.max_hp)); player.mana=minf(player.max_mana,data.get("mana",player.max_mana))
     if is_instance_valid(_gravebound_campaign):_gravebound_campaign.load_save_state(data.get("gravebound_campaign",{}))
+    if is_instance_valid(_oathbound_campaign):_oathbound_campaign.load_save_state(data.get("oathbound_campaign",{}))
+
+
+func get_lore_entries()->Array[Dictionary]:
+    if is_instance_valid(_oathbound_campaign) and _oathbound_campaign.has_method("get_lore_entries"):
+        return _oathbound_campaign.get_lore_entries()
+    return []
