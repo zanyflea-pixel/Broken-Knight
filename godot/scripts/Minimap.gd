@@ -17,6 +17,7 @@ var _redraw_accumulator := 0.0
 var _draw_profile_totals:Dictionary={}
 var _draw_profile_counts:Dictionary={}
 var _bridge_draw_cache:Array[Dictionary]=[]
+var _volcanic_terrain_cache:Array[Dictionary]=[]
 var _interaction_marker_cache:Array[Dictionary]=[]
 var _story_marker_cache:Array[Dictionary]=[]
 var _enemy_position_cache:Array[Vector3]=[]
@@ -162,6 +163,12 @@ func _terrain_color(height: float, world_point: Vector2) -> Color:
     color=color.lerp(Color(.105,.275,.17),forest_influence*.52)
     if height>34.0:color=color.lerp(Color(.43,.39,.29),clampf((height-34.0)/92.0,0.0,.68))
     if height>82.0:color=color.lerp(Color(.39,.38,.34),clampf((height-82.0)/70.0,0.0,.68))
+    for volcano_value in _volcanic_terrain_cache:
+        var volcano_center:Vector2=volcano_value.center
+        var volcano_radius:float=volcano_value.radius
+        var warped_distance:=world_point.distance_to(volcano_center)+sin(world_point.x*.0041+world_point.y*.0032)*90.0
+        var ash_weight:=1.0-smoothstep(volcano_radius*.48,volcano_radius,warped_distance)
+        color=color.lerp(Color(.285,.275,.235),ash_weight*.48)
     var snow_weight:=_snow_weight(world_point,height)
     if snow_weight>0.0:color=color.lerp(Color(.87,.91,.90),snow_weight)
     return Color(color.r+variation,color.g+variation,color.b+variation)
@@ -247,6 +254,7 @@ func _draw() -> void:
     _profile_draw_call("waterfalls",func():_draw_waterfalls(center,radius))
     _profile_draw_call("bridges",func():_draw_bridges(center,radius))
     _profile_draw_call("settlements",func():_draw_settlements(center,radius))
+    _profile_draw_call("geology",func():_draw_major_geology_sites(center,radius))
     _profile_draw_call("map_sites",func():_draw_starter_map_sites(center,radius))
     _profile_draw_call("caves_camps",func():_draw_caves_and_camps(center,radius))
     _profile_draw_call("interactions",func():_draw_interactions(center,radius))
@@ -286,7 +294,10 @@ func reset_draw_profile()->void:
 
 
 func _inside_dungeon()->bool:
-    return is_instance_valid(_player) and _player.global_position.x>7800.0
+    # Dungeon rooms historically lived beyond X=7800, but the seamless world
+    # now extends through that range into the Eastern Marches. Interior mode is
+    # the authoritative state; coordinates are no longer a valid classifier.
+    return is_instance_valid(_player) and _player.has_method("is_interior_mode") and _player.is_interior_mode()
 
 
 func _draw_dungeon_minimap(center:Vector2,radius:float)->void:
@@ -592,7 +603,7 @@ func _draw_starter_map_sites(center:Vector2,radius:float)->void:
         if not site_value is Dictionary:continue
         var site:Dictionary=site_value
         var kind:=str(site.get("kind",""))
-        if kind not in ["waystation","watchtower","glacier","crevasse","ruin","lair"]:continue
+        if kind not in ["waystation","watchtower","glacier","crevasse","ruin","lair","volcano"]:continue
         var world_point:Vector2=site.get("position",Vector2.ZERO)
         var p:=_local_point(world_point,center,radius)
         if p.distance_to(center)>=radius-8.0:continue
@@ -616,8 +627,45 @@ func _draw_starter_map_sites(center:Vector2,radius:float)->void:
                 var angle:=TAU*float(index)/6.0+.20
                 draw_circle(p+Vector2(cos(angle),sin(angle))*4.3,1.55,Color(.17,.23,.23,.98))
             draw_circle(p,2.0,Color(.31,.72,.77,.98))
+        elif kind=="volcano":
+            draw_colored_polygon(PackedVector2Array([
+                p+Vector2(-7,5),p+Vector2(-4,0),p+Vector2(-2,-6),
+                p+Vector2(0,-4),p+Vector2(2,-6),p+Vector2(4,0),p+Vector2(7,5),
+            ]),Color(.22,.19,.16,.98))
+            draw_line(p+Vector2(-2,-6),p+Vector2(2,-6),Color(.07,.055,.045,.98),1.8,true)
         else:
             draw_polyline(PackedVector2Array([p+Vector2(-5,-4),p+Vector2(5,-4),p+Vector2(4,5),p+Vector2(-5,5)]),Color(.30,.27,.23,.98),1.8,true)
+
+
+func _major_geology_family(site:Dictionary)->String:
+    if str(site.get("kind",""))!="outcrop":return ""
+    var site_name:=str(site.get("name","")).to_lower()
+    if "sea stack" in site_name or "shore" in site_name:return "coastal"
+    if "basalt" in site_name or "ember" in site_name or "cinder" in site_name:return "basalt"
+    if "crown" in site_name or "crag" in site_name or "moraine" in site_name:return "glacial"
+    return ""
+
+
+func _draw_major_geology_sites(center:Vector2,radius:float)->void:
+    for site_value in _profile.get("landmark_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var family:=_major_geology_family(site)
+        if family.is_empty():continue
+        var p:=_local_point(site.get("position",Vector2.ZERO),center,radius)
+        if p.distance_to(center)>=radius-7.0:continue
+        var ink:=Color(.24,.23,.21,.96)
+        match family:
+            "basalt":
+                for index in range(4):
+                    var height:=4.0+float((index*3)%4)
+                    draw_rect(Rect2(p+Vector2(-5.0+float(index)*2.7,-height),Vector2(2.0,height+3.0)),ink,true)
+            "glacial":
+                draw_colored_polygon(PackedVector2Array([p+Vector2(-7,5),p+Vector2(-2,-7),p+Vector2(1,-3),p+Vector2(4,-6),p+Vector2(7,5)]),Color(.48,.55,.56,.98))
+                draw_colored_polygon(PackedVector2Array([p+Vector2(-4,-2),p+Vector2(-2,-7),p+Vector2(0,-3),p+Vector2(1,-3),p+Vector2(4,-6),p+Vector2(5,-1)]),Color(.88,.89,.83,.96))
+            "coastal":
+                draw_polyline(PackedVector2Array([p+Vector2(-6,5),p+Vector2(-5,-2),p+Vector2(0,-7),p+Vector2(5,-2),p+Vector2(6,5)]),ink,2.6,true)
+                draw_arc(p+Vector2(0,4),3.8,PI,TAU,14,Color(.64,.61,.52,.92),1.0,true)
 
 
 func _draw_local_crownspire(capital_center:Vector2,center:Vector2,radius:float)->void:
@@ -685,19 +733,60 @@ func _draw_story_markers(center:Vector2,radius:float)->void:
     for marker in _story_marker_cache:
         var position:Vector3=marker.get("position",Vector3.ZERO)
         var p:=_local_point(Vector2(position.x,position.z),center,radius)
-        if p.distance_to(center)>=radius-7.0:continue
         var kind:=str(marker.get("kind","story_site"))
+        var primary:=bool(marker.get("primary",false))
+        # MinimapShell moves this cached cartography layer under a separate
+        # live overlay. Keep the primary objective out of the cached texture;
+        # otherwise its edge arrow drifts with the terrain anchor.
+        if primary and _cached_layer_mode:continue
+        var screen_distance:=p.distance_to(center)
+        if screen_distance>=radius-7.0:
+            if primary:_draw_offscreen_objective(center,radius,Vector2(position.x,position.z))
+            continue
         if kind=="story_objective":
-            var diamond:=PackedVector2Array([p+Vector2(0,-6),p+Vector2(5,0),p+Vector2(0,6),p+Vector2(-5,0)])
-            draw_colored_polygon(diamond,Color(1.0,.70,.10,.98));draw_polyline(diamond,Color(.18,.08,.02),1.3,true)
+            var vertical:=8.0 if primary else 5.0
+            var horizontal:=6.5 if primary else 4.2
+            var diamond:=PackedVector2Array([p+Vector2(0,-vertical),p+Vector2(horizontal,0),p+Vector2(0,vertical),p+Vector2(-horizontal,0)])
+            draw_colored_polygon(diamond,Color(1.0,.70,.10,.98 if primary else .62));draw_polyline(diamond,Color(.18,.08,.02),1.7 if primary else 1.1,true)
+            if primary:draw_circle(p,2.2,Color(.20,.06,.015,.96))
         elif kind=="graveyard":
             draw_line(p+Vector2(0,-4),p+Vector2(0,4),Color(.82,.80,.66),1.8);draw_line(p+Vector2(-3,-1),p+Vector2(3,-1),Color(.82,.80,.66),1.8)
         elif kind=="dungeon":draw_arc(p,5,PI,TAU,14,Color(.20,.13,.05),2.5,true)
         else:draw_rect(Rect2(p-Vector2(3.5,3),Vector2(7,6)),Color(.42,.23,.08),true)
 
 
+func _draw_offscreen_objective(center:Vector2,radius:float,objective:Vector2)->void:
+    var player_position:=_draw_anchor if _cached_layer_mode and is_finite(_draw_anchor.x) else Vector2(_player.global_position.x,_player.global_position.z)
+    var delta:=objective-player_position
+    if delta.length_squared()<1.0:return
+    var direction:=delta.normalized()
+    var marker_center:=center+direction*(radius-19.0)
+    var tangent:=Vector2(-direction.y,direction.x)
+    var arrow:=PackedVector2Array([
+        marker_center+direction*8.5,
+        marker_center-direction*5.5+tangent*5.2,
+        marker_center-direction*2.5,
+        marker_center-direction*5.5-tangent*5.2,
+    ])
+    draw_colored_polygon(arrow,Color(1.0,.71,.10,.98))
+    draw_polyline(arrow,Color(.17,.065,.015,.98),1.7,true)
+    var metres:=delta.length()
+    var distance_text:="%d m"%roundi(metres) if metres<1000.0 else "%.1f km"%(metres/1000.0)
+    var label_position:=marker_center-direction*36.0-Vector2(ThemeDB.fallback_font.get_string_size(distance_text,HORIZONTAL_ALIGNMENT_LEFT,-1,10).x*.5,-4)
+    _small_label(distance_text,label_position)
+
+
 func _prepare_draw_caches()->void:
     _bridge_draw_cache.clear()
+    _volcanic_terrain_cache.clear()
+    for site_value in _profile.get("map_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        if str(site.get("kind",""))!="volcano":continue
+        _volcanic_terrain_cache.append({
+            "center":site.get("position",Vector2.ZERO),
+            "radius":maxf(1200.0,float(site.get("radius",170.0))*8.2),
+        })
     for bridge_value in _profile.get("ford_sites",[]):
         var bridge:Dictionary=bridge_value
         var world_point:Vector2=bridge.get("position",Vector2.ZERO)

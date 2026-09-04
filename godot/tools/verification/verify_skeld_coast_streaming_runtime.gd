@@ -94,8 +94,8 @@ func _run()->void:
     if coast_summaries!=1:failures.append("Skeld Coast appears %d times in atlas summaries"%coast_summaries)
     var extent:Vector2=atlas.get("map_extent",Vector2.ZERO)
     var center:Vector2=atlas.get("map_center",Vector2.ZERO)
-    if extent.distance_to(Vector2(14400,21600))>.1:failures.append("Six-region atlas extent is not 14400 x 21600")
-    if center.distance_to(Vector2(-3600,-7200))>.1:failures.append("Six-region atlas center is incorrect")
+    if extent.distance_to(Vector2(21600,21600))>.1:failures.append("Seven-region atlas extent is not 21600 x 21600")
+    if center.distance_to(Vector2(0,-7200))>.1:failures.append("Seven-region atlas center is incorrect")
 
     print("SKELD_COAST_STREAMING_RUNTIME|ready=%s|houses=%d|walkable=%s/%s|sea_blocked=%s|active=%s|encounters=%d|vendors=%d|atlas_regions=%d|failures=%d"%[
         str(bool(main.get("_skeld_region_ready"))).to_lower(),coastal_houses,

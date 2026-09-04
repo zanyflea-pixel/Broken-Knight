@@ -88,6 +88,7 @@ func configure(profile: Dictionary, player: Node3D, director: Node = null, heigh
         profile.get("landform_regions",[]),profile.get("mountain_chains",[]),profile.get("forest_regions",[]),
         profile.get("river_corridors",[]),profile.get("road_corridors",[]),profile.get("trail_corridors",[]),
         profile.get("town_sites",[]),profile.get("pond_sites",[]),profile.get("ford_sites",[]),profile.get("map_sites",[]),
+        profile.get("landmark_sites",[]),
     ]).hash()
     var structure_changed:=next_signature!=_static_profile_signature
     _static_profile_signature=next_signature
@@ -172,6 +173,12 @@ func _advance_terrain_samples(rows:int)->void:
             var sampled_height:float=_terrain_height_sampler.call(world_x,world_z).y
             if not _survey_region_loaded(world_point):
                 sampled_height=_authored_survey_height(world_point,sampled_height)
+            # Feather the cartographic relief into the survey-paper datum at
+            # the irregular edge of authored land. Without this, the normal
+            # shading treated the edge of the L-shaped atlas footprint as a
+            # bright square cliff even though no physical cliff exists there.
+            var authored_weight:=_authored_region_weight(world_point)
+            sampled_height=lerpf(12.0,sampled_height,authored_weight)
             _terrain_heights[y*TERRAIN_RESOLUTION+x]=sampled_height
     _terrain_sample_row=last_row
     if _terrain_sample_row>=TERRAIN_RESOLUTION:
@@ -223,16 +230,18 @@ func _survey_color(height: float, world_point: Vector2) -> Color:
     # the ground the player actually sees instead of recoloring everything as
     # the same green elevation band.
     var world_size: float = _profile.get("world_size", 7200.0)
-    var local_point:=world_point-_nearest_region_origin_for_point(world_point)
     var fine:=sin(world_point.x*.021)*sin(world_point.y*.017)
     var broad:=sin(world_point.x*.0031+world_point.y*.0022)*sin(world_point.y*.0043-world_point.x*.0015)
     var variation:=fine*.012+broad*.020
     var color:=Color(.36,.48,.25)
     var warp:=sin(world_point.x*.0027+world_point.y*.0019)*world_size*.038+sin(world_point.y*.0041-world_point.x*.0013)*world_size*.021
-    var east:=smoothstep(world_size*.07+warp,world_size*.27+warp,local_point.x)
-    var west:=1.0-smoothstep(-world_size*.31+warp,-world_size*.11+warp,local_point.x)
-    var north:=smoothstep(world_size*.08-warp,world_size*.29-warp,local_point.y)
-    var south:=1.0-smoothstep(-world_size*.29-warp,-world_size*.09-warp,local_point.y)
+    # Climate is continuous in atlas/world space. The old nearest-tile local
+    # coordinates restarted these gradients every 7.2 km and exposed the
+    # streaming grid as square color blocks on the illustrated map.
+    var east:=smoothstep(2200.0+warp,9800.0+warp,world_point.x)
+    var west:=1.0-smoothstep(-9200.0+warp,-1800.0+warp,world_point.x)
+    var north:=1.0-smoothstep(-11200.0-warp,-3800.0-warp,world_point.y)
+    var south:=smoothstep(-2600.0+warp,3200.0+warp,world_point.y)
     color=color.lerp(Color(.56,.48,.24),east*.72)
     color=color.lerp(Color(.25,.40,.25),west*.66)
     color=color.lerp(Color(.27,.43,.38),north*.30)
@@ -255,7 +264,32 @@ func _survey_color(height: float, world_point: Vector2) -> Color:
     var snow_weight:=_survey_snow_weight(world_point,height)
     if snow_weight>0.0:
         color=color.lerp(Color(.87,.90,.88),snow_weight)
-    return Color(color.r + variation, color.g + variation, color.b + variation)
+    color=Color(color.r + variation, color.g + variation, color.b + variation)
+    # Outside the authored seven-region footprint, show a softly mottled
+    # survey-paper field rather than flat tan rectangles or invented terrain.
+    # The irregular feather conceals technical tile edges while staying honest
+    # about which land currently exists.
+    var authored_weight:=_authored_region_weight(world_point)
+    var paper_fiber:=sin(world_point.x*.0071+world_point.y*.0023)*sin(world_point.y*.0059-world_point.x*.0017)
+    var paper_cloud:=sin(world_point.x*.0011-world_point.y*.0016)
+    var paper:=Color(.46,.43,.31)+Color(1.0,1.0,1.0,0.0)*(paper_fiber*.012+paper_cloud*.009)
+    return paper.lerp(color,authored_weight)
+
+
+func _authored_region_weight(world_point:Vector2)->float:
+    var best_signed_distance:=INF
+    for summary_value in _profile.get("region_summaries",[]):
+        if not summary_value is Dictionary:continue
+        var summary:Dictionary=summary_value
+        var half_size:=float(summary.get("world_size",7200.0))*.5
+        var origin:Vector2=summary.get("origin",Vector2.ZERO)
+        var delta:=Vector2(absf(world_point.x-origin.x),absf(world_point.y-origin.y))-Vector2.ONE*half_size
+        var outside:=Vector2(maxf(delta.x,0.0),maxf(delta.y,0.0)).length()
+        var inside:=minf(maxf(delta.x,delta.y),0.0)
+        best_signed_distance=minf(best_signed_distance,outside+inside)
+    if not is_finite(best_signed_distance):return 0.0
+    var edge_warp:=sin(world_point.x*.0037+world_point.y*.0021)*150.0+sin(world_point.y*.0063-world_point.x*.0014)*62.0
+    return 1.0-smoothstep(-120.0,620.0,best_signed_distance+edge_warp)
 
 
 func _point_inside_ocean(world_point:Vector2)->bool:
@@ -294,6 +328,7 @@ func _nearest_region_origin_for_point(world_point:Vector2)->Vector2:
 
 
 func _survey_region_loaded(world_point:Vector2)->bool:
+    if _authored_region_weight(world_point)<.02:return false
     var nearest_id:="starting_realm"
     var best:=INF
     for summary_value in _profile.get("region_summaries",[]):
@@ -410,6 +445,7 @@ func _draw() -> void:
         draw_rect(panel,Color(.42,.50,.29),true)
     _draw_ocean_basins(panel,world_size)
     _draw_ground_detail(panel,world_size)
+    _draw_volcanic_aprons(panel,world_size)
     if profile_draw:
         print("WORLD_MAP_DRAW_STAGE|ground_ms=%.2f"%[float(Time.get_ticks_usec()-draw_mark_usec)/1000.0]);draw_mark_usec=Time.get_ticks_usec()
     _draw_forests(panel, world_size)
@@ -485,8 +521,14 @@ func _draw_story_markers(panel:Rect2,world_size:float)->void:
         var kind:=str(marker.get("kind","story_site"))
         var discovered:=bool(marker.get("discovered",false))
         if kind=="story_objective":
-            var diamond:=PackedVector2Array([p+Vector2(0,-8),p+Vector2(7,0),p+Vector2(0,8),p+Vector2(-7,0)])
-            draw_colored_polygon(diamond,Color(1.0,.70,.12,.98));draw_polyline(diamond,Color(.18,.09,.025),1.6,true)
+            var primary:=bool(marker.get("primary",false))
+            var vertical:=11.0 if primary else 7.0
+            var horizontal:=9.0 if primary else 6.0
+            var diamond:=PackedVector2Array([p+Vector2(0,-vertical),p+Vector2(horizontal,0),p+Vector2(0,vertical),p+Vector2(-horizontal,0)])
+            draw_colored_polygon(diamond,Color(1.0,.72,.12,.98 if primary else .68));draw_polyline(diamond,Color(.18,.09,.025),2.0 if primary else 1.3,true)
+            if primary:
+                var inner:=PackedVector2Array([p+Vector2(0,-4),p+Vector2(3.2,0),p+Vector2(0,4),p+Vector2(-3.2,0)])
+                draw_colored_polygon(inner,Color(.22,.075,.025,.96))
         elif kind=="graveyard":
             draw_rect(Rect2(p-Vector2(6,5),Vector2(12,10)),Color(.28,.30,.25,.96),true)
             draw_line(p+Vector2(0,-5),p+Vector2(0,5),Color(.80,.78,.62),1.8);draw_line(p+Vector2(-3,-1),p+Vector2(3,-1),Color(.80,.78,.62),1.8)
@@ -496,7 +538,8 @@ func _draw_story_markers(panel:Rect2,world_size:float)->void:
             draw_rect(Rect2(p-Vector2(6,4),Vector2(12,8)),Color(.31,.19,.08,.96),true)
             draw_line(p+Vector2(-7,-5),p+Vector2(0,-9),Color(.46,.20,.07),2.0);draw_line(p+Vector2(0,-9),p+Vector2(7,-5),Color(.46,.20,.07),2.0)
         if not discovered and kind!="story_objective":draw_circle(p,2.2,Color(.86,.72,.45,.80))
-        _register_map_feature(p,9.0,str(marker.get("name","Story location")),"Story",Vector2(position.x,position.z))
+        var category:="Active objective" if bool(marker.get("primary",false)) else "Story"
+        _register_map_feature(p,11.0 if bool(marker.get("primary",false)) else 9.0,str(marker.get("name","Story location")),category,Vector2(position.x,position.z))
 
 
 func _draw_realm_crest(panel:Rect2)->void:
@@ -882,14 +925,49 @@ func _draw_landmark_sites(panel:Rect2,world_size:float)->void:
                     var q:=p+Vector2(cos(float(i)*TAU/4.0),sin(float(i)*TAU/4.0))*maxf(1.5,radius*.56)
                     _draw_tree_symbol(q,2.1,Color(.08,.27,.12,.92))
             "outcrop":
-                for i in range(3):
-                    var q:=p+Vector2(float(i-1)*3.2,float(i%2)*1.8)
-                    draw_colored_polygon(PackedVector2Array([q+Vector2(-3,3),q+Vector2(0,-3),q+Vector2(3,3)]),Color(.38,.36,.31,.94))
+                _draw_geology_landmark_symbol(p,site)
             "waystone":
                 draw_colored_polygon(PackedVector2Array([p+Vector2(0,-6),p+Vector2(4,0),p+Vector2(0,6),p+Vector2(-4,0)]),Color(.46,.43,.35,.96))
             "cairn":
                 draw_circle(p,4.0,Color(.27,.24,.19,.96));draw_circle(p-Vector2(0,2),2.2,Color(.55,.51,.42,.96))
         _register_map_feature(p,maxf(5.0,radius),str(site.get("name","Landmark")),kind.capitalize(),world_point)
+
+
+func _geology_landmark_family(site:Dictionary)->String:
+    var site_name:=str(site.get("name","")).to_lower()
+    if "sea stack" in site_name or "shore" in site_name:return "coastal"
+    if "basalt" in site_name or "ember" in site_name or "cinder" in site_name:return "basalt"
+    if "crown" in site_name or "crag" in site_name or "moraine" in site_name:return "glacial"
+    return "layered"
+
+
+func _draw_geology_landmark_symbol(p:Vector2,site:Dictionary)->void:
+    var family:=_geology_landmark_family(site)
+    var ink:=Color(.27,.25,.22,.96)
+    var light:=Color(.58,.55,.47,.92)
+    match family:
+        "basalt":
+            for index in range(5):
+                var height:=5.0+float((index*3)%5)
+                var x:=-6.0+float(index)*3.0
+                draw_rect(Rect2(p+Vector2(x,-height),Vector2(2.4,height+4.0)),ink,true)
+                draw_line(p+Vector2(x+.4,-height+.7),p+Vector2(x+1.9,-height+.7),light,.7,true)
+        "glacial":
+            var crag:=PackedVector2Array([p+Vector2(-9,6),p+Vector2(-5,-2),p+Vector2(-1,-9),p+Vector2(3,-3),p+Vector2(6,-7),p+Vector2(9,6)])
+            draw_colored_polygon(crag,Color(.42,.48,.49,.98))
+            draw_polyline(crag,ink,1.1,true)
+            draw_colored_polygon(PackedVector2Array([p+Vector2(-4,-3),p+Vector2(-1,-9),p+Vector2(2,-4),p+Vector2(3,-3),p+Vector2(6,-7),p+Vector2(7,-1)]),Color(.88,.88,.80,.96))
+        "coastal":
+            var arch:=PackedVector2Array([p+Vector2(-8,6),p+Vector2(-8,0),p+Vector2(-5,-6),p+Vector2(0,-9),p+Vector2(5,-6),p+Vector2(8,0),p+Vector2(8,6)])
+            draw_polyline(arch,ink,3.0,true)
+            draw_arc(p+Vector2(0,5),5.2,PI,TAU,18,light,1.2,true)
+            draw_line(p+Vector2(-10,8),p+Vector2(10,8),Color(.16,.42,.51,.92),1.4,true)
+        _:
+            var outline:=PackedVector2Array([p+Vector2(-9,6),p+Vector2(-8,-5),p+Vector2(-2,-8),p+Vector2(4,-6),p+Vector2(9,-3),p+Vector2(9,6)])
+            draw_polyline(outline,ink,1.8,true)
+            for row in range(3):
+                var y:=-3.0+float(row)*3.3
+                draw_line(p+Vector2(-7.5,y),p+Vector2(7.5,y+sin(float(row))*1.1),light,1.2,true)
 
 
 func _draw_special_map_sites(panel:Rect2,world_size:float)->void:
@@ -947,9 +1025,50 @@ func _draw_special_map_sites(panel:Rect2,world_size:float)->void:
                 for offset in [Vector2(-2,1),Vector2(2,0),Vector2(0,3.5)]:
                     draw_circle(p+offset,1.8,Color(.30,.72,.77,.98))
                 draw_arc(p,9.5,.20,TAU-.55,22,Color(.10,.18,.20,.88),1.2,true)
+            "volcano":
+                var volcanic_peak:=PackedVector2Array([
+                    p+Vector2(-11,8),p+Vector2(-7,1),p+Vector2(-3,-7),
+                    p+Vector2(0,-4),p+Vector2(3,-7),p+Vector2(7,1),p+Vector2(11,8),
+                ])
+                draw_colored_polygon(volcanic_peak,Color(.23,.20,.17,.98))
+                draw_polyline(volcanic_peak,Color(.11,.085,.065,.98),1.5,true)
+                draw_line(p+Vector2(-3,-7),p+Vector2(3,-7),Color(.08,.065,.055,.98),2.4,true)
+                draw_line(p+Vector2(-6,3),p+Vector2(-1,1),Color(.52,.27,.11,.80),1.1,true)
             "castle":
                 pass # Crownspire's complete footprint is drawn by _draw_crownspire_detail.
         _register_map_feature(p,10.0,str(site.get("name","Landmark")),kind.capitalize(),world_point)
+
+
+func _draw_volcanic_aprons(panel:Rect2,world_size:float)->void:
+    for site_value in _profile.get("map_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        if str(site.get("kind",""))!="volcano":continue
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var radius_world:=maxf(1200.0,float(site.get("radius",170.0))*8.2)
+        if not _world_circle_overlaps_map(center,radius_world):continue
+        # Several translucent irregular footprints approximate the same broad
+        # two-stage terrain fade as the world shader. No legend or circular
+        # border is added; rivers, roads and labels remain legible above it.
+        for layer_index in range(6):
+            var layer_scale:=1.0-float(layer_index)*.13
+            var footprint:=PackedVector2Array()
+            for point_index in range(49):
+                var angle:=TAU*float(point_index)/48.0
+                var irregularity:=1.0+sin(angle*3.0+center.x*.0011)*.10+sin(angle*7.0+center.y*.0013)*.045
+                footprint.append(_map_point(center+Vector2(cos(angle),sin(angle))*radius_world*layer_scale*irregularity,panel,world_size))
+            draw_colored_polygon(footprint,Color(.15,.14,.125,.030+float(layer_index)*.012))
+        for fissure_index in range(8):
+            var angle:=.34+float(fissure_index)*2.399963
+            var start_radius:=radius_world*(.18+float(fissure_index%3)*.035)
+            var end_radius:=radius_world*(.38+float((fissure_index+1)%4)*.045)
+            var normal:=Vector2(-sin(angle),cos(angle))
+            var fissure:=PackedVector2Array([
+                _map_point(center+Vector2(cos(angle),sin(angle))*start_radius,panel,world_size),
+                _map_point(center+Vector2(cos(angle),sin(angle))*lerpf(start_radius,end_radius,.52)+normal*radius_world*.022,panel,world_size),
+                _map_point(center+Vector2(cos(angle),sin(angle))*end_radius-normal*radius_world*.013,panel,world_size),
+            ])
+            draw_polyline(fissure,Color(.17,.12,.085,.35),.75,true)
 
 
 func _draw_services(panel:Rect2,world_size:float)->void:

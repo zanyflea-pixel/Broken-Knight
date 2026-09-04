@@ -46,7 +46,7 @@ func _run()->void:
         elif node_name=="HouseSignBoard":sign_boards+=1
         elif detail_kind=="CastleChandelier":chandeliers+=1
         elif detail_kind=="CastleWeaponRack":weapon_racks+=1
-        elif detail_kind=="FurnitureBookshelf":bookshelves+=1
+        elif detail_kind in ["FurnitureBookshelf","FurnitureBookcaseFull"]:bookshelves+=1
         elif detail_kind=="FurnitureBarrel":barrels+=1
         elif node_name.begins_with("FurnishedInterior_"):furnished_interiors+=1
         elif node_name=="Castle Courtyard Workshops And Training Yard":castle_courtyard_zones+=1

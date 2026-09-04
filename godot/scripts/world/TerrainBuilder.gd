@@ -1,8 +1,10 @@
 extends RefCounted
 
 const TERRAIN_MATERIAL_COLOR := Color(1.0, 1.0, 1.0, 1.0)
-const TERRAIN_CACHE_VERSION:=60
+const TERRAIN_CACHE_VERSION:=63
 const TERRAIN_MESH_CACHE_VERSION:=3
+const ENGINEERED_ROUTE_CACHE_VERSION:=1
+const ENGINEERED_ROUTE_BAKE_DIR:="res://assets/world/generated/terrain_routes"
 const TERRAIN_PROFILE_PATH:="res://data/world/profile.json"
 const MAX_RIVER_BANK_GRADE:=0.42
 const RIVER_TERRAIN_INFLUENCE:=620.0
@@ -556,6 +558,10 @@ func _restore_streaming_seam_edges(heights:PackedFloat32Array,grid_resolution:in
     var seam_edges:Array=profile.get("seam_edges",[])
     if seam_edges.is_empty():return heights
     var cell_size:=world_size/maxf(1.0,float(grid_resolution))
+    var has_north_edge:=_profile_has_streaming_edge(profile,"north")
+    var has_south_edge:=_profile_has_streaming_edge(profile,"south")
+    var has_east_edge:=_profile_has_streaming_edge(profile,"east")
+    var has_west_edge:=_profile_has_streaming_edge(profile,"west")
     for seam_value in seam_edges:
         if not seam_value is Dictionary:continue
         var edge:=str(seam_value.get("edge",""))
@@ -574,6 +580,13 @@ func _restore_streaming_seam_edges(heights:PackedFloat32Array,grid_resolution:in
                 var inward_distance:=float(inward_cell)*cell_size
                 var weight:=1.0 if inward_cell==0 else 1.0-_smoothstep(0.0,blend_width,inward_distance)
                 for x_index in range(grid_resolution+1):
+                    # A perpendicular seam owns its complete outer boundary
+                    # column, including the several rows inside this corner
+                    # blend. Do not overwrite that column with this edge's
+                    # approach curve or adjacent terrain tiles diverge just
+                    # before a four-region junction.
+                    if x_index==0 and has_west_edge:continue
+                    if x_index==grid_resolution and has_east_edge:continue
                     var world_x:=_grid_to_world(x_index,grid_resolution,world_size)
                     var point:=Vector2(world_x,world_z)
                     var crossing_height:=_authored_streaming_river_crossing_height(world_x,seam_value,profile)
@@ -591,6 +604,8 @@ func _restore_streaming_seam_edges(heights:PackedFloat32Array,grid_resolution:in
                 var inward_distance:=float(inward_cell)*cell_size
                 var weight:=1.0 if inward_cell==0 else 1.0-_smoothstep(0.0,blend_width,inward_distance)
                 for z_index in range(grid_resolution+1):
+                    if z_index==0 and has_south_edge:continue
+                    if z_index==grid_resolution and has_north_edge:continue
                     var world_z:=_grid_to_world(z_index,grid_resolution,world_size)
                     var point:=Vector2(world_x,world_z)
                     var crossing_height:=_authored_streaming_river_crossing_height(world_z,seam_value,profile)
@@ -602,6 +617,12 @@ func _restore_streaming_seam_edges(heights:PackedFloat32Array,grid_resolution:in
                     var index:=_grid_index(x_index,z_index,grid_resolution)
                     heights[index]=lerpf(float(heights[index]),final_height,weight)
     return heights
+
+
+func _profile_has_streaming_edge(profile:Dictionary,edge_name:String)->bool:
+    for seam_value in profile.get("seam_edges",[]):
+        if seam_value is Dictionary and str(seam_value.get("edge",""))==edge_name:return true
+    return false
 
 
 func _authored_streaming_river_crossing_height(local_along:float,seam:Dictionary,profile:Dictionary)->float:
@@ -618,7 +639,12 @@ func _authored_streaming_river_crossing_height(local_along:float,seam:Dictionary
         var crossing:Dictionary=crossing_value
         var width:=maxf(2.0,float(crossing.get("width",24.0)))
         var distance:=absf(global_along-float(crossing.get("along",global_along)))
-        var weight:=1.0-_smoothstep(width*.48,width*.95,distance)
+        # A rendered channel is backed by a full coarse-grid triangle beyond
+        # its nominal half-width. Hold the shared submerged bed across that
+        # support envelope, then feather it into the pass outside the liquid.
+        # The previous center-only falloff left a transverse terrain lip in
+        # the water whenever a river crossed a streamed boundary.
+        var weight:=1.0-_smoothstep(width*.96,width*1.55,distance)
         if weight<=best_weight:continue
         best_weight=weight
         result=lerpf(seam_height,float(crossing.get("bed_height",seam_height)),weight)
@@ -1030,6 +1056,7 @@ func _streaming_river_endpoint_influence(point:Vector2,edge:String,profile:Dicti
 
 func _prepare_engineered_route_cache(profile:Dictionary)->void:
     _engineered_route_buckets.clear()
+    if OS.get_environment("BROKEN_KNIGHT_REBUILD_ENGINEERED_ROUTES")!="1" and _load_engineered_route_bake(profile):return
     var grid_step:float=float(profile.get("world_size",7200.0))/maxf(1.0,float(profile.get("grid_resolution",256)))
     var corridors:Array=[]
     corridors.append_array(profile.get("road_corridors",[]))
@@ -1080,6 +1107,46 @@ func _prepare_engineered_route_cache(profile:Dictionary)->void:
                 "height_a":target_heights[index],"height_b":target_heights[index+1],
                 "inner":inner,"outer":outer,
             })
+
+
+func engineered_route_bake_path(profile:Dictionary)->String:
+    var zone_id:=str(profile.get("zone_id","starting_realm")).validate_filename()
+    return "%s/%s_engineered_routes_v%d.cache"%[ENGINEERED_ROUTE_BAKE_DIR,zone_id,ENGINEERED_ROUTE_CACHE_VERSION]
+
+
+func engineered_route_bake_signature(profile:Dictionary)->String:
+    # The terrain-cache key already covers every landform, settlement, river,
+    # road, trail, bridge and seam input used by the grade solver.
+    return str(hash([ENGINEERED_ROUTE_CACHE_VERSION,_terrain_cache_path(profile)]))
+
+
+func save_engineered_route_bake(profile:Dictionary)->Error:
+    var output_path:=engineered_route_bake_path(profile)
+    DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(ENGINEERED_ROUTE_BAKE_DIR))
+    var file:=FileAccess.open(output_path,FileAccess.WRITE)
+    if file==null:return FileAccess.get_open_error()
+    file.store_var({
+        "version":ENGINEERED_ROUTE_CACHE_VERSION,
+        "signature":engineered_route_bake_signature(profile),
+        "buckets":_engineered_route_buckets,
+    },false)
+    return OK
+
+
+func _load_engineered_route_bake(profile:Dictionary)->bool:
+    var input_path:=engineered_route_bake_path(profile)
+    if not FileAccess.file_exists(input_path):return false
+    var file:=FileAccess.open(input_path,FileAccess.READ)
+    if file==null:return false
+    var value:Variant=file.get_var(false)
+    if not value is Dictionary:return false
+    var cache:Dictionary=value
+    if int(cache.get("version",-1))!=ENGINEERED_ROUTE_CACHE_VERSION:return false
+    if str(cache.get("signature",""))!=engineered_route_bake_signature(profile):return false
+    var buckets:Variant=cache.get("buckets",{})
+    if not buckets is Dictionary:return false
+    _engineered_route_buckets=buckets
+    return true
 
 
 func _settlement_route_target(point:Vector2,fallback:float,profile:Dictionary)->Dictionary:
@@ -2013,6 +2080,8 @@ uniform float glacial_biome = 0.0;
 uniform vec2 glacier_center = vec2(0.0);
 uniform float glacier_radius = 1.0;
 uniform float marcher_biome = 0.0;
+uniform vec2 volcanic_center = vec2(100000.0);
+uniform float volcanic_radius = 1.0;
 
 varying vec3 world_position;
 
@@ -2082,7 +2151,17 @@ void fragment() {
     float grass_luma = dot(grass_albedo, vec3(0.2126, 0.7152, 0.0722));
     grass_albedo = mix(vec3(grass_luma), grass_albedo, 0.94);
     vec3 soil_albedo = texture(soil_texture, terrain_uv * 0.82 + vec2(0.17, 0.31)).rgb * vec3(0.88, 0.93, 1.02);
-    vec3 stone_albedo = texture(stone_texture, terrain_uv * 0.68 + vec2(0.43, 0.11)).rgb;
+    // A single repeated stone photograph exposed its image boundary as a
+    // glaring checkerboard across snowfields and high ridges. Three
+    // incommensurate rotations/scales ensure no rectangular edge can dominate
+    // the ground, while a procedural mineral tint keeps the blend geological.
+    vec3 stone_a = texture(stone_texture, terrain_uv * 0.68 + vec2(0.43, 0.11)).rgb;
+    vec3 stone_b = texture(stone_texture, terrain_uv_rot * 0.79 + vec2(3.17, 5.29)).rgb;
+    vec2 stone_uv_cross = vec2(p.x * 0.031 - p.y * 0.047, p.x * 0.047 + p.y * 0.031) + vec2(13.7, 2.9);
+    vec3 stone_c = texture(stone_texture, stone_uv_cross).rgb;
+    vec3 stone_albedo = stone_a * 0.43 + stone_b * 0.35 + stone_c * 0.22;
+    vec3 mineral_stone = mix(vec3(0.245, 0.255, 0.25), vec3(0.39, 0.385, 0.35), broad * 0.58 + clumps * 0.42);
+    stone_albedo = mix(stone_albedo, mineral_stone, 0.22 + glacial_biome * 0.18);
     // Soil speckles come from fine noise only. Thresholding interpolated
     // biome colour switched an entire coarse triangle to a different texture.
     float soil_marker = clamp(smoothstep(0.74, 0.95, grit) * 0.24 * detail_fade + smoothstep(0.78, 0.96, broad) * 0.16, 0.0, 0.38);
@@ -2102,6 +2181,12 @@ void fragment() {
     float snow_altitude = smoothstep(snow_line - 24.0 + (snow_noise - 0.5) * 28.0, snow_line + 44.0 + (snow_noise - 0.5) * 28.0, world_position.y);
     float snow_slope_hold = mix(0.28, 1.0, smoothstep(0.34, 0.91, abs(NORMAL.y)));
     float snow_weight = clamp(snow_altitude * snow_slope_hold * snow_strength, 0.0, 0.90);
+    // Within the glacial tile, a strongly height-driven white/stone mix made
+    // every coarse planar triangle legible. Preserve altitude as a secondary
+    // influence, but let continuous rotated world fields carry most of the
+    // snow mantle so neighboring triangles cannot alternate gray and white.
+    float glacial_snow_mantle = clamp(0.57 + (macro_field - 0.5) * 0.14 + (broad - 0.5) * 0.10, 0.48, 0.70);
+    snow_weight = mix(snow_weight, glacial_snow_mantle, glacial_biome * 0.74);
     vec3 packed_snow = mix(stone_albedo * vec3(0.92, 0.98, 1.03), vec3(0.82, 0.855, 0.86), clumps * 0.72 + broad * 0.18);
     vec3 snow_color = packed_snow * mix(0.92, 1.035, grit * detail_fade);
     textured_ground = mix(textured_ground, snow_color, snow_weight);
@@ -2147,18 +2232,44 @@ void fragment() {
     // Streamed alpine regions need their regional identity evaluated in local
     // coordinates. Previously global Z made the entire range inherit the
     // starter map's far-south grass tint, even directly beneath the glacier.
+    float final_glacial_snow_cover = 0.0;
     if (glacial_biome > 0.5) {
+        // Glacial colour must be evaluated entirely in continuous world-space
+        // fields. Height/slope masks are geometrically correct, but on the
+        // 22.5 m gameplay mesh their strong white/gray contrast exposed each
+        // planar triangle. These fields retain cold direction, glacier apron,
+        // snow islands and moraine without consulting triangle orientation.
         float north_cold = 1.0 - smoothstep(-2500.0, 1500.0, local_p.y);
-        vec3 tundra_ground = mix(vec3(0.205, 0.255, 0.205), vec3(0.35, 0.355, 0.315), broad * 0.62 + clumps * 0.38);
-        tundra_ground = mix(tundra_ground, stone_albedo * vec3(0.93, 0.99, 1.03), stone_weight * 0.72);
-        color = mix(color, tundra_ground, 0.24 + north_cold * 0.34);
         float glacier_distance = distance(local_p, glacier_center);
         float forefield = 1.0 - smoothstep(glacier_radius * 0.48, glacier_radius, glacier_distance);
-        // Moraine stone dominates the low forefield; packed snow gathers in
-        // softer islands. Pure white across the coarse valley mesh exposed
-        // every terrain triangle as a hard patch while moving.
-        vec3 ice_moraine = mix(stone_albedo * vec3(0.92, 1.01, 1.05), packed_snow, 0.18 + clumps * 0.16);
-        color = mix(color, ice_moraine, forefield * 0.62);
+        // Long sinusoidal macro fields looked like parallel contour stripes
+        // across shallow snow. Two differently rotated, incommensurate noise
+        // fields overlap so neither one's square lattice can read on its own.
+        vec2 glacier_uv_a = vec2(local_p.x * 0.0043 + local_p.y * 0.0027, -local_p.x * 0.0027 + local_p.y * 0.0043) + vec2(37.0, 11.0);
+        vec2 glacier_uv_b = vec2(local_p.x * 0.0021 - local_p.y * 0.0058, local_p.x * 0.0058 + local_p.y * 0.0021) + vec2(9.0, 43.0);
+        float glacier_macro_a = value_noise(glacier_uv_a);
+        float glacier_macro_b = value_noise(glacier_uv_b);
+        float glacier_detail = value_noise(vec2(local_p.x * 0.031 + local_p.y * 0.014, -local_p.x * 0.014 + local_p.y * 0.031) + vec2(53.0, 17.0));
+        float glacier_field = glacier_macro_a * 0.52 + glacier_macro_b * 0.34 + glacier_detail * 0.14;
+        float moraine_field = smoothstep(0.58, 0.82, glacier_macro_b * 0.62 + glacier_detail * 0.38);
+        final_glacial_snow_cover = clamp(
+            0.38 + north_cold * 0.24 + forefield * 0.15
+            + (glacier_field - 0.5) * 0.20
+            - moraine_field * 0.18,
+            0.30, 0.78);
+        // The source stone photograph still carried long light bands when it
+        // showed through the snow at eye level. Keep a trace of that mineral
+        // detail, but let non-repeating world fields define the exposed rock.
+        vec3 glacial_rock = mix(vec3(0.21, 0.235, 0.24), vec3(0.34, 0.36, 0.35), glacier_field);
+        glacial_rock = mix(glacial_rock, vec3(0.22, 0.255, 0.27), moraine_field * 0.30);
+        // Snow stays below display white so its shallow relief remains legible
+        // under the range's bright sky. Fine continuous fields add packed-snow
+        // grain without a texture boundary, hard threshold, or square repeat.
+        vec3 glacial_snow = mix(vec3(0.55, 0.60, 0.63), vec3(0.69, 0.73, 0.75), glacier_field);
+        float snow_grain = (grit - 0.5) * 0.052 * detail_fade + (glacier_detail - 0.5) * 0.032;
+        glacial_snow *= 1.0 + snow_grain;
+        glacial_snow = mix(glacial_snow, vec3(0.56, 0.67, 0.72), forefield * 0.12);
+        color = mix(glacial_rock, glacial_snow, final_glacial_snow_cover);
     }
     if (marcher_biome > 0.5) {
         // Continuous local-coordinate masks distinguish the Marches' loess,
@@ -2176,6 +2287,17 @@ void fragment() {
         march_color = mix(march_color, vec3(0.20, 0.27, 0.12), ember_alluvium * 0.34);
         march_color = mix(march_color, vec3(0.25, 0.23, 0.21), cinder_upland * 0.56);
         march_color = mix(march_color, vec3(0.34, 0.35, 0.23), glass_chalk * 0.48);
+        // Embercrag needs a landform-scale volcanic apron rather than dark
+        // props pasted onto ordinary grassland. Rotated macro noise warps two
+        // broad radial fades, avoiding a circular decal or a hard biome band.
+        vec2 volcanic_p = march_p + vec2((macro_field - 0.5) * 240.0, (broad - 0.5) * 190.0);
+        float volcanic_distance = distance(volcanic_p, volcanic_center);
+        float ash_apron = 1.0 - smoothstep(volcanic_radius * 0.48, volcanic_radius, volcanic_distance);
+        float basalt_core = 1.0 - smoothstep(volcanic_radius * 0.18, volcanic_radius * 0.56, volcanic_distance);
+        vec3 ash_ground = mix(stone_albedo * vec3(0.58, 0.55, 0.51), vec3(0.125, 0.118, 0.108), 0.54 + clumps * 0.20);
+        ash_ground = mix(ash_ground, vec3(0.205, 0.125, 0.070), smoothstep(0.76, 0.95, grit) * detail_fade * 0.20);
+        float volcanic_weight = ash_apron * (0.34 + basalt_core * 0.38) * mix(0.88, 1.0, stone_weight);
+        march_color = mix(march_color, ash_ground, volcanic_weight);
         color = mix(color, march_color, 0.60);
     }
     // World-scale biome colour is already authored per vertex with warped
@@ -2184,7 +2306,18 @@ void fragment() {
     float final_luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
     color = mix(vec3(final_luma), color, 0.94);
     color *= vec3(1.015, 1.01, 0.965);
+    // Bright snow made the coarse gameplay heightfield's otherwise subtle
+    // lighting facets read as giant diagonal polygons. Snow physically rounds
+    // small terrain breaks, so soften only its rendered normal toward world
+    // up. Collision, vertex height and exposed-rock slope shading are intact.
+    vec3 world_up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+    float snow_normal_smoothing = glacial_biome * (0.84 + final_glacial_snow_cover * 0.10);
+    NORMAL = normalize(mix(NORMAL, world_up_view, snow_normal_smoothing));
     ALBEDO = color;
+    // Snow receives the same world lighting as every other ground material.
+    // A previous emissive lift hid facets in a diagnostic capture but washed
+    // the playable range into a featureless white field.
+    EMISSION = vec3(0.0);
     ROUGHNESS = 0.96;
     SPECULAR = 0.08;
 }
@@ -2199,6 +2332,16 @@ void fragment() {
     var glacial_biome:=str(profile.get("biome_id",""))=="glacial_alpine"
     material.set_shader_parameter("glacial_biome",1.0 if glacial_biome else 0.0)
     material.set_shader_parameter("marcher_biome",1.0 if str(profile.get("biome_id",""))=="continental_marches" else 0.0)
+    var volcanic_center:=Vector2(100000.0,100000.0)
+    var volcanic_radius:=1.0
+    if str(profile.get("biome_id",""))=="continental_marches":
+        for site in profile.get("map_sites",[]):
+            if str(site.get("kind",""))=="volcano":
+                volcanic_center=site.get("position",Vector2(100000.0,100000.0))
+                volcanic_radius=maxf(1200.0,float(site.get("radius",170.0))*8.2)
+                break
+    material.set_shader_parameter("volcanic_center",volcanic_center)
+    material.set_shader_parameter("volcanic_radius",volcanic_radius)
     var glacier_center:=Vector2.ZERO
     var glacier_radius:=1.0
     if glacial_biome:

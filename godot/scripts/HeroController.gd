@@ -2,6 +2,7 @@ extends CharacterBody3D
 
 signal environment_damage_requested(amount: float, source: String)
 signal world_item_requested(action:String,item_id:String)
+signal swimming_changed(active:bool,water_kind:String,water_name:String)
 
 @export var walk_speed := 5.2
 @export var sprint_speed := 8.5
@@ -17,6 +18,9 @@ signal world_item_requested(action:String,item_id:String)
 @export var jump_velocity := 6.2
 @export var mounted_jump_velocity := 7.8
 @export var gravity := 17.0
+@export var swim_speed:=3.7
+@export var fast_swim_speed:=5.25
+@export var swim_waterline_offset:=0.78
 @export var safe_fall_distance := 5.0
 @export var fatal_fall_distance := 30.0
 @export var mouse_sensitivity := 0.0035
@@ -71,6 +75,7 @@ var _pitch := -0.35
 var _height_sampler: Callable
 var _walkable_sampler: Callable
 var _structure_height_sampler: Callable
+var _water_state_sampler:Callable
 var _spawn_position := Vector3.ZERO
 var _input_enabled := true
 var _current_move_speed := 0.0
@@ -108,6 +113,10 @@ var _mount_original_parent:Node
 var _camera_pivot_base_position:=Vector3.ZERO
 var _spring_arm_base_length:=0.0
 var _visual_base_position:=Vector3.ZERO
+var _is_swimming:=false
+var _swim_damage_elapsed:=0.0
+var _swim_water_kind:=""
+var _swim_water_name:=""
 
 
 func _ready() -> void:
@@ -134,10 +143,11 @@ func _ready() -> void:
     _equip_loadout_item("royal_vanguard_shield", "offhand")
 
 
-func configure_world(height_sampler: Callable, spawn_position: Vector3, walkable_sampler: Callable = Callable(), structure_height_sampler: Callable = Callable()) -> void:
+func configure_world(height_sampler: Callable, spawn_position: Vector3, walkable_sampler: Callable = Callable(), structure_height_sampler: Callable = Callable(), water_state_sampler:Callable=Callable()) -> void:
     _height_sampler = height_sampler
     _walkable_sampler = walkable_sampler
     _structure_height_sampler = structure_height_sampler
+    _water_state_sampler=water_state_sampler
     _spawn_position = spawn_position
     _climbable_ladders.clear()
     _active_ladder=null
@@ -146,6 +156,7 @@ func configure_world(height_sampler: Callable, spawn_position: Vector3, walkable
 
 func teleport_to_surface(destination:Vector3)->void:
     set_interior_mode(false)
+    _set_swimming(false)
     global_position=destination
     velocity=Vector3.ZERO
     _vertical_velocity=0.0
@@ -175,6 +186,7 @@ func set_interior_mode(enabled: bool) -> void:
     _vertical_velocity = 0.0
     _is_airborne = false
     _fall_peak_y = global_position.y
+    if enabled:_set_swimming(false)
 
 
 func is_interior_mode()->bool:return _interior_mode
@@ -279,15 +291,23 @@ func _process(delta: float) -> void:
         return
     if not _input_enabled:
         return
-    if is_warrior():
-        stamina=minf(max_stamina,stamina+18.0*delta)
     # Surface teleports must never retain dungeon floor mode. A stale interior
     # flag made the current Y position become its own "ground", which explains
     # both falling through Crownspire outskirts and repeated skyward jumping.
     if _interior_mode and global_position.x<7000.0:
         set_interior_mode(false)
 
+    var water_state:=_sample_water_state(global_position)
+    var should_swim:=_water_state_is_swimmable(water_state)
+    if should_swim!=_is_swimming:_set_swimming(should_swim,water_state)
+    if not _is_swimming and is_warrior():
+        stamina=minf(max_stamina,stamina+18.0*delta)
     var input_dir := _get_input_vector()
+    if _is_swimming:
+        _process_swimming(delta,input_dir,water_state)
+        _jump_was_down=Input.is_key_pressed(KEY_SPACE)
+        _roll_was_down=Input.is_key_pressed(KEY_CTRL)
+        return
     _ladder_release_time=maxf(0.0,_ladder_release_time-delta)
     if not _mounted and _try_climb_ladder(delta,input_dir):
         return
@@ -340,6 +360,12 @@ func _process(delta: float) -> void:
         var next_position: Vector3 = global_position + travel_dir * travel_speed * delta
         var step_motion:=Vector3(next_position.x-global_position.x,0.0,next_position.z-global_position.z)
         var is_walkable: bool = _interior_mode or not _walkable_sampler.is_valid() or bool(_walkable_sampler.call(next_position.x, next_position.z))
+        if _mounted:
+            var next_water:=_sample_water_state(next_position)
+            if bool(next_water.get("in_water",false)) and float(next_water.get("depth",0.0))>1.18:
+                # Horses can wade along a shallow margin but cannot use the
+                # submerged riverbed as a road or walk out into the Grey Sea.
+                is_walkable=false
         if is_walkable:
             var blocked := test_move(global_transform, step_motion)
             if blocked:
@@ -394,6 +420,82 @@ func _process(delta: float) -> void:
         global_position = _resolve_ground_position(_spawn_position)
         _vertical_velocity = 0.0
         _is_airborne = false
+
+
+func _sample_water_state(position:Vector3)->Dictionary:
+    if not _water_state_sampler.is_valid():return {}
+    var result:Variant=_water_state_sampler.call(position.x,position.z)
+    return result if result is Dictionary else {}
+
+
+func _water_state_is_swimmable(state:Dictionary)->bool:
+    if _interior_mode or _mounted or not bool(state.get("in_water",false)):return false
+    var surface_y:=float(state.get("surface_y",-INF))
+    return float(state.get("depth",0.0))>=.92 and global_position.y<=surface_y+.38
+
+
+func _set_swimming(enabled:bool,state:Dictionary={})->void:
+    if _is_swimming==enabled:return
+    _is_swimming=enabled
+    _roll_time=0.0
+    _vertical_velocity=0.0
+    _is_airborne=false
+    _swim_damage_elapsed=0.0
+    if enabled:
+        _swim_water_kind=str(state.get("kind","water"))
+        _swim_water_name=str(state.get("name","Open water"))
+    else:
+        _swim_water_kind=""
+        _swim_water_name=""
+        if _height_sampler.is_valid() and is_inside_tree():global_position=_resolve_ground_position(global_position)
+    if is_instance_valid(_visual) and _visual.has_method("set_swimming"):_visual.set_swimming(enabled)
+    swimming_changed.emit(enabled,_swim_water_kind,_swim_water_name)
+
+
+func _process_swimming(delta:float,input_dir:Vector2,state:Dictionary)->void:
+    var move_basis:=Basis(Vector3.UP,_yaw)
+    var input_move:Vector3=(move_basis*Vector3(input_dir.x,0.0,input_dir.y)).normalized()
+    var has_input:=input_move.length_squared()>.001
+    var fast:=has_input and Input.is_key_pressed(KEY_SHIFT) and stamina>0.0
+    var target_speed:=(fast_swim_speed if fast else swim_speed) if has_input else 0.0
+    var swim_acceleration:float=acceleration*.62 if target_speed>_current_move_speed else deceleration*.72
+    _current_move_speed=move_toward(_current_move_speed,target_speed,swim_acceleration*delta)
+    if has_input:
+        _last_move_dir=input_move
+        _turn_visual_toward(input_move,delta*.72)
+    var flow_2d:Vector2=state.get("flow_direction",Vector2.ZERO)
+    var flow_strength:=float(state.get("flow_strength",0.0))
+    var motion:=input_move*_current_move_speed*delta+Vector3(flow_2d.x,0.0,flow_2d.y)*flow_strength*delta
+    if motion.length_squared()>.000001 and not test_move(global_transform,Vector3(motion.x,0.0,motion.z)):
+        global_position.x+=motion.x
+        global_position.z+=motion.z
+    var updated_state:=_sample_water_state(global_position)
+    if bool(updated_state.get("in_water",false)):state=updated_state
+    var surface_y:=float(state.get("surface_y",global_position.y+swim_waterline_offset))
+    var bob:=sin(Time.get_ticks_msec()*.0048)*.035
+    global_position.y=move_toward(global_position.y,surface_y-swim_waterline_offset+bob,3.4*delta)
+    if is_instance_valid(_visual):
+        if _visual.has_method("set_move_blend"):_visual.set_move_blend(.82 if has_input else .22)
+        if _visual.has_method("set_movement_speed"):_visual.set_movement_speed(_current_move_speed)
+    var kind:=str(state.get("kind","river"))
+    var drain:=1.55 if kind=="pond" else 2.35
+    if kind=="ocean":drain=8.5+flow_strength*1.15
+    if fast:drain+=4.0 if kind=="ocean" else 2.5
+    stamina=maxf(0.0,stamina-drain*delta)
+    if stamina<=0.0:
+        _swim_damage_elapsed+=delta
+        if _swim_damage_elapsed>=1.0:
+            _swim_damage_elapsed-=1.0
+            environment_damage_requested.emit(12.0 if kind=="ocean" else 6.0,"ocean_exhaustion" if kind=="ocean" else "drowning")
+    else:
+        _swim_damage_elapsed=0.0
+
+
+func is_swimming()->bool:return _is_swimming
+
+
+func get_water_traversal_state()->Dictionary:
+    return {"swimming":_is_swimming,"kind":_swim_water_kind,"name":_swim_water_name,"stamina":stamina}
 
 
 func _start_jump() -> void:
@@ -522,6 +624,7 @@ func _start_roll(direction:Vector3)->void:
 
 func _begin_death()->void:
     if _mounted:dismount_horse()
+    _set_swimming(false)
     _dead=true;_death_time=2.75;_input_enabled=false;_roll_time=0.0;_vertical_velocity=0.0
     if _visual.has_method("play_death"):_visual.play_death()
 
@@ -530,6 +633,7 @@ func _respawn_after_death()->void:
     hp=max_hp;mana=max_mana;stamina=max_stamina;_dead=false;_input_enabled=true
     set_interior_mode(false);global_position=_resolve_ground_position(_spawn_position)
     _active_ladder=null;_released_ladder=null
+    _set_swimming(false)
     _fall_peak_y=global_position.y
     if _visual.has_method("reset_death"):_visual.reset_death()
 

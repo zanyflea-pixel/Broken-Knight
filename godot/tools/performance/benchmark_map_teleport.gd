@@ -81,5 +81,9 @@ func _run()->void:
     print("MAP_TELEPORT_BUDGET|%s|worst_protected_ms=%.2f|worst_first_unpaused_ms=%.2f|limit_ms=34.0"%[
         "PASS" if passed else "FAIL",worst_protected,worst_first_frame,
     ])
+    # Give queued renderer/resource cleanup a pair of main-loop turns. Calling
+    # free() and quit() back-to-back made the dummy renderer report false RID
+    # leaks even though the runtime test itself had completed cleanly.
     main.free()
+    for _cleanup_frame in range(8):await process_frame
     quit(0 if passed else 1)

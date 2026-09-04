@@ -11,8 +11,18 @@ func _capture()->void:
     root.add_child(main)
     await main.boot_world(Callable(),false,true)
     var world_map:=main.get_node("UI/WorldMap") as Control
+    var player:=main.get_node("Player") as Node3D
+    var x_raw:=OS.get_environment("BROKEN_KNIGHT_MAP_CAPTURE_X")
+    var z_raw:=OS.get_environment("BROKEN_KNIGHT_MAP_CAPTURE_Z")
+    if not x_raw.is_empty() and not z_raw.is_empty():
+        var capture_point:=Vector2(float(x_raw),float(z_raw))
+        player.global_position=main._sample_global_height(capture_point.x,capture_point.y)+Vector3.UP*.08
     main.get_node("UI/OldHud").visible=false
     main.get_node("UI/Minimap").visible=false
+    var requested_scale:=OS.get_environment("BROKEN_KNIGHT_MAP_CAPTURE_SCALE").strip_edges().to_lower()
+    if requested_scale=="local":world_map.call("_set_map_scale",0)
+    elif requested_scale=="world":world_map.call("_set_map_scale",2)
+    else:world_map.call("_set_map_scale",1)
     world_map.visible=true
     # Let the asynchronous 512px terrain survey finish. Cached launches skip
     # this loop and make repeat visual inspections nearly immediate.
@@ -39,4 +49,7 @@ func _capture()->void:
     if not terrain_output.is_empty():
         print("WORLD_MAP_TERRAIN_BAKE|output=%s|error=%d"%[terrain_output,terrain_error])
     main.free()
+    for _cleanup_frame in range(6):
+        await process_frame
+        if DisplayServer.get_name().to_lower()!="headless":await RenderingServer.frame_post_draw
     quit(0 if error==OK and terrain_error==OK else 1)

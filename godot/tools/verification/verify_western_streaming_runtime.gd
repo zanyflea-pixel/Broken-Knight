@@ -27,11 +27,19 @@ func _run()->void:
     var start_result:Dictionary=starting.get("result",{})
     var west_result:Dictionary=western.get("result",{})
     var maximum_gap:=0.0
+    var maximum_gap_z:=0.0
+    var maximum_gap_start_height:=0.0
+    var maximum_gap_west_height:=0.0
     for sample_index in range(129):
         var z:=lerpf(-3600.0,3600.0,float(sample_index)/128.0)
         var start_height:float=start_result.terrain_height_sampler.call(-3600.0,z).y
         var west_height:float=west_result.terrain_height_sampler.call(3600.0,z).y
-        maximum_gap=maxf(maximum_gap,absf(start_height-west_height))
+        var gap:=absf(start_height-west_height)
+        if gap>maximum_gap:
+            maximum_gap=gap
+            maximum_gap_z=z
+            maximum_gap_start_height=start_height
+            maximum_gap_west_height=west_height
     if maximum_gap>.015:failures.append("Runtime western boundary has a %.4fm terrain crack"%maximum_gap)
     var crossing_point:=Vector2(-3600.0,-400.0)
     if not bool(main._sample_global_walkable(crossing_point.x,crossing_point.y)):failures.append("Western road crossing still has an invisible traversal wall")
@@ -115,16 +123,16 @@ func _run()->void:
     var atlas:Dictionary=main.get("_world_atlas_profile")
     var extent:Vector2=atlas.get("map_extent",Vector2.ZERO)
     var center:Vector2=atlas.get("map_center",Vector2.ZERO)
-    if extent.distance_to(Vector2(14400,21600))>.1:failures.append("Four-region atlas extent is not 14400 x 21600")
-    if center.distance_to(Vector2(-3600,-7200))>.1:failures.append("Four-region atlas center is incorrect")
+    if extent.distance_to(Vector2(21600,21600))>.1:failures.append("Seven-region atlas extent is not 21600 x 21600")
+    if center.distance_to(Vector2(0,-7200))>.1:failures.append("Seven-region atlas center is incorrect")
     var region_ids:Array=[]
     for summary in atlas.get("region_summaries",[]):region_ids.append(str(summary.get("zone_id","")))
     if "western_reaches" not in region_ids:failures.append("Western Reaches is absent from map region summaries")
     var oakrest_count:int=atlas.get("town_sites",[]).filter(func(site:Dictionary)->bool:return str(site.get("name",""))=="Oakrest").size()
     if oakrest_count!=1:failures.append("Oakrest appears %d times in the world map settlement layer"%oakrest_count)
 
-    print("WESTERN_STREAMING_RUNTIME|ready=%s|gap=%.5f|road_gap=%.3f|walkable=%s|active_return=%s|atlas=%dx%d|failures=%d"%[
-        str(bool(main.get("_western_region_ready"))).to_lower(),maximum_gap,
+    print("WESTERN_STREAMING_RUNTIME|ready=%s|gap=%.5f@gap_z=%.1f:start=%.3f:west=%.3f|road_gap=%.3f|walkable=%s|active_return=%s|atlas=%dx%d|failures=%d"%[
+        str(bool(main.get("_western_region_ready"))).to_lower(),maximum_gap,maximum_gap_z,maximum_gap_start_height,maximum_gap_west_height,
         road_gap,str(bool(main._sample_global_walkable(crossing_point.x,crossing_point.y))).to_lower(),str(main.get("_active_zone_id")),
         roundi(extent.x),roundi(extent.y),failures.size(),
     ])

@@ -196,9 +196,64 @@ func configure(hero: CharacterBody3D, height_call: Callable, walkable_call: Call
 
 
 func configure_streamed(hero:CharacterBody3D,height_call:Callable,walkable_call:Callable,world_profile:Dictionary={})->void:
+    # A map teleport is already protected by the paused opaque survey. Build
+    # the destination's gameplay services synchronously there so frame-slicing
+    # does not turn a hidden 100-200 ms setup into several seconds of waiting.
+    if get_tree().paused:
+        configure(hero,height_call,walkable_call,world_profile)
+        return
     _begin_configuration(hero,height_call,walkable_call,world_profile)
     var configure_started_usec:int=Time.get_ticks_usec()
     for stage_index in range(get_configuration_stage_count()):
+        if stage_index==0:
+            # Enemy scenes and wildlife are independent populations. Creating
+            # both in one crossing frame produced the largest gameplay-service
+            # hitch, so give each population its own frame during seamless
+            # outdoor transitions.
+            await get_tree().process_frame
+            var encounter_started_usec:=Time.get_ticks_usec()
+            await _build_region_encounters_streamed()
+            _profile_configure_step("enemy_encounters",configure_started_usec,encounter_started_usec)
+            await get_tree().process_frame
+            var wildlife_started_usec:=Time.get_ticks_usec()
+            _build_region_wildlife()
+            _profile_configure_step("wildlife",configure_started_usec,wildlife_started_usec)
+            continue
+        if stage_index==2:
+            await get_tree().process_frame
+            var dungeon_started_usec:=Time.get_ticks_usec()
+            await _build_dungeon_network_streamed()
+            _profile_configure_step("dungeons",configure_started_usec,dungeon_started_usec)
+            continue
+        if stage_index==3:
+            await get_tree().process_frame
+            var grave_campaign_started_usec:=Time.get_ticks_usec()
+            _gravebound_campaign=GRAVEBOUND_CAMPAIGN_SCRIPT.new()
+            add_child(_gravebound_campaign)
+            _gravebound_campaign.configure(self,player,profile)
+            _profile_configure_step("gravebound_campaign",configure_started_usec,grave_campaign_started_usec)
+            await get_tree().process_frame
+            var oath_campaign_started_usec:=Time.get_ticks_usec()
+            _oathbound_campaign=OATHBOUND_CAMPAIGN_SCRIPT.new()
+            add_child(_oathbound_campaign)
+            _oathbound_campaign.configure(self,player,profile)
+            _profile_configure_step("oathbound_campaign",configure_started_usec,oath_campaign_started_usec)
+            continue
+        if stage_index==4:
+            var gathering_steps:Array[Callable]=[
+                Callable(self,"_build_crafting_stations"),Callable(self,"_scatter_gathering_nodes"),Callable(self,"_build_fishing_spots"),
+                Callable(self,"_register_house_doors"),Callable(self,"_build_zone_exits"),Callable(self,"_build_region_discovery_sites"),
+            ]
+            var gathering_labels:Array[String]=["crafting_stations","gathering_nodes","fishing_spots","house_doors","zone_exits","discovery_sites"]
+            for gathering_index in range(gathering_steps.size()):
+                await get_tree().process_frame
+                var gathering_started_usec:=Time.get_ticks_usec()
+                gathering_steps[gathering_index].call()
+                _profile_configure_step(gathering_labels[gathering_index],configure_started_usec,gathering_started_usec)
+            continue
+        if stage_index==7:
+            await _batch_static_service_geometry_streamed()
+            continue
         await get_tree().process_frame
         var step_started_usec:int=Time.get_ticks_usec()
         run_configuration_stage(stage_index)
@@ -283,28 +338,49 @@ func _build_region_encounters()->void:
         return
     for site_index in range(authored.size()):
         var site:Dictionary=authored[site_index]
-        var center:Vector2=site.get("position",Vector2.ZERO)
         var count:=clampi(int(site.get("count",3)),1,8)
-        var radius:=maxf(8.0,float(site.get("radius",36.0)))
-        var rank:=maxi(1,int(site.get("rank",int(profile.get("danger_tier",1)))))
-        var enemy_kind:=str(site.get("enemy","imp"))
         for member in range(count):
-            var angle:=float(member)*TAU/float(count)+float(site_index)*1.117
-            var distance:=radius*(.34+.45*float((member*5+site_index)%7)/6.0)
-            var point:=center+Vector2(cos(angle),sin(angle))*distance
-            var position:=Vector3(point.x,0.0,point.y)
-            if _inside_safe_zone(position):continue
-            match enemy_kind:
-                "ashfang":_spawn_ashfang(0.0,angle,member>0,position,rank)
-                "bramble_wraith":_spawn_bramble_wraith(0.0,angle,position,rank)
-                "frost_troll":_spawn_frost_troll(position,rank,member)
-                "rimecrawler":_spawn_rimecrawler(position,rank,member)
-                "ashscale_basilisk":_spawn_ashscale_basilisk(position,rank,member)
-                "gravebound":
-                    var variants:Array[String]=["runner","common","graveguard","carrier"]
-                    _spawn_zombie(point,variants[member%variants.size()],str(site.get("name","regional_patrol")))
-                    _scale_latest_region_enemy(rank)
-                _:_spawn_minion(0.0,angle,position,rank)
+            _build_region_encounter_member(site,site_index,member,count)
+
+
+func _build_region_encounters_streamed()->void:
+    var authored:Array=profile.get("encounter_sites",[])
+    if authored.is_empty():
+        _build_region_encounters()
+        return
+    var members_since_yield:=0
+    for site_index in range(authored.size()):
+        var site:Dictionary=authored[site_index]
+        var count:=clampi(int(site.get("count",3)),1,8)
+        for member in range(count):
+            _build_region_encounter_member(site,site_index,member,count)
+            members_since_yield+=1
+            if members_since_yield>=2:
+                members_since_yield=0
+                await get_tree().process_frame
+
+
+func _build_region_encounter_member(site:Dictionary,site_index:int,member:int,count:int)->void:
+    var center:Vector2=site.get("position",Vector2.ZERO)
+    var radius:=maxf(8.0,float(site.get("radius",36.0)))
+    var rank:=maxi(1,int(site.get("rank",int(profile.get("danger_tier",1)))))
+    var enemy_kind:=str(site.get("enemy","imp"))
+    var angle:=float(member)*TAU/float(count)+float(site_index)*1.117
+    var distance:=radius*(.34+.45*float((member*5+site_index)%7)/6.0)
+    var point:=center+Vector2(cos(angle),sin(angle))*distance
+    var position:=Vector3(point.x,0.0,point.y)
+    if _inside_safe_zone(position):return
+    match enemy_kind:
+        "ashfang":_spawn_ashfang(0.0,angle,member>0,position,rank)
+        "bramble_wraith":_spawn_bramble_wraith(0.0,angle,position,rank)
+        "frost_troll":_spawn_frost_troll(position,rank,member)
+        "rimecrawler":_spawn_rimecrawler(position,rank,member)
+        "ashscale_basilisk":_spawn_ashscale_basilisk(position,rank,member)
+        "gravebound":
+            var variants:Array[String]=["runner","common","graveguard","carrier"]
+            _spawn_zombie(point,variants[member%variants.size()],str(site.get("name","regional_patrol")))
+            _scale_latest_region_enemy(rank)
+        _:_spawn_minion(0.0,angle,position,rank)
 
 
 func _build_region_wildlife()->void:
@@ -803,7 +879,39 @@ func get_story_map_markers()->Array[Dictionary]:
         result.append_array(_oathbound_campaign.get_map_markers())
     if is_instance_valid(_gravebound_campaign) and _gravebound_campaign.has_method("get_map_markers"):
         result.append_array(_gravebound_campaign.get_map_markers())
+    var primary:=get_primary_story_objective()
+    var primary_position:Vector3=primary.get("position",Vector3(INF,INF,INF))
+    var matched_primary:=false
+    for marker_index in range(result.size()):
+        var marker:Dictionary=result[marker_index]
+        var marker_position:Vector3=marker.get("position",Vector3.ZERO)
+        var is_primary:=not primary.is_empty() and str(marker.get("kind",""))=="story_objective" and Vector2(marker_position.x,marker_position.z).distance_to(Vector2(primary_position.x,primary_position.z))<2.0
+        marker["primary"]=is_primary
+        if is_primary:
+            marker["quest_title"]=str(primary.get("quest_title","Active objective"))
+            matched_primary=true
+        result[marker_index]=marker
+    if not primary.is_empty() and not matched_primary:result.append(primary)
     return result
+
+
+func get_primary_story_objective()->Dictionary:
+    # Only one objective receives strong navigation treatment. Side-story
+    # sites remain discoverable on the survey, but they do not become a field
+    # of competing gold dots or multiple edge arrows on the minimap.
+    for quest_value in get_quest_state():
+        if not quest_value is Dictionary:continue
+        var quest:Dictionary=quest_value
+        if not bool(quest.get("available",true)) or bool(quest.get("claimed",false)):continue
+        if not quest.has("objective_position"):continue
+        var objective:Vector2=quest.get("objective_position",Vector2.ZERO)
+        return {
+            "kind":"story_objective","primary":true,"discovered":true,
+            "name":str(quest.get("description",quest.get("title","Active objective"))),
+            "quest_title":str(quest.get("title","Active objective")),
+            "position":Vector3(objective.x,0.0,objective.y),
+        }
+    return {}
 
 
 func get_map_service_markers()->Array[Dictionary]:
@@ -1736,7 +1844,11 @@ func _animate_wildlife(animal:Dictionary,moving:bool,speed:float)->void:
     var species:=str(animal.get("species","deer"))
     var phase:=float(animal.get("phase",0.0))*(8.5 if moving else 2.0)*(1.0+speed*.06)
     var swing:=sin(phase)*(.48 if moving else .035)
-    var names:Array[String]=["FrontLegL","FrontLegR","RearLegL","RearLegR"] if species!="grouse" else ["LegL","LegR"]
+    var names:Array[String]=[]
+    if species=="grouse":
+        names.assign(["LegL","LegR"])
+    else:
+        names.assign(["FrontLegL","FrontLegR","RearLegL","RearLegR"])
     for index in range(names.size()):
         var pivot:=visual.find_child(names[index],true,false) as Node3D
         if pivot:pivot.rotation.x=swing*(-1.0 if index%2==0 else 1.0)
@@ -2322,7 +2434,10 @@ func _register_rideable_horses()->void:
         var horse:=horse_value as Node3D
         var horse_name:=str(horse.get_meta("horse_name","Riverwatch Courser"))
         _interactables.append({
-            "action":"mount_horse","position":horse.global_position,"radius":1.8,
+            # The stable rail keeps the player a little away from the model's
+            # origin. A 1.8 m sphere made a visible horse effectively
+            # unreachable from the aisle even though mounting itself worked.
+            "action":"mount_horse","position":horse.global_position,"radius":4.5,
             "label":"Ride %s"%horse_name,"node":horse,
             "active":not bool(horse.get_meta("mounted",false)),
         })
@@ -2351,6 +2466,21 @@ func _batch_static_service_geometry()->void:
     # boxes, but their visuals do not need one draw call per wall or floor
     # piece. Batch static BoxMesh visuals inside each streamed top-level root;
     # doors, chests, secret walls, enemies and other moving nodes stay separate.
+    var dynamic_roots:=_collect_dynamic_service_roots()
+    for child in get_children():
+        if child is Node3D and not dynamic_roots.has(child.get_instance_id()):
+            _batch_static_service_boxes(child as Node3D,dynamic_roots)
+
+
+func _batch_static_service_geometry_streamed()->void:
+    var dynamic_roots:=_collect_dynamic_service_roots()
+    for child in get_children():
+        if child is Node3D and not dynamic_roots.has(child.get_instance_id()):
+            _batch_static_service_boxes(child as Node3D,dynamic_roots)
+            await get_tree().process_frame
+
+
+func _collect_dynamic_service_roots()->Dictionary:
     var dynamic_roots:Dictionary={}
     for enemy in minions:
         var enemy_node:=enemy.get("node") as Node
@@ -2362,9 +2492,7 @@ func _batch_static_service_geometry()->void:
     for interaction in _interactables:
         var interaction_node:=interaction.get("node") as Node
         if is_instance_valid(interaction_node):dynamic_roots[interaction_node.get_instance_id()]=true
-    for child in get_children():
-        if child is Node3D and not dynamic_roots.has(child.get_instance_id()):
-            _batch_static_service_boxes(child as Node3D,dynamic_roots)
+    return dynamic_roots
 
 
 func _batch_static_service_boxes(scope:Node3D,dynamic_roots:Dictionary)->void:
@@ -2492,11 +2620,19 @@ func _configure_local_prop_collisions()->void:
 
 func _world_population_roots(world_root:Node,root_names:Array[String])->Array[Node]:
     var result:Array[Node]=[]
-    for root_name in root_names:
-        var direct:=world_root.get_node_or_null(root_name)
-        if direct!=null:result.append(direct)
+    var active_zone:=str(profile.get("zone_id","starting_realm"))
+    if active_zone=="starting_realm":
+        for root_name in root_names:
+            var direct:=world_root.get_node_or_null(root_name)
+            if direct!=null:result.append(direct)
     var streamed_regions:=world_root.get_node_or_null("StreamedRegions")
-    if streamed_regions!=null:
+    if streamed_regions!=null and active_zone!="starting_realm":
+        var active_region:=streamed_regions.get_node_or_null(active_zone.to_pascal_case())
+        if active_region==null:return result
+        for root_name in root_names:
+            var nested:=active_region.get_node_or_null(root_name)
+            if nested!=null:result.append(nested)
+    elif streamed_regions!=null and active_zone.is_empty():
         for region in streamed_regions.get_children():
             for root_name in root_names:
                 var nested:=region.get_node_or_null(root_name)
@@ -2749,15 +2885,40 @@ func _activate_world_rock(rock:Dictionary)->void:
     var ground:Vector3=rock.get("ground_position",rock.get("position",Vector3.ZERO))
     var ore_name:String=rock.get("ore_name","Iron Ore")
     var ore_color:Color=rock.get("ore_color",Color(.35,.37,.38))
+    _spawn_authored_depleted_rock(rock)
     _spawn_mined_rock_break(ground,float(rock.get("scale",3.0)),ore_color)
     _spawn_world_drop(ground+Vector3(-.7,0,.2),{"kind":"material","material":"ore","amount":1,"name":ore_name,"ore_color":ore_color})
     _spawn_world_drop(ground+Vector3(.75,0,-.25),{"kind":"material","material":"stone","amount":1,"name":"Broken Stone"})
     _notify("Rock broken - pick up the ore and stone with E",Color(.74,1.0,.58))
     get_tree().create_timer(150.0).timeout.connect(func():
+        _remove_authored_depleted_rock(rock)
         rock.hits=0
         rock.active=true
         _set_world_rock_visible(rock,true)
         _refresh_local_prop_collisions(true))
+
+
+func _spawn_authored_depleted_rock(rock:Dictionary)->void:
+    _remove_authored_depleted_rock(rock)
+    var depleted_mesh:=rock.get("depleted_mesh") as Mesh
+    if depleted_mesh==null:return
+    var remnant:=MeshInstance3D.new()
+    remnant.name="%sDepletedRemnant"%str(rock.get("ore_id","ore")).to_pascal_case()
+    remnant.mesh=depleted_mesh
+    remnant.visibility_range_end=900.0
+    remnant.visibility_range_end_margin=72.0
+    remnant.visibility_range_fade_mode=GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    remnant.set_meta("mineable_depleted_state",true)
+    remnant.set_meta("ore_id",str(rock.get("ore_id","iron")))
+    add_child(remnant)
+    remnant.global_transform=rock.get("depleted_transform",Transform3D(Basis.IDENTITY,rock.get("ground_position",Vector3.ZERO)))
+    rock["depleted_node"]=remnant
+
+
+func _remove_authored_depleted_rock(rock:Dictionary)->void:
+    var remnant:=rock.get("depleted_node") as Node
+    if is_instance_valid(remnant):remnant.queue_free()
+    rock.erase("depleted_node")
 
 
 func _spawn_mined_rock_break(position:Vector3,rock_scale:float,ore_color:Color=Color(.35,.37,.38))->void:
@@ -3201,7 +3362,10 @@ func apply_environment_damage(amount:float,source:String="environment")->void:
     _damage_player(amount)
     var applied:=maxf(0.0,before-player.hp)
     if applied<=0.0:return
-    if player.hp<=0.0 or source=="fatal_fall":
+    if source in ["drowning","ocean_exhaustion"]:
+        var message:="The Grey Sea took you." if player.hp<=0.0 and source=="ocean_exhaustion" else ("You drowned." if player.hp<=0.0 else ("The sea current is exhausting you!" if source=="ocean_exhaustion" else "You are too exhausted to stay afloat!"))
+        notification_requested.emit(message,Color(0.38,0.70,1.0))
+    elif player.hp<=0.0 or source=="fatal_fall":
         notification_requested.emit("The fall was fatal.",Color(0.95,0.25,0.18))
     else:
         notification_requested.emit("Fall damage  -%d"%roundi(applied),Color(1.0,0.58,0.20))
@@ -3386,23 +3550,26 @@ func _add_cave_mouth_darkness(cave:Node3D,z_position:float)->void:
 
 
 func _build_dungeon_network()->void:
+    var layout:=_dungeon_network_layout()
+    for phase in range(5):_build_dungeon_network_phase(phase,layout)
+
+
+func _build_dungeon_network_streamed()->void:
+    var layout:=_dungeon_network_layout()
+    for phase in range(5):
+        _build_dungeon_network_phase(phase,layout)
+        await get_tree().process_frame
+
+
+func _dungeon_network_layout()->Dictionary:
     _portals.clear()
     var spawn2:Vector2=profile.get("spawn_site",{}).get("position",Vector2.ZERO)
     var well2:=spawn2+Vector2(-34.0,30.0)
     var well_ground:=_ground(Vector3(well2.x,0,well2.y))
-    _build_surface_dungeon_well(well_ground)
-
     var well_base:=Vector3(8000.0,-82.0,0.0)
     var west_base:=Vector3(8200.0,-96.0,0.0)
     var east_base:=Vector3(8420.0,-112.0,0.0)
-    _build_well_dungeon(well_base)
-    _build_cavern_dungeon(west_base,3,"WEST CAVERN")
-    _build_cavern_dungeon(east_base,4,"EAST CAVERN")
-
     var well_entry:=well_base+Vector3(0,.12,58.0)
-    _register_portal(well_ground,well_entry,"Climb down the well",true,4.7)
-    _register_portal(well_entry,well_ground+Vector3(0,.18,5.2),"Climb back to Riverwatch",false,4.0)
-
     # Use the carved tunnel floor elevation, not the lowered heightfield below
     # it; otherwise the 3D interaction radius can sit many units under the hero.
     var west_mouth:=_ground(Vector3(-2700.0,0,1700.0))
@@ -3414,12 +3581,28 @@ func _build_dungeon_network()->void:
     var east_surface:=Vector3(2620.0,east_mouth.y+.2,-1812.0)
     var west_entry:=west_base+Vector3(0,.12,88.0)
     var east_entry:=east_base+Vector3(0,.12,88.0)
-    _register_portal(west_surface,west_entry,"Enter the West Cavern - Rank III",true,22.0,true,true,12.5)
-    _register_portal(east_surface,east_entry,"Enter the East Cavern - Rank IV",true,22.0,true,true,12.5)
-    _register_portal(west_entry,_ground(Vector3(-2700.0,0,1692.0)),"Return to the mountainside",false,4.2)
-    _register_portal(east_entry,_ground(Vector3(2620.0,0,-1792.0)),"Return to the mountainside",false,4.2)
-    _add_portal_marker(Vector3(-2700.0,west_mouth.y+.2,1702.0),"WEST CAVERN - RANK III\nWALK INSIDE OR PRESS E")
-    _add_portal_marker(Vector3(2620.0,east_mouth.y+.2,-1802.0),"EAST CAVERN - RANK IV\nWALK INSIDE OR PRESS E")
+    return {
+        "well_ground":well_ground,"well_base":well_base,"west_base":west_base,"east_base":east_base,
+        "well_entry":well_entry,"west_mouth":west_mouth,"east_mouth":east_mouth,
+        "west_surface":west_surface,"east_surface":east_surface,"west_entry":west_entry,"east_entry":east_entry,
+    }
+
+
+func _build_dungeon_network_phase(phase:int,layout:Dictionary)->void:
+    match phase:
+        0:_build_surface_dungeon_well(layout.well_ground)
+        1:_build_well_dungeon(layout.well_base)
+        2:_build_cavern_dungeon(layout.west_base,3,"WEST CAVERN")
+        3:_build_cavern_dungeon(layout.east_base,4,"EAST CAVERN")
+        4:
+            _register_portal(layout.well_ground,layout.well_entry,"Climb down the well",true,4.7)
+            _register_portal(layout.well_entry,layout.well_ground+Vector3(0,.18,5.2),"Climb back to Riverwatch",false,4.0)
+            _register_portal(layout.west_surface,layout.west_entry,"Enter the West Cavern - Rank III",true,22.0,true,true,12.5)
+            _register_portal(layout.east_surface,layout.east_entry,"Enter the East Cavern - Rank IV",true,22.0,true,true,12.5)
+            _register_portal(layout.west_entry,_ground(Vector3(-2700.0,0,1692.0)),"Return to the mountainside",false,4.2)
+            _register_portal(layout.east_entry,_ground(Vector3(2620.0,0,-1792.0)),"Return to the mountainside",false,4.2)
+            _add_portal_marker(Vector3(-2700.0,layout.west_mouth.y+.2,1702.0),"WEST CAVERN - RANK III\nWALK INSIDE OR PRESS E")
+            _add_portal_marker(Vector3(2620.0,layout.east_mouth.y+.2,-1802.0),"EAST CAVERN - RANK IV\nWALK INSIDE OR PRESS E")
 
 
 func _register_portal(position:Vector3,destination:Vector3,label:String,interior:bool,radius:float,horizontal:bool=false,auto_enter:bool=false,auto_radius:float=0.0)->void:
@@ -3797,6 +3980,22 @@ func _tick_vendor()->void:
             nearby_vendor="E - %s"%_nearby_portal.get("label","Enter")
             return
     var closest_interaction:=INF
+    # Also discover horses directly from their persistent group. This keeps E
+    # mounting reliable if a baked stable finishes entering the tree after a
+    # gameplay registry refresh or a future region streams in nearby.
+    for horse_value in get_tree().get_nodes_in_group("rideable_horse"):
+        if not horse_value is Node3D:continue
+        var horse:=horse_value as Node3D
+        if bool(horse.get_meta("mounted",false)):continue
+        var horse_delta:=horse.global_position-player.global_position
+        var horse_distance:=Vector2(horse_delta.x,horse_delta.z).length_squared()+horse_delta.y*horse_delta.y*.16
+        if horse_distance<=4.5*4.5 and horse_distance<closest_interaction:
+            closest_interaction=horse_distance
+            _nearby_interactable={
+                "action":"mount_horse","position":horse.global_position,"radius":4.5,
+                "label":"Ride %s"%str(horse.get_meta("horse_name","Riverwatch Courser")),
+                "node":horse,"active":true,
+            }
     for interaction in _interactables:
         if str(interaction.get("action",""))=="mount_horse":
             var interaction_horse:=interaction.get("node") as Node3D

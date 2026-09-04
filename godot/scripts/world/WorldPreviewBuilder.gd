@@ -20,6 +20,9 @@ const WESTERN_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/west
 const STORMBREAK_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/stormbreak_environment_kit_v1.glb")
 const SKELD_COAST_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/skeld_coast_environment_kit_v1.glb")
 const EASTERN_MARCHES_ENVIRONMENT_KIT_SCENE:PackedScene=preload("res://assets/world/eastern_marches_environment_kit_v1.glb")
+const REGIONAL_GEOLOGY_KIT_SCENE:PackedScene=preload("res://assets/world/regional_geology_kit_v1.glb")
+const MINEABLE_GEOLOGY_KIT_SCENE:PackedScene=preload("res://assets/world/mineable_geology_kit_v1.glb")
+const VOLCANIC_ECOLOGY_KIT_SCENE:PackedScene=preload("res://assets/world/volcanic_ecology_kit_v1.glb")
 const RIVERWATCH_STABLE_SCENE:PackedScene=preload("res://assets/architecture/riverwatch_stable.glb")
 const RIVERWATCH_HORSE_SCENE:PackedScene=preload("res://assets/animals/riverwatch_horse.glb")
 const RIDEABLE_HORSE_SCRIPT:Script=preload("res://scripts/world/RideableHorse.gd")
@@ -29,7 +32,7 @@ const STARTING_VISUAL_BAKE_VERSION := 1
 const STREAMED_VISUAL_BAKE_VERSION := 1
 const STREAMED_VISUAL_BAKE_ZONES := [
     "north_frontier","glacial_range","western_reaches",
-    "stormbreak_highlands","skeld_coast","east_marches",
+    "stormbreak_highlands","skeld_coast","east_marches","sunscar_drylands",
 ]
 const STARTING_VISUAL_BAKE_SOURCES := [
     "res://scripts/world/WorldProfile.gd",
@@ -130,7 +133,7 @@ func get_population_stage_count() -> int:
 
 
 func get_population_stage_job_count(stage_idx:int,profile:Dictionary={})->int:
-    var counts:Array[int]=[8,2,3,4,5,8,6,2]
+    var counts:Array[int]=[8,2,3,4,5,9,6,2]
     if stage_idx<0 or stage_idx>=counts.size():return 0
     if stage_idx==0 and profile.get("streamed_population",false):
         return _streamed_transport_job_specs(profile).size()
@@ -141,7 +144,7 @@ func get_population_stage_job_count(stage_idx:int,profile:Dictionary={})->int:
     if stage_idx==1 and profile.get("streamed_population",false):
         return profile.get("forest_regions",[]).size()+1
     if stage_idx==5 and profile.get("streamed_population",false):
-        return profile.get("forest_regions",[]).size()+10
+        return profile.get("forest_regions",[]).size()+11
     if stage_idx==7 and profile.get("streamed_population",false):
         return 16
     return counts[stage_idx]
@@ -251,20 +254,22 @@ func run_population_stage_job(stage_idx:int,job_idx:int,world_root:Node3D,profil
                     match job_idx-composition_job_count-4:
                         0:_build_rock_formations(props_root,profile,terrain_result)
                         1:_build_highland_outcrop_clusters(props_root,profile,terrain_result)
-                        2:_build_flower_meadows(props_root,profile,terrain_result)
-                        3:_build_flowering_shrubs(props_root,profile,terrain_result)
-                        4:_build_stone_landmarks(props_root,profile,terrain_result)
-                        5:_build_authored_landmark_sites(props_root,profile,terrain_result)
+                        2:_build_regional_geology(props_root,profile,terrain_result)
+                        3:_build_flower_meadows(props_root,profile,terrain_result)
+                        4:_build_flowering_shrubs(props_root,profile,terrain_result)
+                        5:_build_stone_landmarks(props_root,profile,terrain_result)
+                        6:_build_authored_landmark_sites(props_root,profile,terrain_result)
             else:
                 match job_idx:
                     0:_build_forest_composition(props_root,profile,terrain_result)
                     1:_build_ground_stones(props_root,profile,terrain_result)
                     2:_build_rock_formations(props_root,profile,terrain_result)
                     3:_build_highland_outcrop_clusters(props_root,profile,terrain_result)
-                    4:_build_flower_meadows(props_root,profile,terrain_result)
-                    5:_build_flowering_shrubs(props_root,profile,terrain_result)
-                    6:_build_stone_landmarks(props_root,profile,terrain_result)
-                    7:_build_authored_landmark_sites(props_root,profile,terrain_result)
+                    4:_build_regional_geology(props_root,profile,terrain_result)
+                    5:_build_flower_meadows(props_root,profile,terrain_result)
+                    6:_build_flowering_shrubs(props_root,profile,terrain_result)
+                    7:_build_stone_landmarks(props_root,profile,terrain_result)
+                    8:_build_authored_landmark_sites(props_root,profile,terrain_result)
         6:
             var town_job_count:int=_enterable_town_job_count(profile)
             if job_idx<town_job_count:
@@ -528,7 +533,7 @@ func _add_regional_settlement_identity(root:Node3D,site:Dictionary,profile:Dicti
         _solid_box(tower,Vector3(10.4,.70,10.4),ground+Vector3.UP*13.72,stone)
         for corner in [Vector2(-4.4,-4.4),Vector2(4.4,-4.4),Vector2(-4.4,4.4),Vector2(4.4,4.4)]:
             _solid_box(tower,Vector3(1.35,1.7,1.35),ground+Vector3(corner.x,14.55,corner.y),stone)
-        var beacon:=OmniLight3D.new();beacon.position=ground+Vector3.UP*15.7;beacon.light_color=Color(1.0,.47,.18);beacon.light_energy=0.0;beacon.omni_range=28.0;beacon.visible=false;beacon.add_to_group("town_torches");tower.add_child(beacon)
+        var beacon:=OmniLight3D.new();beacon.position=ground+Vector3.UP*15.7;beacon.light_color=Color(1.0,.47,.18);beacon.light_energy=0.0;beacon.omni_range=28.0;beacon.visible=false;beacon.add_to_group("town_torches",true);tower.add_child(beacon)
         _visual_box(tower,Vector3(2.6,.32,2.6),ground+Vector3.UP*14.25,_make_lit_window_material(Color(.96,.38,.10)))
         # Heavy gate shoulders identify the pass entrance without blocking the road.
         var gate_z:=center.y+float(site.get("radius",176.0))*.78
@@ -595,6 +600,37 @@ func _add_marcher_settlement_identity(root:Node3D,site:Dictionary,terrain_result
     if mesh_name.is_empty():return
     var ground:Vector3=sampler.call(point.x,point.y)
     _add_eastern_environment_piece(root,mesh_name,ground,yaw,scale_value,true,1750.0 if site_name=="March Keep" else 1050.0,site_name+" Identity")
+
+    # Regional silhouettes establish each settlement at a distance; these
+    # smaller Blender-authored compositions make the same places read at
+    # walking height. They sit on road shoulders or working edges so the
+    # deliberately broad March views and travel lanes remain open.
+    var composition_specs:={
+        "Dawnford":{
+            "mesh":"DawnfordArrivalSet","offset":Vector2(-205.0,58.0),
+            "yaw":1.38,"scale":.94,"range":620.0,"name":"Dawnford Arrival Shoulder",
+        },
+        "Amberfield":{
+            "mesh":"AmberfieldFieldSet","offset":Vector2(190.0,112.0),
+            "yaw":-.28,"scale":.96,"range":580.0,"name":"Amberfield Working Verge",
+        },
+        "March Keep":{
+            "mesh":"MarchKeepGateApproach","offset":Vector2(-52.0,-20.0),
+            "yaw":1.25,"scale":.94,"range":720.0,"name":"March Keep Gate Approach",
+        },
+        "Saltwatch":{
+            "mesh":"SaltwatchWorkYard","offset":Vector2(95.0,150.0),
+            "yaw":.16,"scale":.94,"range":590.0,"name":"Saltwatch Brine Yard",
+        },
+    }
+    if composition_specs.has(site_name):
+        var spec:Dictionary=composition_specs[site_name]
+        var composition_point:Vector2=center+spec.offset
+        var composition_ground:Vector3=sampler.call(composition_point.x,composition_point.y)
+        _add_eastern_environment_piece(
+            root,str(spec.mesh),composition_ground,float(spec.yaw),float(spec.scale),
+            true,float(spec.range),str(spec.name)
+        )
 
 
 func _add_skeld_settlement_identity(root:Node3D,site:Dictionary,terrain_result:Dictionary)->void:
@@ -773,7 +809,7 @@ func _add_riverwatch_stable(root:Node3D,center:Vector2,sampler:Callable)->void:
         horse.name="Rideable Horse - %s"%horse_names[index]
         horse.set_script(RIDEABLE_HORSE_SCRIPT)
         horse.set("horse_name",horse_names[index])
-        horse.add_to_group("rideable_horse")
+        horse.add_to_group("rideable_horse",true)
         horse.set_meta("horse_name",horse_names[index])
         horse.set_meta("mounted",false)
         horse.set_meta("stable_home_position",horse_ground)
@@ -1257,6 +1293,12 @@ func _build_authored_landmark_sites(root:Node3D,profile:Dictionary,terrain_resul
             "cinderwatch_signal_yard":
                 var ground:Vector3=terrain_sampler.call(center.x,center.y)
                 _add_eastern_environment_piece(root,"CinderwatchSignalYard",ground,rotation,float(site.get("scale",1.0)),true,920.0,str(site.get("name","Cinderwatch Signal Yard")))
+                # The larger shelter reads as a camp silhouette; a separate
+                # survey station on the west working edge supplies the
+                # close-range instruments, packs and marker stakes.
+                var survey_point:=center+Vector2(-72.0,78.0)
+                var survey_ground:Vector3=terrain_sampler.call(survey_point.x,survey_point.y)
+                _add_eastern_environment_piece(root,"CinderwatchSurveySet",survey_ground,rotation-.22,.94,true,620.0,"Cinderwatch Survey Station")
             "embercrag_crown":
                 # The crown spans a steep summit; sink its long column bases
                 # into the mountain so no outer spire can read as floating.
@@ -1754,7 +1796,7 @@ func _add_market_square(root: Node3D, center: Vector2, terrain_result: Dictionar
         light.light_energy = 0.0
         light.omni_range = 10.0
         light.visible = false
-        light.add_to_group("town_torches")
+        light.add_to_group("town_torches",true)
         lamp.add_child(light)
     _add_market_dressing(root, ground, scale_factor)
 
@@ -2164,6 +2206,18 @@ func _add_architecture_detail(root:Node3D,mesh_name:String,position:Vector3,scal
     return mesh_instance
 
 
+func _add_collision_aware_interior_detail(root:Node3D,mesh_name:String,position:Vector3,scale_factor:Vector3,rotation:Vector3,collision_size:Vector3,collision_center_y:float,visibility_range:float=48.0)->MeshInstance3D:
+    # Interior sets are authored in Blender as one draw-friendly mesh, while a
+    # deliberately simple box keeps the player from walking through the useful
+    # part of the furnishing. The collider never reaches beyond the visible set.
+    var detail:=_add_architecture_detail(root,mesh_name,position,scale_factor,null,rotation,visibility_range)
+    var scaled_size:=Vector3(collision_size.x*scale_factor.x,collision_size.y*scale_factor.y,collision_size.z*scale_factor.z)
+    var collider_position:=position+Vector3.UP*collision_center_y*scale_factor.y
+    _add_static_collision_box(root,scaled_size,collider_position,rotation)
+    detail.set_meta("interior_collision_size",scaled_size)
+    return detail
+
+
 func _make_real_window_material()->StandardMaterial3D:
     if _shared_materials.has("real_window_glass"):return _shared_materials.real_window_glass
     var glass:=StandardMaterial3D.new();glass.albedo_color=Color(.20,.38,.46,.34);glass.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA;glass.metallic=.08;glass.roughness=.18;glass.cull_mode=BaseMaterial3D.CULL_DISABLED
@@ -2172,8 +2226,8 @@ func _make_real_window_material()->StandardMaterial3D:
 
 
 func _add_working_house_door(house:Node3D,door_width:float,door_height:float,depth:float,material:Material,door_center_x:float=0.0,extra_group:String="")->void:
-    var hinge:=Node3D.new();hinge.name="WorkingHouseDoor";hinge.position=Vector3(door_center_x-door_width*.5+.10,0,depth*.5+.08);hinge.add_to_group("interactive_house_door")
-    if not extra_group.is_empty():hinge.add_to_group(extra_group)
+    var hinge:=Node3D.new();hinge.name="WorkingHouseDoor";hinge.position=Vector3(door_center_x-door_width*.5+.10,0,depth*.5+.08);hinge.add_to_group("interactive_house_door",true)
+    if not extra_group.is_empty():hinge.add_to_group(extra_group,true)
     hinge.set_meta("door_center_x",door_center_x)
     hinge.set_meta("door_depth",depth)
     hinge.set_meta("door_width",door_width)
@@ -2188,6 +2242,8 @@ func _add_working_house_door(house:Node3D,door_width:float,door_height:float,dep
 func _add_house_furniture(house:Node3D,width:float,depth:float,timber:Material,style:int,storeys:int=1)->void:
     var furniture:=Node3D.new();furniture.name="FurnishedInterior_Family_%d"%(style%6);house.add_child(furniture)
     var family:=style%6
+    var interior_roles:=["cottage kitchen","village alehouse","artisan workshop","merchant shop","townhouse study","traveller inn"]
+    furniture.set_meta("interior_role",interior_roles[family])
     var furniture_timber:=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.72,.53,.33),1.0,1.8)
     var cloth_colors:=[Color(.42,.09,.07),Color(.12,.25,.39),Color(.34,.29,.10),Color(.24,.36,.19)]
     var cloth:=_make_material(cloth_colors[style%cloth_colors.size()],.94)
@@ -2195,35 +2251,35 @@ func _add_house_furniture(house:Node3D,width:float,depth:float,timber:Material,s
     var ground_rug:=_visual_box(furniture,Vector3(width*.42,.055,depth*.32),Vector3(-width*.08,.12,0),cloth);ground_rug.name="Ground Floor Woven Rug";ground_rug.set_meta("skip_static_solidify",true)
     match family:
         0:
-            # Compact cottage: bed, eating table, chest and wall shelf.
+            # Compact cottage: a real working kitchen, bed and storage. The
+            # kitchen stays against the rear wall and leaves the entry aisle open.
             _append_house_bed(furniture,timber_boxes,Vector3(-width*.27,0,-depth*.25),furniture_timber,cloth)
-            _append_house_table(furniture,timber_boxes,Vector3(width*.15,0,0),Vector2(2.9,1.45))
-            _add_architecture_detail(furniture,"FurnitureChest",Vector3(width*.28,0,-depth*.30),Vector3(.88,.88,.88),null,Vector3.ZERO,48.0)
+            _add_collision_aware_interior_detail(furniture,"FurnitureKitchenSet",Vector3(width*.18,0,-depth*.39),Vector3(.64,.70,.64),Vector3.ZERO,Vector3(3.65,2.65,1.10),1.33,48.0)
+            _add_architecture_detail(furniture,"FurnitureChest",Vector3(-width*.40,0,depth*.12),Vector3(.88,.88,.88),null,Vector3(0,PI*.5,0),48.0)
         1:
-            # Alehouse/croft: communal table, benches and modeled barrels.
+            # Alehouse/croft: communal seating and a recognizable serving bar.
             _append_house_table(furniture,timber_boxes,Vector3(0,0,-depth*.04),Vector2(4.8,1.65))
             for z in [-1.45,1.45]:timber_boxes.append({"size":Vector3(4.2,.32,.48),"position":Vector3(0,.68,z)})
+            _add_collision_aware_interior_detail(furniture,"FurnitureTavernSet",Vector3(0,0,-depth*.40),Vector3(.78,.82,.70),Vector3.ZERO,Vector3(5.05,1.62,1.12),.80,52.0)
             for x in [-width*.34,width*.34]:_add_architecture_detail(furniture,"FurnitureBarrel",Vector3(x,0,-depth*.30),Vector3(.82,.82,.82),furniture_timber,Vector3.ZERO,42.0)
         2:
-            # Working house: heavy bench, tool counter, shelves and cargo.
-            _append_house_table(furniture,timber_boxes,Vector3(-width*.10,0,-depth*.12),Vector2(4.0,1.9))
-            timber_boxes.append({"size":Vector3(3.5,1.15,.85),"position":Vector3(width*.24,.58,-depth*.41)})
+            # Working house: a Blender-authored workbench with visible tools.
+            _add_collision_aware_interior_detail(furniture,"FurnitureWorkshopSet",Vector3(width*.08,0,-depth*.39),Vector3(.78,.78,.68),Vector3.ZERO,Vector3(4.02,3.10,1.36),1.55,52.0)
             timber_boxes.append({"size":Vector3(1.4,1.2,1.3),"position":Vector3(-width*.31,.60,depth*.18)})
-            _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(width*.30,0,-depth*.43),Vector3(.92,.92,.92),furniture_timber,Vector3.ZERO,44.0)
         3:
             # Merchant shop: proper counter line, stock shelving and barrels.
             timber_boxes.append({"size":Vector3(width*.56,1.18,1.05),"position":Vector3(width*.05,.59,-depth*.10)})
-            _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(-width*.30,0,-depth*.43),Vector3(1.05,1.05,1.05),furniture_timber,Vector3.ZERO,44.0)
+            _add_collision_aware_interior_detail(furniture,"FurnitureBookcaseFull",Vector3(-width*.30,0,-depth*.43),Vector3(.96,.96,.96),Vector3.ZERO,Vector3(2.05,3.16,.56),1.58,48.0)
             _add_architecture_detail(furniture,"FurnitureBarrel",Vector3(width*.34,0,-depth*.34),Vector3(.88,.88,.88),furniture_timber,Vector3.ZERO,42.0)
         4:
-            # Urban townhouse: reception table downstairs; sleeping rooms above.
-            _append_house_table(furniture,timber_boxes,Vector3(-width*.12,0,-depth*.08),Vector2(3.5,1.55))
+            # Urban townhouse: a readable study rather than another generic table.
+            _add_collision_aware_interior_detail(furniture,"FurnitureReadingDesk",Vector3(-width*.13,0,-depth*.18),Vector3(.82,.82,.82),Vector3.ZERO,Vector3(2.82,1.72,1.38),.86,50.0)
             _add_architecture_detail(furniture,"FurnitureChest",Vector3(-width*.29,0,-depth*.39),Vector3(1.05,1.05,1.05),null,Vector3.ZERO,48.0)
         5:
             # Inn: keep the right-hand stair route open from the doorway to the
             # upper floor; the former second table sat directly on the ramp.
             for table_z in [-depth*.18,depth*.20]:_append_house_table(furniture,timber_boxes,Vector3(-width*.19,0,float(table_z)),Vector2(3.1,1.35))
-            timber_boxes.append({"size":Vector3(width*.50,1.10,.90),"position":Vector3(0,.55,-depth*.40)})
+            _add_collision_aware_interior_detail(furniture,"FurnitureTavernSet",Vector3(-width*.07,0,-depth*.40),Vector3(.82,.84,.72),Vector3.ZERO,Vector3(5.05,1.62,1.12),.80,54.0)
     if family not in [1,3]:
         _add_architecture_detail(furniture,"FurnitureChair",Vector3(width*.12,0,depth*.16),Vector3(.72,.72,.72),furniture_timber,Vector3(0,PI,0),40.0)
     _add_house_interior_light(furniture,Vector3(0,2.45,0))
@@ -2236,7 +2292,7 @@ func _add_house_furniture(house:Node3D,width:float,depth:float,timber:Material,s
         # Upper storage stays on the opposite wall from the stair exit so the
         # player does not arrive against a collision prop.
         timber_boxes.append({"size":Vector3(2.6,.24,.72),"position":Vector3(-width*.31,upper_y+2.0,-depth*.44)})
-        _add_architecture_detail(furniture,"FurnitureBookshelf",Vector3(-width*.32,upper_y,-depth*.42),Vector3(.82,.82,.82),furniture_timber,Vector3.ZERO,46.0)
+        _add_collision_aware_interior_detail(furniture,"FurnitureBookcaseFull",Vector3(-width*.32,upper_y,-depth*.42),Vector3(.76,.76,.76),Vector3.ZERO,Vector3(2.05,3.16,.56),1.58,48.0)
         _add_architecture_detail(furniture,"FurnitureChest",Vector3(-width*.18,upper_y,depth*.30),Vector3(.82,.82,.82),null,Vector3.ZERO,46.0)
         _add_house_interior_light(furniture,Vector3(-width*.08,upper_y+2.35,0))
     _add_box_batch(furniture,timber_boxes,furniture_timber,false,46.0)
@@ -2508,8 +2564,11 @@ func _dress_castle_ground_hall(root:Node3D,keep_center:Vector3,timber:Material,r
         _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(0,6.15,z),Vector3(1.1,1.1,1.1),null,Vector3.ZERO,78.0)
     for z in [-10.0,2.0,14.0]:
         _add_architecture_detail(root,"CastleWeaponRack",keep_center+Vector3(22.0,0,z),Vector3(.82,.82,.82),null,Vector3(0,-PI*.5,0),58.0)
-    for z in [-12.0,10.0]:
-        _add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(-22.4,0,z),Vector3(1.08,1.08,1.08),timber,Vector3(0,PI*.5,0),58.0)
+    for z in [-12.0,9.0]:
+        _add_collision_aware_interior_detail(root,"FurnitureBookcaseFull",keep_center+Vector3(-22.4,0,z),Vector3(1.02,1.02,1.02),Vector3(0,PI*.5,0),Vector3(2.05,3.16,.56),1.58,62.0)
+    # A stocked watch post beside the entrance gives the great hall a visible
+    # security function while preserving the broad central aisle and stair route.
+    _add_collision_aware_interior_detail(root,"FurnitureGuardPost",keep_center+Vector3(-22.2,0,16.2),Vector3(.88,.88,.88),Vector3(0,PI*.5,0),Vector3(3.20,3.95,.94),1.95,64.0)
     for side in [-1.0,1.0]:
         var brazier_x:=7.0*float(side)
         _solid_box(root,Vector3(1.4,1.0,1.4),keep_center+Vector3(brazier_x,.50,-12.0),stone)
@@ -2570,7 +2629,7 @@ func _build_keep_wall_with_openings(root: Node3D, keep_center: Vector3, z: float
 func _build_roof_lookout_tower(root:Node3D,floor_center:Vector3,faces_negative_z:bool,door_center_x:float,stone:Material,dark_stone:Material,timber:Material,roof:Material,gold:Material)->void:
     var lookout:=Node3D.new()
     lookout.name="AccessibleRoofLookout"
-    lookout.add_to_group("castle_roof_lookout")
+    lookout.add_to_group("castle_roof_lookout",true)
     lookout.position=floor_center
     lookout.rotation.y=PI if faces_negative_z else 0.0
     root.add_child(lookout)
@@ -2620,7 +2679,7 @@ func _build_roof_gallery(root:Node3D,roof_center:Vector3,keep_width:float,keep_d
 func _build_open_gallery_wall(root:Node3D,base_center:Vector3,width:float,rotated:bool,stone:Material)->void:
     var gallery:=Node3D.new()
     gallery.name="OpenRoofGallery"
-    gallery.add_to_group("castle_roof_gallery")
+    gallery.add_to_group("castle_roof_gallery",true)
     gallery.position=base_center
     if rotated:gallery.rotation.y=PI*.5
     root.add_child(gallery)
@@ -2642,7 +2701,7 @@ func _build_open_gallery_wall(root:Node3D,base_center:Vector3,width:float,rotate
 func _build_central_roof_watch(root:Node3D,floor_center:Vector3,stone:Material,trim:Material,timber:Material,roof:Material,gold:Material)->void:
     var watch:=Node3D.new()
     watch.name="AccessibleCentralWatch"
-    watch.add_to_group("castle_central_watch")
+    watch.add_to_group("castle_central_watch",true)
     watch.position=floor_center
     root.add_child(watch)
     var width:=18.0
@@ -2703,7 +2762,7 @@ func _add_keep_wall_torches(root: Node3D, keep_center: Vector3, bracket_material
             var flame := MeshInstance3D.new()
             var flame_mesh := SphereMesh.new(); flame_mesh.radius = 0.22; flame_mesh.height = 0.62; flame_mesh.radial_segments = 7; flame_mesh.rings = 4
             flame.mesh = flame_mesh; flame.position = center + Vector3(0, 0.27, 0.72); flame.material_override = flame_material; root.add_child(flame)
-            var light := OmniLight3D.new(); light.position = center + Vector3(0, 0.42, 1.1); light.light_color = Color(1.0, 0.56, 0.24); light.light_energy = 0.0; light.omni_range = 12.0; light.shadow_enabled = false; light.visible=false; light.distance_fade_enabled=true;light.distance_fade_begin=42.0;light.distance_fade_length=16.0;light.add_to_group("town_torches"); root.add_child(light)
+            var light := OmniLight3D.new(); light.position = center + Vector3(0, 0.42, 1.1); light.light_color = Color(1.0, 0.56, 0.24); light.light_energy = 0.0; light.omni_range = 12.0; light.shadow_enabled = false; light.visible=false; light.distance_fade_enabled=true;light.distance_fade_begin=42.0;light.distance_fade_length=16.0;light.add_to_group("town_torches",true); root.add_child(light)
 
 
 func _build_keep_floor(root: Node3D, keep_center: Vector3, floor_y: float, width: float, depth: float, material: Material) -> void:
@@ -2751,7 +2810,7 @@ func _build_keep_roof_with_hatch(root:Node3D,keep_center:Vector3,width:float,dep
 func _add_castle_roof_ladder(root:Node3D,keep_center:Vector3,timber:Material,stone:Material)->void:
     var ladder:=Node3D.new()
     ladder.name="CastleRoofLadder"
-    ladder.add_to_group("climbable_ladder")
+    ladder.add_to_group("climbable_ladder",true)
     root.add_child(ladder)
     var bottom:=keep_center+Vector3(18.0,24.35,10.5)
     # Both endpoints stay inside the roof hatch. The former top ended beneath
@@ -2841,7 +2900,7 @@ func _build_internal_keep_stairs(root: Node3D, keep_center: Vector3, tread_mater
     _add_material_multimesh(root,tread_mesh,tread_transforms,tread_material,false)
     _add_material_multimesh(root,riser_mesh,riser_transforms,tread_material,false)
     _add_material_multimesh(root,post_mesh,post_transforms,rail_material,false)
-    root.add_to_group("castle_stair_assembly")
+    root.add_to_group("castle_stair_assembly",true)
     root.set_meta("castle_stair_riser_count",riser_transforms.size())
 
 
@@ -2860,7 +2919,7 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
     for x in [-18.0, 18.0]:
         _visual_box(root, Vector3(2.8, 6.0, 0.20), keep_center + Vector3(x, council_y + 4.5, 20.92), royal)
         _add_broken_crown_crest(root,keep_center+Vector3(x,council_y+4.15,20.77),.70,gold)
-    for x in [-20.0,14.0]:_add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(x,council_y,-19.9),Vector3(1.2,1.2,1.2),timber,Vector3.ZERO,66.0)
+    for x in [-20.0,14.0]:_add_collision_aware_interior_detail(root,"FurnitureBookcaseFull",keep_center+Vector3(x,council_y,-19.9),Vector3(1.10,1.10,1.10),Vector3.ZERO,Vector3(2.05,3.16,.56),1.58,68.0)
     for z in [4.0,10.0,16.0]:
         _add_architecture_detail(root,"FurnitureChest",keep_center+Vector3(-21.0,council_y,z),Vector3(.78,.78,.78),timber,Vector3(0,PI*.5,0),58.0)
     # A readable planning wall gives the council chamber an actual purpose.
@@ -2872,6 +2931,7 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
     for x in [-18.0,-14.0]:
         for z in [10.2,11.8]:_visual_box(root,Vector3(.20,.90,.20),keep_center+Vector3(x,council_y+.45,z),timber)
     _add_architecture_detail(root,"CastleChandelier",keep_center+Vector3(-5.0,council_y+6.0,5.5),Vector3(.92,.92,.92),null,Vector3.ZERO,72.0)
+    _add_collision_aware_interior_detail(root,"FurnitureReadingDesk",keep_center+Vector3(8.0,council_y,-15.5),Vector3(.88,.88,.88),Vector3.ZERO,Vector3(2.82,1.72,1.38),.86,68.0)
     _add_castle_room_light(root,keep_center+Vector3(-5.0,council_y+5.7,4.5))
 
     # Third floor: armory and archive, deliberately unlike the council room.
@@ -2889,6 +2949,7 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
     for position in [Vector3(-20,0,13),Vector3(-16,0,15),Vector3(3,0,-14)]:_add_architecture_detail(root,"FurnitureBarrel",keep_center+Vector3(position.x,armory_y,position.z),Vector3(.86,.86,.86),null,Vector3.ZERO,58.0)
     for position in [Vector3(-8,0,15),Vector3(-1,0,15),Vector3(7,0,-15)]:
         _add_architecture_detail(root,"FurnitureChest",keep_center+Vector3(position.x,armory_y,position.z),Vector3(.82,.82,.82),timber,Vector3.ZERO,58.0)
+    _add_collision_aware_interior_detail(root,"FurnitureWorkshopSet",keep_center+Vector3(6.0,armory_y,-19.0),Vector3(.82,.82,.76),Vector3.ZERO,Vector3(4.02,3.10,1.36),1.55,68.0)
     _solid_box(root,Vector3(8.0,.32,2.6),keep_center+Vector3(8.0,armory_y+1.0,12.5),timber)
     for x in [4.4,11.6]:
         for z in [11.4,13.6]:_visual_box(root,Vector3(.20,.86,.20),keep_center+Vector3(x,armory_y+.43,z),timber)
@@ -2916,7 +2977,7 @@ func _dress_keep_upper_floors(root: Node3D, keep_center: Vector3, timber: Materi
     for x in [-10.4,-5.6]:
         for z in [10.0,12.0]:_visual_box(root,Vector3(.20,.88,.20),keep_center+Vector3(x,solar_y+.44,z),timber)
     _add_architecture_detail(root,"FurnitureChair",keep_center+Vector3(-8.0,solar_y,8.8),Vector3(.80,.80,.80),timber,Vector3.ZERO,64.0)
-    for x in [-21.5,15.0]:_add_architecture_detail(root,"FurnitureBookshelf",keep_center+Vector3(x,solar_y,-20.0),Vector3(1.15,1.15,1.15),timber,Vector3.ZERO,66.0)
+    for x in [-21.5,15.0]:_add_collision_aware_interior_detail(root,"FurnitureBookcaseFull",keep_center+Vector3(x,solar_y,-20.0),Vector3(1.06,1.06,1.06),Vector3.ZERO,Vector3(2.05,3.16,.56),1.58,68.0)
     for position in [Vector3(-20,0,-4),Vector3(5,0,-4),Vector3(18,0,13)]:
         _add_architecture_detail(root,"FurnitureChest",keep_center+Vector3(position.x,solar_y,position.z),Vector3(.86,.86,.86),timber,Vector3.ZERO,58.0)
     for z in [-1.0,4.5,10.0]:
@@ -3388,12 +3449,21 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
     var controlled: bool = profile.get("controlled_aqueduct", false)
     var base_rock_count:int=1050 if controlled else 220
     var rock_count:int=_scaled_population_count(profile,base_rock_count,200 if controlled else 70)
+    var geology_source:=MINEABLE_GEOLOGY_KIT_SCENE.instantiate()
     var ore_specs:Array[Dictionary]=[
-        {"id":"iron","name":"Iron Ore","color":Color(.34,.37,.39),"profile":Vector3(1.30,.70,1.00)},
-        {"id":"copper","name":"Copper Ore","color":Color(.48,.285,.16),"profile":Vector3(1.12,.88,1.28)},
-        {"id":"silver","name":"Silver Ore","color":Color(.58,.62,.63),"profile":Vector3(1.36,.62,.92)},
-        {"id":"gold","name":"Gold Ore","color":Color(.58,.44,.13),"profile":Vector3(.96,.96,1.24)},
+        {"id":"iron","name":"Iron Ore","color":Color(.34,.37,.39),"profile":Vector3(1.08,.94,1.00),"intact":"IronOutcropIntact","depleted":"IronOutcropDepleted"},
+        {"id":"copper","name":"Copper Ore","color":Color(.48,.285,.16),"profile":Vector3(1.00,.96,1.06),"intact":"CopperOutcropIntact","depleted":"CopperOutcropDepleted"},
+        {"id":"silver","name":"Silver Ore","color":Color(.58,.62,.63),"profile":Vector3(1.02,.92,.98),"intact":"SilverOutcropIntact","depleted":"SilverOutcropDepleted"},
+        {"id":"gold","name":"Gold Ore","color":Color(.58,.44,.13),"profile":Vector3(1.04,.94,1.00),"intact":"GoldOutcropIntact","depleted":"GoldOutcropDepleted"},
     ]
+    for ore_spec in ore_specs:
+        ore_spec["intact_mesh"]=_find_named_mesh_resource(geology_source,str(ore_spec.intact))
+        ore_spec["depleted_mesh"]=_find_named_mesh_resource(geology_source,str(ore_spec.depleted))
+    geology_source.free()
+    for ore_spec in ore_specs:
+        if ore_spec.intact_mesh==null or ore_spec.depleted_mesh==null:
+            root.set_meta("mineable_rock_registry",[])
+            return
     var grouped_transforms:Array=[[],[],[],[]]
     var grouped_rocks:Array=[[],[],[],[]]
     var collision_registry:Array=root.get_meta("collision_prop_registry",[])
@@ -3416,14 +3486,16 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
         var ground: Vector3 = rock_sampler.call(point.x, point.y)
         if ground.y <= terrain_result.water_level + 2.0:
             continue
-        var scale_factor := (0.45 + float(i % 7) * 0.16) if controlled else (3.0 + float(i % 7) * 1.15)
+        var scale_factor := (0.45 + float(i % 7) * 0.16) if controlled else (2.2 + float(i % 7) * 0.62)
         var roll:=(i*37)%20
         var ore_index:=0 if roll<9 else (1 if roll<15 else (2 if roll<19 else 3))
         var ore_spec:Dictionary=ore_specs[ore_index]
         var shape_profile:Vector3=ore_spec.profile
         var basis := Basis.from_euler(Vector3(float(i % 5) * 0.08, angle, float(i % 3) * 0.06))
         basis = basis.scaled(shape_profile*scale_factor)
-        var transform:=Transform3D(basis,ground+Vector3(0.0,scale_factor*.55,0.0))
+        # Authored outcrops have a ground-level origin. Sink the irregular foot
+        # slightly so no family floats on coarse terrain triangles.
+        var transform:=Transform3D(basis,ground-Vector3.UP*scale_factor*.045)
         grouped_transforms[ore_index].append(transform)
         var rock_data:={
             "kind":"mineable_rock",
@@ -3432,8 +3504,10 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
             "ore_color":ore_spec.color,
             "position":ground+Vector3(0,scale_factor*.45,0),
             "ground_position":ground,
-            "radius":scale_factor*.72,
+            "radius":scale_factor*.92,
             "scale":scale_factor,
+            "depleted_mesh":ore_spec.depleted_mesh,
+            "depleted_transform":Transform3D(basis,ground-Vector3.UP*scale_factor*.025),
             "active":true,
             "hits":0,
         }
@@ -3442,20 +3516,18 @@ func _build_rocks(root: Node3D, profile: Dictionary, terrain_result: Dictionary)
         grouped_rocks[ore_index].append(rock_data)
     root.set_meta("collision_prop_registry",collision_registry)
     root.set_meta("mineable_rock_registry",mineable_registry)
-    # Four spatially batched silhouettes make metal deposits recognizable in
+    # Four Blender-authored silhouettes make metal deposits recognizable in
     # the field without turning hundreds of rocks into individual draw calls.
+    # Depleted remnants are instantiated only for actively mined nodes, so the
+    # normal world pays no second batch/draw cost for invisible break states.
     for ore_index in range(ore_specs.size()):
-        var rock_mesh:=SphereMesh.new()
-        rock_mesh.radius=1.0
-        rock_mesh.height=1.7+float(ore_index%2)*.16
-        rock_mesh.radial_segments=6+ore_index
-        rock_mesh.rings=3+int(ore_index/2)
         var ore_spec:Dictionary=ore_specs[ore_index]
+        var rock_mesh:Mesh=ore_spec.intact_mesh
         var ore_transforms:Array[Transform3D]=[]
         ore_transforms.assign(grouped_transforms[ore_index])
         var source_map:=_add_material_multimesh(
             root,rock_mesh,ore_transforms,
-            _make_material(ore_spec.color,1.0),false,900.0,520.0
+            null,true,900.0,520.0
         )
         var rock_group:Array=grouped_rocks[ore_index]
         for local_index in range(rock_group.size()):
@@ -4813,6 +4885,397 @@ func _build_highland_outcrop_clusters(root:Node3D,profile:Dictionary,terrain_res
     root.set_meta("outcrop_bracken_count",bracken_transforms.size())
 
 
+func _build_regional_geology(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+    var source:=REGIONAL_GEOLOGY_KIT_SCENE.instantiate()
+    var meshes:Dictionary={}
+    for mesh_name in ["LayeredCliffFace","BasaltColumnEscarpment","GlacialCrownCrag","CoastalSeaStack"]:
+        meshes[mesh_name]=_find_named_mesh_resource(source,mesh_name)
+    source.free()
+    for mesh_name in meshes:
+        if meshes[mesh_name]==null:
+            root.set_meta("regional_geology_count",0)
+            return
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var zone_id:=str(profile.get("zone_id","starting_realm"))
+    var anchors:Array[Dictionary]=[]
+    var chains:Array=profile.get("mountain_chains",[])
+    for chain_index in range(chains.size()):
+        var chain:Dictionary=chains[chain_index]
+        var center:Vector2=chain.get("center",Vector2.ZERO)
+        var angle:=float(chain.get("angle",0.0))
+        var length:=float(chain.get("length",1000.0))
+        var width:=float(chain.get("width",500.0))
+        var tangent:=Vector2(cos(angle),sin(angle))
+        var normal:=Vector2(-tangent.y,tangent.x)
+        for formation_index in range(2):
+            var progress:=.32+.36*float(formation_index)
+            var point:=center+tangent*((progress-.5)*length*.72)+normal*width*(-.31 if (chain_index+formation_index)%2==0 else .31)
+            var kind:="LayeredCliffFace"
+            if zone_id=="glacial_range":kind="GlacialCrownCrag"
+            elif zone_id=="north_frontier":kind="GlacialCrownCrag" if (chain_index+formation_index)%2==0 else "LayeredCliffFace"
+            elif zone_id=="east_marches":kind="BasaltColumnEscarpment" if (chain_index+formation_index)%2==0 else "LayeredCliffFace"
+            elif zone_id=="skeld_coast":kind="CoastalSeaStack" if "Headland" in str(chain.get("name","")) and formation_index==0 else "LayeredCliffFace"
+            anchors.append({
+                "kind":kind,"position":point,"yaw":angle+sin(float(chain_index*3+formation_index))*.17,
+                "scale":1.02+float((chain_index+formation_index)%3)*.16,"purpose":"mountain flank",
+            })
+    # Explicit outcrop landmarks receive the silhouette that matches their
+    # authored identity. These remain sparse navigation marks, not a rock grid.
+    for site_value in profile.get("landmark_sites",[]):
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        if str(site.get("kind",""))!="outcrop":continue
+        var site_name:=str(site.get("name",""))
+        var kind:="LayeredCliffFace"
+        if zone_id=="east_marches" and ("Basalt" in site_name or "Ember" in site_name or "Cinder" in site_name):kind="BasaltColumnEscarpment"
+        elif zone_id in ["north_frontier","glacial_range"] and ("Crown" in site_name or "Crag" in site_name or "Moraine" in site_name):kind="GlacialCrownCrag"
+        elif zone_id=="skeld_coast" and ("Sea Stack" in site_name or "Shore" in site_name):kind="CoastalSeaStack"
+        else:continue
+        anchors.append({
+            "kind":kind,"position":site.get("position",Vector2.ZERO),"yaw":float(site.get("rotation",0.0)),
+            "scale":clampf(float(site.get("radius",55.0))/62.0,.84,1.45),"purpose":"authored landmark",
+        })
+
+    var collision_sizes:={
+        "LayeredCliffFace":Vector3(17.0,7.8,5.2),
+        "BasaltColumnEscarpment":Vector3(14.0,10.4,5.0),
+        "GlacialCrownCrag":Vector3(12.5,9.5,6.5),
+        "CoastalSeaStack":Vector3(10.0,12.0,7.0),
+    }
+    var transforms_by_kind:Dictionary={}
+    var counts:Dictionary={}
+    for kind in meshes:
+        transforms_by_kind[kind]=[]
+        counts[kind]=0
+    var collision_body:=StaticBody3D.new();collision_body.name="RegionalGeologyCollision";collision_body.collision_layer=1;root.add_child(collision_body)
+    for anchor_index in range(anchors.size()):
+        var anchor:Dictionary=anchors[anchor_index]
+        var point:Vector2=anchor.get("position",Vector2.ZERO)
+        var kind:=str(anchor.get("kind","LayeredCliffFace"))
+        var coastal:=kind=="CoastalSeaStack" and str(anchor.get("purpose",""))=="authored landmark"
+        if not coastal and _is_too_close_to_corridors(point,profile.get("river_corridors",[]),58.0):continue
+        if not coastal and _is_inside_pond_water(point,profile.get("pond_sites",[]),12.0):continue
+        if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),34.0):continue
+        if _is_near_bridge_site(point,profile.get("ford_sites",[]),96.0):continue
+        if _is_too_close_to_sites(point,profile.get("town_sites",[]),92.0):continue
+        var scale_value:=float(anchor.get("scale",1.0))
+        var base_size:Vector3=collision_sizes.get(kind,Vector3(12,8,5))
+        var yaw:=float(anchor.get("yaw",0.0))
+        var basis:=Basis(Vector3.UP,yaw)
+        var footprint_offsets:=[Vector2.ZERO]
+        for local_offset in [Vector2(-base_size.x*.34,0),Vector2(base_size.x*.34,0),Vector2(0,-base_size.z*.34),Vector2(0,base_size.z*.34)]:
+            var offset3:=basis*Vector3(local_offset.x,0,local_offset.y)
+            footprint_offsets.append(Vector2(offset3.x,offset3.z)*scale_value)
+        var minimum_y:=INF
+        var maximum_y:=-INF
+        for offset_value in footprint_offsets:
+            var sample_point:=point+Vector2(offset_value)
+            var sample_y:=float((sampler.call(sample_point.x,sample_point.y) as Vector3).y)
+            minimum_y=minf(minimum_y,sample_y);maximum_y=maxf(maximum_y,sample_y)
+        if not coastal and maximum_y-minimum_y>base_size.y*scale_value*.42:continue
+        if not coastal and minimum_y<=float(terrain_result.water_level)+1.4:continue
+        var ground:=Vector3(point.x,minimum_y+.025,point.y)
+        var transform:=Transform3D(Basis(Vector3.UP,yaw).scaled(Vector3.ONE*scale_value),ground)
+        (transforms_by_kind[kind] as Array).append(transform)
+        counts[kind]=int(counts[kind])+1
+        var collision:=CollisionShape3D.new();var shape:=BoxShape3D.new()
+        shape.size=Vector3(base_size.x*.86,base_size.y*.88,base_size.z*.74)*scale_value
+        collision.shape=shape;collision.position=ground+Vector3.UP*shape.size.y*.5;collision.rotation.y=yaw;collision_body.add_child(collision)
+    for kind in meshes:
+        var typed_transforms:Array[Transform3D]=[]
+        for transform_value in transforms_by_kind[kind]:typed_transforms.append(transform_value as Transform3D)
+        var source_map:=_add_material_multimesh(root,meshes[kind],typed_transforms,null,true,1500.0,620.0)
+        var tagged_instances:Dictionary={}
+        for source_value in source_map.values():
+            var instance:MultiMeshInstance3D=source_value.get("instance")
+            if is_instance_valid(instance) and not tagged_instances.has(instance.get_instance_id()):
+                tagged_instances[instance.get_instance_id()]=true
+                instance.set_meta("regional_geology_kind",kind)
+    root.set_meta("regional_geology_count",collision_body.get_child_count())
+    root.set_meta("regional_geology_kind_counts",counts)
+    _build_mountain_cliff_walls(root,profile,terrain_result)
+    _build_volcanic_ecology(root,profile,terrain_result)
+
+
+func _build_mountain_cliff_walls(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+    var source:=REGIONAL_GEOLOGY_KIT_SCENE.instantiate()
+    var meshes:={
+        "StratifiedMountainWall":_find_named_mesh_resource(source,"StratifiedMountainWall"),
+        "GlacialCirqueWall":_find_named_mesh_resource(source,"GlacialCirqueWall"),
+    }
+    source.free()
+    for kind in meshes:
+        if meshes[kind]==null:
+            root.set_meta("mountain_cliff_wall_count",0)
+            root.set_meta("mountain_cliff_wall_records",[])
+            return
+        var mesh:ArrayMesh=(meshes[kind] as ArrayMesh).duplicate()
+        if mesh.get_surface_count()>=3:
+            if kind=="GlacialCirqueWall":
+                mesh.surface_set_material(0,_make_cliff_rock_material(Color(.76,.84,.90)))
+                mesh.surface_set_material(1,_make_cliff_rock_material(Color(.76,.84,.90)))
+                mesh.surface_set_material(2,_make_material(Color(.82,.88,.91),.94))
+            else:
+                mesh.surface_set_material(0,_make_cliff_rock_material(Color(.92,.82,.64)))
+                mesh.surface_set_material(1,_make_cliff_rock_material(Color(.92,.82,.64)))
+                mesh.surface_set_material(2,_make_material(Color(.29,.34,.17),1.0))
+        meshes[kind]=mesh
+    var zone_id:=str(profile.get("zone_id","starting_realm"))
+    var glacial_zone:=zone_id in ["north_frontier","glacial_range"]
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var transforms_by_kind:={"StratifiedMountainWall":[],"GlacialCirqueWall":[]}
+    var records:Array[Dictionary]=[]
+    var collision_body:=StaticBody3D.new();collision_body.name="MountainCliffWallCollision";collision_body.collision_layer=1;root.add_child(collision_body)
+    var playable_half_extent:=float(profile.get("world_size",7200.0))*.5-120.0
+    var progress_options:=[-.28,.02,.29,-.12]
+    for chain_index in range(profile.get("mountain_chains",[]).size()):
+        var chain:Dictionary=profile.get("mountain_chains",[])[chain_index]
+        var center:Vector2=chain.get("center",Vector2.ZERO)
+        var angle:=float(chain.get("angle",0.0))
+        var length:=float(chain.get("length",1800.0))
+        var width:=float(chain.get("width",620.0))
+        var tangent:=Vector2(cos(angle),sin(angle))
+        var normal:=Vector2(-tangent.y,tangent.x)
+        var kind:="GlacialCirqueWall" if glacial_zone else "StratifiedMountainWall"
+        var base_size:=Vector3(76.0,34.0,47.0) if kind=="GlacialCirqueWall" else Vector3(84.0,29.4,42.0)
+        var collision_depth:=16.0 if kind=="GlacialCirqueWall" else 13.0
+        var scale_value:=clampf(length/2300.0,.92,1.28)
+        var placed:=false
+        for candidate_index in range(progress_options.size()*2):
+            if placed:break
+            var progress:float=float(progress_options[candidate_index%progress_options.size()])
+            var preferred_side:=(-1.0 if chain_index%2==0 else 1.0)
+            var side:=preferred_side if candidate_index<progress_options.size() else -preferred_side
+            var point:=center+tangent*(progress*length*.72)+normal*(width*(.40+.025*float(candidate_index%3))*side)
+            var edge_guard:=base_size.x*scale_value*.55+120.0
+            if absf(point.x)>playable_half_extent-edge_guard or absf(point.y)>playable_half_extent-edge_guard:continue
+            if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),120.0):continue
+            if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),150.0):continue
+            if _is_too_close_to_corridors(point,profile.get("trail_corridors",[]),76.0):continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),180.0):continue
+            if _is_near_bridge_site(point,profile.get("ford_sites",[]),250.0):continue
+            if _is_too_close_to_sites(point,profile.get("town_sites",[]),300.0):continue
+            var orientation:=Basis(Vector3.UP,-angle)
+            var minimum_y:=INF;var maximum_y:=-INF
+            var footprint_offsets:=[
+                Vector2.ZERO,Vector2(-base_size.x*.44,0),Vector2(base_size.x*.44,0),
+                Vector2(-base_size.x*.22,-base_size.z*.32),Vector2(-base_size.x*.22,base_size.z*.32),
+                Vector2(base_size.x*.22,-base_size.z*.32),Vector2(base_size.x*.22,base_size.z*.32),
+                Vector2(0,-base_size.z*.42),Vector2(0,base_size.z*.42),
+            ]
+            for local_offset_value in footprint_offsets:
+                var local_offset:Vector2=local_offset_value
+                var offset3:=orientation*Vector3(local_offset.x,0,local_offset.y)*scale_value
+                var sample_y:=float((sampler.call(point.x+offset3.x,point.y+offset3.z) as Vector3).y)
+                minimum_y=minf(minimum_y,sample_y);maximum_y=maxf(maximum_y,sample_y)
+            var relief:=maximum_y-minimum_y
+            if relief>base_size.y*scale_value*.36:continue
+            if minimum_y<=float(terrain_result.water_level)+7.0:continue
+            var half_probe:=base_size.x*scale_value*.38
+            var oriented_tangent:=tangent*side
+            var minus_point:=point-oriented_tangent*half_probe
+            var plus_point:=point+oriented_tangent*half_probe
+            var minus_y:=float((sampler.call(minus_point.x,minus_point.y) as Vector3).y)
+            var plus_y:=float((sampler.call(plus_point.x,plus_point.y) as Vector3).y)
+            var axis_x:=Vector3(oriented_tangent.x,(plus_y-minus_y)/(half_probe*2.0),oriented_tangent.y).normalized()
+            var axis_z:=Vector3(normal.x*side,0,normal.y*side).normalized()
+            var axis_y:=axis_z.cross(axis_x).normalized()
+            axis_z=axis_x.cross(axis_y).normalized()
+            var placement_basis:=Basis(axis_x,axis_y,axis_z)
+            var center_ground:Vector3=sampler.call(point.x,point.y)
+            var ground:=Vector3(point.x,center_ground.y-3.8*scale_value,point.y)
+            (transforms_by_kind[kind] as Array).append(Transform3D(placement_basis.scaled(Vector3.ONE*scale_value),ground))
+            for segment_index in range(4):
+                var height_factor:float=[.52,.88,.94,.58][segment_index]
+                var segment_height:=base_size.y*scale_value*height_factor
+                var local_x:=(float(segment_index)-1.5)*base_size.x*scale_value*.245
+                var shape:=BoxShape3D.new();shape.size=Vector3(base_size.x*scale_value*.235,segment_height,collision_depth*scale_value)
+                var collision:=CollisionShape3D.new();collision.shape=shape
+                collision.transform=Transform3D(placement_basis,ground+placement_basis*Vector3(local_x,segment_height*.5-1.2*scale_value,0))
+                collision_body.add_child(collision)
+            records.append({
+                "chain":str(chain.get("name","Mountain chain")),"kind":kind,"position":point,
+                "scale":scale_value,"relief":relief,"road_clearance":150.0,"river_clearance":120.0,
+                "town_clearance":300.0,"bridge_clearance":250.0,"edge_guard":edge_guard,
+            })
+            placed=true
+    var kind_counts:={}
+    for kind in meshes:
+        var typed_transforms:Array[Transform3D]=[]
+        for value in transforms_by_kind[kind]:typed_transforms.append(value as Transform3D)
+        kind_counts[kind]=typed_transforms.size()
+        var source_map:=_add_material_multimesh(root,meshes[kind],typed_transforms,null,true,2400.0,760.0)
+        var tagged_instances:Dictionary={}
+        for source_value in source_map.values():
+            var instance:MultiMeshInstance3D=source_value.get("instance")
+            if is_instance_valid(instance) and not tagged_instances.has(instance.get_instance_id()):
+                tagged_instances[instance.get_instance_id()]=true
+                instance.set_meta("mountain_cliff_wall_kind",kind)
+    root.set_meta("mountain_cliff_wall_count",records.size())
+    root.set_meta("mountain_cliff_wall_kind_counts",kind_counts)
+    root.set_meta("mountain_cliff_wall_records",records)
+
+
+func _build_volcanic_ecology(root:Node3D,profile:Dictionary,terrain_result:Dictionary)->void:
+    if str(profile.get("zone_id",""))!="east_marches":
+        root.set_meta("volcanic_ecology_count",0)
+        return
+    var volcano_center:=Vector2(INF,INF)
+    for site_value in profile.get("map_sites",[]):
+        if site_value is Dictionary and str(site_value.get("kind",""))=="volcano":
+            volcano_center=site_value.get("position",Vector2(INF,INF))
+            break
+    if not is_finite(volcano_center.x):
+        root.set_meta("volcanic_ecology_count",0)
+        return
+    var source:=VOLCANIC_ECOLOGY_KIT_SCENE.instantiate()
+    var meshes:={
+        "RopeyLavaShelf":_find_named_mesh_resource(source,"RopeyLavaShelf"),
+        "ObsidianShardCluster":_find_named_mesh_resource(source,"ObsidianShardCluster"),
+        "FumaroleVentCluster":_find_named_mesh_resource(source,"FumaroleVentCluster"),
+        "CharredVolcanicSnag":_find_named_mesh_resource(source,"CharredVolcanicSnag"),
+        "AshScrubCluster":_find_named_mesh_resource(source,"AshScrubCluster"),
+        "FireweedPatch":_find_named_mesh_resource(source,"FireweedPatch"),
+    }
+    source.free()
+    for kind in meshes:
+        if meshes[kind]==null:
+            root.set_meta("volcanic_ecology_count",0)
+            return
+    var snag_offsets:Array[Vector2]=[]
+    var scrub_offsets:Array[Vector2]=[]
+    var fireweed_offsets:Array[Vector2]=[]
+    for ecology_index in range(20):
+        var ecology_angle:=float(ecology_index)*2.399963+.17*sin(float(ecology_index)*1.37)
+        var ecology_radius:=560.0+float((ecology_index*97)%420)
+        snag_offsets.append(Vector2(cos(ecology_angle),sin(ecology_angle))*ecology_radius)
+    for ecology_index in range(34):
+        var ecology_angle:=float(ecology_index)*2.399963+.24*cos(float(ecology_index)*.93)
+        var ecology_radius:=390.0+float((ecology_index*83)%690)
+        scrub_offsets.append(Vector2(cos(ecology_angle),sin(ecology_angle))*ecology_radius)
+    for ecology_index in range(46):
+        var ecology_angle:=float(ecology_index)*2.399963+.31*sin(float(ecology_index)*.71)
+        var ecology_radius:=360.0+float((ecology_index*71)%780)
+        fireweed_offsets.append(Vector2(cos(ecology_angle),sin(ecology_angle))*ecology_radius)
+    var candidate_offsets:={
+        "RopeyLavaShelf":[
+            Vector2(-420,180),Vector2(380,160),Vector2(-520,-260),Vector2(520,-220),
+            Vector2(-120,460),Vector2(180,-520),Vector2(660,80),Vector2(-690,40),
+        ],
+        "ObsidianShardCluster":[
+            Vector2(-340,-420),Vector2(430,-420),Vector2(620,300),Vector2(-610,320),
+            Vector2(180,620),Vector2(-60,-680),Vector2(760,-280),Vector2(-760,-240),
+            Vector2(360,720),Vector2(-420,700),
+        ],
+        "FumaroleVentCluster":[
+            Vector2(250,-280),Vector2(-260,-320),Vector2(330,300),Vector2(-350,280),
+            Vector2(580,-40),Vector2(-560,20),Vector2(40,520),
+        ],
+        "CharredVolcanicSnag":snag_offsets,
+        "AshScrubCluster":scrub_offsets,
+        "FireweedPatch":fireweed_offsets,
+    }
+    var footprint_sizes:={
+        "RopeyLavaShelf":Vector2(22.0,9.0),
+        "ObsidianShardCluster":Vector2(9.0,8.0),
+        "FumaroleVentCluster":Vector2(10.0,8.0),
+        "CharredVolcanicSnag":Vector2(4.5,4.5),
+        "AshScrubCluster":Vector2(5.0,4.2),
+        "FireweedPatch":Vector2(4.8,3.8),
+    }
+    var max_relief:={
+        "RopeyLavaShelf":6.5,"ObsidianShardCluster":3.2,"FumaroleVentCluster":3.8,
+        "CharredVolcanicSnag":2.4,"AshScrubCluster":2.2,"FireweedPatch":1.8,
+    }
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var transforms_by_kind:={
+        "RopeyLavaShelf":[],"ObsidianShardCluster":[],"FumaroleVentCluster":[],
+        "CharredVolcanicSnag":[],"AshScrubCluster":[],"FireweedPatch":[],
+    }
+    var collision_body:=StaticBody3D.new();collision_body.name="VolcanicEcologyCollision";collision_body.collision_layer=1;root.add_child(collision_body)
+    var playable_half_extent:=float(profile.get("world_size",7200.0))*.5-120.0
+    for kind in candidate_offsets:
+        var footprint:Vector2=footprint_sizes[kind]
+        for candidate_index in range((candidate_offsets[kind] as Array).size()):
+            var raw_offset:Vector2=(candidate_offsets[kind] as Array)[candidate_index]
+            var yaw:=sin(float(candidate_index)*2.41+float(kind.hash()%19))*.78
+            var point:=volcano_center+raw_offset.rotated(.08*sin(float(candidate_index)*1.7))
+            # The height sampler clamps outside a tile; accepting those values
+            # would place visible ecology beyond the actual terrain mesh.
+            if absf(point.x)>playable_half_extent or absf(point.y)>playable_half_extent:continue
+            var river_clearance:=48.0 if kind in ["CharredVolcanicSnag","AshScrubCluster","FireweedPatch"] else 88.0
+            var road_clearance:=32.0 if kind=="CharredVolcanicSnag" else (18.0 if kind=="AshScrubCluster" else (12.0 if kind=="FireweedPatch" else 42.0))
+            var trail_clearance:=20.0 if kind=="CharredVolcanicSnag" else (10.0 if kind in ["AshScrubCluster","FireweedPatch"] else 26.0)
+            if _is_too_close_to_corridors(point,profile.get("river_corridors",[]),river_clearance):continue
+            if _is_too_close_to_corridors(point,profile.get("road_corridors",[]),road_clearance):continue
+            if _is_too_close_to_corridors(point,profile.get("trail_corridors",[]),trail_clearance):continue
+            if _is_inside_pond_water(point,profile.get("pond_sites",[]),18.0):continue
+            if _is_near_bridge_site(point,profile.get("ford_sites",[]),110.0):continue
+            if _is_too_close_to_sites(point,profile.get("town_sites",[]),120.0 if kind in ["AshScrubCluster","FireweedPatch"] else 150.0):continue
+            var scale_value:=1.0+float((candidate_index*5+kind.length())%5)*.10
+            if kind=="CharredVolcanicSnag":scale_value=.78+float(candidate_index%5)*.065
+            elif kind=="AshScrubCluster":scale_value=.82+float(candidate_index%6)*.055
+            elif kind=="FireweedPatch":scale_value=.76+float(candidate_index%7)*.045
+            var basis:=Basis(Vector3.UP,yaw)
+            var minimum_y:=INF;var maximum_y:=-INF
+            for local_offset in [
+                Vector2.ZERO,Vector2(-footprint.x*.42,-footprint.y*.42),Vector2(footprint.x*.42,-footprint.y*.42),
+                Vector2(-footprint.x*.42,footprint.y*.42),Vector2(footprint.x*.42,footprint.y*.42),
+            ]:
+                var offset3:=basis*Vector3(local_offset.x,0,local_offset.y)
+                var sample_y:=float((sampler.call(point.x+offset3.x*scale_value,point.y+offset3.z*scale_value) as Vector3).y)
+                minimum_y=minf(minimum_y,sample_y);maximum_y=maxf(maximum_y,sample_y)
+            if maximum_y-minimum_y>float(max_relief[kind])*scale_value:continue
+            if minimum_y<=float(terrain_result.water_level)+1.4:continue
+            var center_y:=float((sampler.call(point.x,point.y) as Vector3).y)
+            var ground:=Vector3(point.x,center_y+.035,point.y)
+            var placement_basis:=Basis(Vector3.UP,yaw)
+            # Fit every formation to the local mountain plane. Anchoring to
+            # the lowest footprint corner buried vents and glass clusters on
+            # slopes; a center sample plus local tangent plane keeps the base
+            # embedded without hiding or floating the authored mesh.
+            if kind!="CharredVolcanicSnag":
+                var probe:=minf(8.0,minf(footprint.x,footprint.y)*.42)*scale_value
+                var left_y:=float((sampler.call(point.x-probe,point.y) as Vector3).y)
+                var right_y:=float((sampler.call(point.x+probe,point.y) as Vector3).y)
+                var near_y:=float((sampler.call(point.x,point.y-probe) as Vector3).y)
+                var far_y:=float((sampler.call(point.x,point.y+probe) as Vector3).y)
+                var normal:=Vector3(left_y-right_y,probe*2.0,near_y-far_y).normalized()
+                var flow_x:=Vector3(cos(yaw),0,sin(yaw))
+                flow_x=(flow_x-normal*flow_x.dot(normal)).normalized()
+                var flow_z:=flow_x.cross(normal).normalized()
+                placement_basis=Basis(flow_x,normal,flow_z)
+            ground.y=center_y+(.10 if kind=="RopeyLavaShelf" else .035)
+            var transform:=Transform3D(placement_basis.scaled(Vector3.ONE*scale_value),ground)
+            (transforms_by_kind[kind] as Array).append(transform)
+            if kind in ["ObsidianShardCluster","FumaroleVentCluster","CharredVolcanicSnag"]:
+                var collision:=CollisionShape3D.new();var shape:=BoxShape3D.new()
+                if kind=="ObsidianShardCluster":shape.size=Vector3(7.2,6.8,6.4)*scale_value
+                elif kind=="FumaroleVentCluster":shape.size=Vector3(8.0,2.7,6.6)*scale_value
+                else:shape.size=Vector3(1.25,10.0,1.25)*scale_value
+                collision.shape=shape
+                collision.transform=Transform3D(placement_basis,ground+placement_basis.y*shape.size.y*.5)
+                collision_body.add_child(collision)
+    var counts:={}
+    for kind in meshes:
+        var typed_transforms:Array[Transform3D]=[]
+        for transform_value in transforms_by_kind[kind]:typed_transforms.append(transform_value as Transform3D)
+        counts[kind]=typed_transforms.size()
+        var shadows:bool=kind in ["ObsidianShardCluster","FumaroleVentCluster","CharredVolcanicSnag","AshScrubCluster"]
+        var visibility:float=980.0 if kind in ["RopeyLavaShelf","ObsidianShardCluster","FumaroleVentCluster","CharredVolcanicSnag"] else (620.0 if kind=="AshScrubCluster" else 430.0)
+        var source_map:=_add_material_multimesh(root,meshes[kind],typed_transforms,null,shadows,visibility,360.0)
+        var tagged_instances:Dictionary={}
+        for source_value in source_map.values():
+            var instance:MultiMeshInstance3D=source_value.get("instance")
+            if is_instance_valid(instance) and not tagged_instances.has(instance.get_instance_id()):
+                tagged_instances[instance.get_instance_id()]=true
+                instance.set_meta("volcanic_ecology_kind",kind)
+    root.set_meta("volcanic_ecology_kind_counts",counts)
+    var total_count:=0
+    for kind in counts:total_count+=int(counts[kind])
+    root.set_meta("volcanic_ecology_count",total_count)
+
+
 func _build_flower_meadows(root: Node3D, profile: Dictionary, terrain_result: Dictionary) -> void:
     var head_mesh := SphereMesh.new()
     head_mesh.radius = 0.085
@@ -4978,7 +5441,7 @@ func _build_river_ribbons(root: Node3D, corridors: Array, terrain_result: Dictio
         var river: MeshInstance3D = MeshInstance3D.new()
         river.name = "%s_Water" % corridor.get("name", "River")
         river.mesh = mesh
-        river.material_override = _make_water_material()
+        river.material_override = _make_water_material("river")
         # Transparent river surfaces must never cast a second, detached shape
         # onto the bed. That shadow made correctly submerged channel terrain
         # look like empty air beneath a floating blue sheet.
@@ -6227,11 +6690,13 @@ func _add_eastern_environment_piece(root:Node3D,mesh_name:String,ground:Vector3,
         elif "terracotta" in material_name:
             replacement=_make_texture_material("res://assets/architecture/clay_roof_v1.png",Color(.64,.24,.10),1.0,2.8)
         elif "dark oak" in material_name:
-            replacement=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.34,.20,.09),1.0,2.1)
+            # The former multiplier collapsed wagons, gates, benches and
+            # survey frames into near-black silhouettes under the March sun.
+            replacement=_make_texture_material("res://assets/architecture/dark_oak_v1.png",Color(.82,.58,.34),1.0,2.1)
         elif "striped canvas" in material_name:
             replacement=_make_texture_material("res://assets/architecture/aged_plaster_v1.png",Color(.72,.43,.14),1.0,1.8)
         elif "aged bronze" in material_name:
-            replacement=_make_material(Color(.32,.24,.10),.68)
+            replacement=_make_material(Color(.43,.32,.14),.68)
         elif "beacon ember" in material_name:
             replacement=_make_lit_window_material(Color(1.0,.24,.035))
         if replacement!=null:piece.set_surface_override_material(surface_index,replacement)
@@ -6716,7 +7181,7 @@ func _add_walkable_ramp_collision(ramp:MeshInstance3D,start2:Vector2,end2:Vector
     var body:=StaticBody3D.new()
     body.name="WalkableStairSlopeCollision"
     body.collision_layer=1
-    body.add_to_group("walkable_building_stair")
+    body.add_to_group("walkable_building_stair",true)
     body.basis=Basis(across,normal,forward)
     body.position=Vector3((start2.x+end2.x)*.5,(start_y+end_y)*.5,(start2.y+end2.y)*.5)-normal*thickness*.5
     var collision:=CollisionShape3D.new()
@@ -7380,8 +7845,9 @@ void fragment() {
     return material
 
 
-func _make_water_material() -> ShaderMaterial:
-    if _shared_materials.has("water"):return _shared_materials.water
+func _make_water_material(surface_kind:String="still") -> ShaderMaterial:
+    var cache_key:="water|%s"%surface_kind
+    if _shared_materials.has(cache_key):return _shared_materials[cache_key]
     var material := ShaderMaterial.new()
     var shader := Shader.new()
     shader.code = """
@@ -7390,6 +7856,7 @@ render_mode blend_mix, depth_prepass_alpha, cull_disabled, diffuse_burley, specu
 
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_texture : hint_depth_texture, filter_nearest;
+uniform float flow_strength = 0.0;
 
 varying vec3 world_position;
 
@@ -7401,6 +7868,10 @@ void vertex() {
     vec3 before = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     float surface_wave = sin(before.x * 0.061 + before.z * 0.083 - TIME * 0.92) * 0.020;
     surface_wave += sin(before.x * -0.113 + before.z * 0.049 - TIME * 0.57) * 0.012;
+    // Ribbon V increases from the authored source toward the mouth. This low
+    // travelling wave therefore moves downstream rather than sliding in an
+    // arbitrary world-space direction across every bend.
+    surface_wave += sin(UV.y * 5.4 - TIME * 2.15 + UV.x * 1.7) * 0.010 * flow_strength;
     VERTEX.y += surface_wave * center_mask;
     world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -7427,20 +7898,41 @@ void fragment() {
     surface_view.xyz /= max(surface_view.w, 0.0001);
     float water_depth = clamp((-scene_view.z) - (-surface_view.z), 0.0, 12.0);
     float depth_mix = smoothstep(0.15, 4.8, water_depth);
+    // The physical channel bed is deliberately shallow enough to wade at its
+    // margins. Preserve measured scene depth, but reinforce the authored
+    // river cross-section so its center reads deeper than its banks even when
+    // a coarse terrain triangle makes the depth buffer nearly uniform.
+    float section_depth = (1.0 - smoothstep(0.03, 0.49, abs(UV.x - 0.5))) * 0.38 * flow_strength;
+    float visual_depth = max(depth_mix, section_depth);
 
-    vec2 distortion = NORMAL.xz * mix(0.003, 0.011, depth_mix);
-    vec3 refracted = textureLod(screen_texture, SCREEN_UV + distortion, depth_mix * 0.24).rgb;
+    vec2 distortion = NORMAL.xz * mix(0.003, 0.011, visual_depth);
+    vec3 refracted = textureLod(screen_texture, SCREEN_UV + distortion, visual_depth * 0.24).rgb;
     vec3 shallow_water = vec3(0.016, 0.105, 0.135);
     vec3 deep_water = vec3(0.004, 0.028, 0.058);
-    vec3 water_tint = mix(shallow_water, deep_water, depth_mix);
-    vec3 transmitted = mix(refracted * vec3(0.34, 0.52, 0.55), water_tint, 0.93 + depth_mix * 0.045);
+    vec3 water_tint = mix(shallow_water, deep_water, visual_depth);
+    vec3 transmitted = mix(refracted * vec3(0.34, 0.52, 0.55), water_tint, 0.93 + visual_depth * 0.045);
     float caustic_a = sin(world_position.x * 0.092 + world_position.z * 0.138 - TIME * 1.18);
     float caustic_b = sin(world_position.x * -0.127 + world_position.z * 0.104 - TIME * 0.83);
-    float caustics = pow(max(0.0, caustic_a * caustic_b), 3.0) * (1.0 - depth_mix);
+    float caustics = pow(max(0.0, caustic_a * caustic_b), 3.0) * (1.0 - visual_depth);
     transmitted += vec3(0.025, 0.060, 0.055) * caustics;
 
     float fresnel = pow(1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0), 3.2);
     float flow_glint = smoothstep(0.72, 0.98, along_a * 0.5 + along_b * 0.28 + 0.64);
+    // Long, broken current threads advance with UV.y, which follows the river
+    // centerline from source to mouth. Two frequencies prevent the cue from
+    // reading as repeating stripes while retaining a legible flow direction.
+    float current_a = sin(UV.y * 4.1 - TIME * 2.45 + sin(UV.x * 13.0) * 0.58) * 0.5 + 0.5;
+    float current_b = sin(UV.y * 7.7 - TIME * 3.20 - UV.x * 9.0) * 0.5 + 0.5;
+    float current_lane = smoothstep(0.79, 0.98, current_a * 0.76 + current_b * 0.24);
+    float channel_mask = smoothstep(0.045, 0.19, UV.x) * (1.0 - smoothstep(0.81, 0.955, UV.x));
+    float strand_center_a = 0.31 + sin(UV.y * 0.31) * 0.055 + sin(UV.y * 0.093) * 0.025;
+    float strand_center_b = 0.68 + sin(UV.y * 0.27 + 2.4) * 0.060;
+    float strand_a = 1.0 - smoothstep(0.018, 0.060, abs(UV.x - strand_center_a));
+    float strand_b = 1.0 - smoothstep(0.016, 0.052, abs(UV.x - strand_center_b));
+    float pulse_a = smoothstep(0.18, 0.78, sin(UV.y * 2.15 - TIME * 1.85) * 0.5 + 0.5);
+    float pulse_b = smoothstep(0.22, 0.82, sin(UV.y * 2.70 - TIME * 2.15 + 1.7) * 0.5 + 0.5);
+    float broken_strands = strand_a * pulse_a + strand_b * pulse_b;
+    float current_cue = (current_lane * 0.44 + broken_strands * 0.72) * channel_mask * flow_strength;
     // Strong ribbon-edge foam exposed every overlapping tributary mesh as a
     // white diagonal at confluences. Keep only a restrained shoreline glint.
     float bank_edge = smoothstep(0.47, 0.50, abs(UV.x - 0.5)) * 0.14;
@@ -7448,11 +7940,12 @@ void fragment() {
     float foam = clamp(bank_edge * foam_noise * 0.38, 0.0, 0.38);
     vec3 reflected_sky = vec3(0.075, 0.21, 0.29);
     vec3 final_color = mix(transmitted, reflected_sky, fresnel * 0.23 + flow_glint * 0.020);
+    final_color = mix(final_color, vec3(0.24, 0.48, 0.53), clamp(current_cue * 0.18, 0.0, 0.24));
     final_color = mix(final_color, vec3(0.025, 0.12, 0.13), bank_edge * (1.0 - foam) * 0.16);
     final_color = mix(final_color, vec3(0.76, 0.86, 0.84), foam);
 
     ALBEDO = final_color;
-    ROUGHNESS = clamp(0.14 + foam * 0.18 + (small_ripple * 0.5 + 0.5) * 0.045, 0.13, 0.34);
+    ROUGHNESS = clamp(0.14 + foam * 0.18 + (small_ripple * 0.5 + 0.5) * 0.045 - current_cue * 0.025, 0.11, 0.34);
     METALLIC = 0.0;
     SPECULAR = 0.68;
     // Fade the liquid into the submerged wet-soil strip over its outer few
@@ -7465,7 +7958,8 @@ void fragment() {
 }
 """
     material.shader = shader
-    _shared_materials.water=material
+    material.set_shader_parameter("flow_strength",1.0 if surface_kind=="river" else 0.0)
+    _shared_materials[cache_key]=material
     return material
 
 
@@ -7705,6 +8199,20 @@ func _make_material(color: Color, roughness: float) -> StandardMaterial3D:
     return material
 
 
+func _make_cliff_rock_material(color:Color)->StandardMaterial3D:
+    var key:="cliff_rock|%s"%color.to_html(true)
+    if _shared_materials.has(key):return _shared_materials[key]
+    var material:=_make_texture_material("res://assets/terrain/highland_stone_v1.png",color,1.0,2.6).duplicate() as StandardMaterial3D
+    # A very small diffuse lift keeps broad cliff faces readable while they
+    # are turned away from the sun.  It is deliberately below torch/glow
+    # strength and does not flatten direct-light shading.
+    material.emission_enabled=true
+    material.emission=color*.18
+    material.emission_energy_multiplier=.42
+    _shared_materials[key]=material
+    return material
+
+
 func _make_texture_material(path: String, tint: Color, roughness: float, uv_scale: float) -> StandardMaterial3D:
     var key:="texture|%s|%s|%.3f|%.3f"%[path,tint.to_html(true),roughness,uv_scale]
     if _shared_materials.has(key):return _shared_materials[key]
@@ -7872,19 +8380,145 @@ func _build_wayfinding_landmarks(root: Node3D, profile: Dictionary, terrain_resu
                 label.no_depth_test = false
                 marker.add_child(label)
 
-    var spawn: Vector2 = profile.get("spawn_site", {}).get("position", Vector2.ZERO)
-    var sign2 := spawn + Vector2(15.0, 14.0)
-    var sign_ground: Vector3 = terrain_result.height_sampler.call(sign2.x, sign2.y)
-    var signpost := Node3D.new()
-    signpost.position = sign_ground
-    signpost.rotation.y = -0.48
-    root.add_child(signpost)
-    _solid_box(signpost, Vector3(0.38, 4.5, 0.38), Vector3(0.0, 2.25, 0.0), timber)
-    _solid_box(signpost, Vector3(5.2, 1.55, 0.26), Vector3(0.0, 3.45, 0.30), carved_wood)
-    _add_front_sign_label(signpost, "HIGHFIELD  NORTH\nWESTMERE  WEST   EASTREACH  EAST\nSOUTHBANK / CROWNSPIRE  SOUTH", Vector3(0.0, 3.45, 0.445), 29, 0.0075)
+    _build_regional_travel_signs(root,profile,terrain_result,timber,carved_wood)
 
 
-func _add_front_sign_label(root: Node3D, text: String, center: Vector3, font_size: int, pixel_size: float) -> void:
+func _build_regional_travel_signs(
+    root:Node3D,profile:Dictionary,terrain_result:Dictionary,timber:Material,carved_wood:Material
+)->void:
+    # Every settlement declares why it exists and which places it connects to.
+    # Turn that authored travel graph into physical road guidance instead of
+    # stamping the old Riverwatch destination board into every streamed biome.
+    var destination_lookup:Dictionary={}
+    var destination_sites:Array=[]
+    var spawn_site:Dictionary=profile.get("spawn_site",{})
+    if not spawn_site.is_empty():destination_sites.append(spawn_site)
+    destination_sites.append_array(profile.get("town_sites",[]))
+    destination_sites.append_array(profile.get("map_sites",[]))
+    for site_value in destination_sites:
+        if not site_value is Dictionary:continue
+        var site:Dictionary=site_value
+        var site_name:=str(site.get("name",""))
+        if not site_name.is_empty():destination_lookup[site_name]=site.get("position",Vector2.ZERO)
+    # A connection may name the settlement in an adjacent streamed tile. The
+    # local road endpoint still provides the correct direction toward it.
+    for corridor_value in profile.get("road_corridors",[]):
+        if not corridor_value is Dictionary:continue
+        var corridor:Dictionary=corridor_value
+        var destinations:Array=corridor.get("destinations",[])
+        var points:Array=corridor.get("points",[])
+        if destinations.is_empty() or points.is_empty():continue
+        for destination_index in range(destinations.size()):
+            var destination_name:=str(destinations[destination_index])
+            if destination_lookup.has(destination_name):continue
+            var fraction:=float(destination_index)/float(maxi(1,destinations.size()-1))
+            var point_index:=clampi(roundi(fraction*float(points.size()-1)),0,points.size()-1)
+            destination_lookup[destination_name]=points[point_index]
+
+    var sign_sites:Array=[]
+    if not spawn_site.is_empty():sign_sites.append(spawn_site)
+    sign_sites.append_array(profile.get("town_sites",[]))
+    var sampler:Callable=terrain_result.get("terrain_height_sampler",terrain_result.height_sampler)
+    var stone:=_make_texture_material("res://assets/architecture/castle_stone_v1.png",Color(.55,.52,.43),1.0,2.7)
+    var label_color:=_regional_sign_text_color(str(profile.get("biome_id","")))
+    var sign_count:=0
+    var sign_labels:Array[String]=[]
+    for site_index in range(sign_sites.size()):
+        var site:Dictionary=sign_sites[site_index]
+        var connections:Array=site.get("connections",[])
+        if connections.is_empty():continue
+        var center:Vector2=site.get("position",Vector2.ZERO)
+        var road_info:=_nearest_corridor_segment(center,profile.get("road_corridors",[]))
+        if road_info.is_empty():continue
+        var road_direction:Vector2=road_info.get("direction",Vector2(0,1)).normalized()
+        var road_normal:=Vector2(-road_direction.y,road_direction.x)
+        var site_radius:=float(site.get("radius",120.0))
+        var road_width:=float(road_info.get("width",14.0))
+        var approach_sign:=-1.0 if site_index%2==0 else 1.0
+        var marker_point:=center-road_direction*(site_radius+15.0)+road_normal*(road_width*.64+2.3)*approach_sign
+        # If the chosen shoulder conflicts with water or a bridge landing, use
+        # the opposite shoulder. This keeps guidance useful without becoming a
+        # new traversal obstruction at the exact place it is meant to explain.
+        if _is_too_close_to_corridors(marker_point,profile.get("river_corridors",[]),34.0) or _is_near_bridge_site(marker_point,profile.get("ford_sites",[]),64.0):
+            marker_point=center-road_direction*(site_radius+15.0)-road_normal*(road_width*.64+2.3)*approach_sign
+        var ground:Vector3=sampler.call(marker_point.x,marker_point.y)
+        var marker:=Node3D.new()
+        marker.name="Travel Sign — %s"%str(site.get("name","Settlement"))
+        marker.position=ground
+        marker.set_meta("regional_travel_sign",true)
+        marker.set_meta("settlement",str(site.get("name","")))
+        marker.set_meta("observer_direction",(center-marker_point).normalized())
+        marker.set_meta("batch_static_collision",true)
+        marker.add_to_group("regional_travel_sign",true)
+        root.add_child(marker)
+        _solid_box(marker,Vector3(.92,.48,.92),Vector3(0,.24,0),stone)
+        _solid_box(marker,Vector3(.32,5.2,.32),Vector3(0,2.6,0),timber)
+        var arm_index:=0
+        for connection_value in connections:
+            if arm_index>=4:break
+            var destination_name:=str(connection_value)
+            if not destination_lookup.has(destination_name):continue
+            var target:Vector2=destination_lookup[destination_name]
+            if target.distance_to(center)<32.0:continue
+            var distance_m:=marker_point.distance_to(target)
+            var distance_text:="%d M"%roundi(distance_m) if distance_m<1000.0 else "%.1f KM"%(distance_m/1000.0)
+            var board_text:="%s  %s"%[destination_name.to_upper(),distance_text]
+            _add_regional_sign_arm(
+                marker,marker_point,target,center,board_text,arm_index,
+                timber,carved_wood,label_color
+            )
+            sign_labels.append(board_text)
+            arm_index+=1
+        if arm_index==0:
+            root.remove_child(marker)
+            marker.free()
+            continue
+        marker.set_meta("destination_count",arm_index)
+        sign_count+=1
+    root.set_meta("regional_travel_sign_count",sign_count)
+    root.set_meta("regional_travel_sign_labels",sign_labels)
+
+
+func _add_regional_sign_arm(
+    marker:Node3D,marker_point:Vector2,target:Vector2,observer:Vector2,label_text:String,
+    arm_index:int,timber:Material,carved_wood:Material,label_color:Color
+)->void:
+    var direction:Vector2=(target-marker_point).normalized()
+    var yaw:=-atan2(direction.y,direction.x)
+    var arm:=Node3D.new()
+    arm.name="Destination Arm %d"%(arm_index+1)
+    arm.rotation.y=yaw
+    marker.add_child(arm)
+    var board_width:=clampf(2.85+float(label_text.length())*.064,3.35,4.75)
+    var board_height:=2.38+float(arm_index)*.63
+    var board_center_x:=board_width*.45
+    _solid_box(arm,Vector3(board_width,.54,.19),Vector3(board_center_x,board_height,.09),carved_wood)
+    # A small joined diamond cap reads as an arrow point without adding a
+    # disconnected floating triangle or a second collision sliver.
+    var arrow_cap:=_visual_box(arm,Vector3(.44,.44,.21),Vector3(board_width*.93,board_height,.09),timber)
+    arrow_cap.rotation.z=PI*.25
+    var local_front_world:=Basis(Vector3.UP,yaw)*Vector3(0,0,1)
+    var observer_direction:=Vector3(observer.x-marker_point.x,0,observer.y-marker_point.y).normalized()
+    var front_sign:=1.0 if local_front_world.dot(observer_direction)>=0.0 else -1.0
+    var label:=_add_front_sign_label(
+        arm,label_text,Vector3(board_center_x,board_height,.205*front_sign),28,.0053
+    )
+    label.modulate=label_color
+    if front_sign<0.0:label.rotation.y=PI
+
+
+func _regional_sign_text_color(biome_id:String)->Color:
+    match biome_id:
+        "glacial_range":return Color(.84,.94,1.0)
+        "subarctic_coast":return Color(.82,.92,.85)
+        "continental_marches":return Color(1.0,.78,.43)
+        "stormbreak_highlands":return Color(.93,.82,.60)
+        "rainward_woodland":return Color(.84,.94,.68)
+        "alpine_frontier":return Color(.90,.94,.78)
+        _:return Color(.98,.86,.62)
+
+
+func _add_front_sign_label(root: Node3D, text: String, center: Vector3, font_size: int, pixel_size: float) -> Label3D:
     var label := Label3D.new()
     label.text = text
     label.position = center
@@ -7896,3 +8530,4 @@ func _add_front_sign_label(root: Node3D, text: String, center: Vector3, font_siz
     label.double_sided = false
     label.no_depth_test = false
     root.add_child(label)
+    return label

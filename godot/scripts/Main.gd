@@ -45,7 +45,10 @@ const EAST_REGION_OFFSET:=Vector2(7200.0,0.0)
 const EAST_REGION_SEAM_X:=3600.0
 const STORMBREAK_REGION_OFFSET:=Vector2(-7200.0,-7200.0)
 const SKELD_REGION_OFFSET:=Vector2(-7200.0,-14400.0)
+const SOUTHERN_REGION_OFFSET:=Vector2(0.0,7200.0)
+const SOUTHERN_REGION_SEAM_Z:=3600.0
 const REGION_PRELOAD_Z:=-1800.0
+const SOUTHERN_PRELOAD_Z:=1800.0
 const GLACIAL_PRELOAD_Z:=-7600.0
 const WESTERN_PRELOAD_X:=-1800.0
 const EAST_PRELOAD_X:=1800.0
@@ -57,6 +60,8 @@ const REGION_ACTIVATE_WESTERN_X:=-3300.0
 const REGION_ACTIVATE_START_FROM_WEST_X:=-3180.0
 const REGION_ACTIVATE_EAST_X:=3300.0
 const REGION_ACTIVATE_START_FROM_EAST_X:=3180.0
+const REGION_ACTIVATE_SOUTH_Z:=3300.0
+const REGION_ACTIVATE_START_FROM_SOUTH_Z:=3180.0
 var _region_contexts:Dictionary={}
 var _north_region_loading:=false
 var _north_region_ready:=false
@@ -70,8 +75,13 @@ var _stormbreak_region_loading:=false
 var _stormbreak_region_ready:=false
 var _skeld_region_loading:=false
 var _skeld_region_ready:=false
+var _southern_region_loading:=false
+var _southern_region_ready:=false
+var _region_stream_pipeline_zone:=""
+var _region_stream_phase:="idle"
 var _region_stream_tick:=0.0
 var _region_gameplay_transition_busy:=false
+var _region_visual_residency:Dictionary={}
 var _persistent_region_state:Dictionary={}
 var _world_atlas_profile:Dictionary={}
 var _planned_north_global_profile:Dictionary={}
@@ -80,6 +90,7 @@ var _planned_western_global_profile:Dictionary={}
 var _planned_east_global_profile:Dictionary={}
 var _planned_stormbreak_global_profile:Dictionary={}
 var _planned_skeld_global_profile:Dictionary={}
+var _planned_southern_global_profile:Dictionary={}
 var _geographic_region_id:="starting_realm"
 
 
@@ -137,6 +148,8 @@ func boot_world(progress_callback: Callable = Callable(), show_internal_overlay:
     _planned_stormbreak_global_profile=_world_profile.offset_profile(planned_stormbreak_profile,planned_stormbreak_profile.get("region_origin",STORMBREAK_REGION_OFFSET))
     var planned_skeld_profile:Dictionary=_world_profile.make_zone_profile("skeld_coast")
     _planned_skeld_global_profile=_world_profile.offset_profile(planned_skeld_profile,planned_skeld_profile.get("region_origin",SKELD_REGION_OFFSET))
+    var planned_southern_profile:Dictionary=_world_profile.make_zone_profile("sunscar_drylands")
+    _planned_southern_global_profile=_world_profile.offset_profile(planned_southern_profile,planned_southern_profile.get("region_origin",SOUTHERN_REGION_OFFSET))
     _profile_build_checkpoint("terrain")
     _report_boot_status("Starting gameplay systems...", 58.0, progress_callback, show_internal_overlay)
     await get_tree().process_frame
@@ -146,6 +159,8 @@ func boot_world(progress_callback: Callable = Callable(), show_internal_overlay:
     $GameplayDirector.configure($Player, Callable(self,"_sample_global_height"), Callable(self,"_sample_global_walkable"), global_start_profile)
     if not $Player.environment_damage_requested.is_connected($GameplayDirector.apply_environment_damage):
         $Player.environment_damage_requested.connect($GameplayDirector.apply_environment_damage)
+    if not $Player.swimming_changed.is_connected(_on_player_swimming_changed):
+        $Player.swimming_changed.connect(_on_player_swimming_changed)
     _profile_build_checkpoint("gameplay")
     _create_admin_marker()
     _report_boot_status("Preparing maps and interface...", 76.0, progress_callback, show_internal_overlay)
@@ -267,6 +282,7 @@ func _try_install_streamed_visual_bake(zone_id:String,region_root:Node3D)->bool:
     var bake_path:=WorldPreviewBuilder.streamed_visual_bake_path(zone_id)
     if not ResourceLoader.exists(bake_path):return false
     var started_usec:=Time.get_ticks_usec()
+    _region_stream_phase="loading_visual_resource"
     var request_error:=ResourceLoader.load_threaded_request(bake_path,"PackedScene",true)
     if request_error!=OK:return false
     var load_status:=ResourceLoader.load_threaded_get_status(bake_path)
@@ -276,8 +292,26 @@ func _try_install_streamed_visual_bake(zone_id:String,region_root:Node3D)->bool:
     if load_status!=ResourceLoader.THREAD_LOAD_LOADED:return false
     var packed:=ResourceLoader.load_threaded_get(bake_path) as PackedScene
     if packed==null:return false
+    # Godot explicitly permits constructing a scene chunk away from the active
+    # SceneTree on a worker thread.  These regional bakes contain ten to fifteen
+    # thousand nodes, so instantiating one on the game thread caused a visible
+    # 100-200 ms hitch even though its resource had already loaded.  Region
+    # streaming is serialized by `_region_stream_pipeline_zone`, which also
+    # guarantees that only one worker touches the shared bake resources at once.
+    _region_stream_phase="instantiating_visuals_offtree"
     var instantiate_started_usec:=Time.get_ticks_usec()
-    var baked_root:=packed.instantiate() as Node3D
+    var instantiate_thread:=Thread.new()
+    var thread_error:=instantiate_thread.start(func()->Node3D:
+        return packed.instantiate() as Node3D
+    )
+    var baked_root:Node3D
+    if thread_error==OK:
+        while instantiate_thread.is_alive():
+            await get_tree().process_frame
+        baked_root=instantiate_thread.wait_to_finish() as Node3D
+    else:
+        push_warning("Unable to start the %s visual-bake worker; using the main thread."%zone_id)
+        baked_root=packed.instantiate() as Node3D
     var instantiate_usec:=Time.get_ticks_usec()-instantiate_started_usec
     if baked_root==null:return false
     var expected_signature:=WorldPreviewBuilder.streamed_visual_bake_signature(zone_id)
@@ -288,25 +322,124 @@ func _try_install_streamed_visual_bake(zone_id:String,region_root:Node3D)->bool:
     var root_names:Array=baked_root.get_meta("population_root_names",[])
     for root_name_value in root_names:
         var root_name:=str(root_name_value)
+        _region_stream_phase="installing_%s"%root_name
         var baked_population_root:=baked_root.get_node_or_null(root_name) as Node3D
         var current_population_root:=region_root.get_node_or_null(root_name)
         if baked_population_root==null:
             baked_root.free();return false
         baked_root.remove_child(baked_population_root)
-        _clear_runtime_scene_owners(baked_population_root)
-        if current_population_root!=null:
-            region_root.remove_child(current_population_root);current_population_root.free()
-        region_root.add_child(baked_population_root);baked_population_root.name=root_name
+        await _install_streamed_population_root(
+            region_root,baked_population_root,current_population_root,root_name
+        )
     baked_root.free()
     for root_name_value in root_names:
         var population_root:=region_root.get_node(str(root_name_value))
-        for meta_name in population_root.get_meta_list():
-            population_root.set_meta(meta_name,_resolve_baked_node_references(population_root.get_meta(meta_name),region_root))
+        _region_stream_phase="resolving_%s_metadata"%str(root_name_value)
+        await _resolve_streamed_population_metadata(population_root,region_root)
     if OS.get_environment("BROKEN_KNIGHT_PROFILE_BUILD")=="1":
         print("STREAMED_WORLD_VISUAL_BAKE|zone=%s|status=loaded|instantiate_ms=%.1f|total_ms=%.1f|signature=%s"%[
             zone_id,float(instantiate_usec)/1000.0,float(Time.get_ticks_usec()-started_usec)/1000.0,expected_signature.left(12),
         ])
     return true
+
+
+func _resolve_streamed_population_metadata(population_root:Node,region_root:Node)->void:
+    # Tree, rock, and collision registries contain thousands of small records.
+    # Resolve their baked NodePaths in slices so registry reconstruction cannot
+    # become one final streaming hitch after all visuals have entered the tree.
+    var entries_per_frame:=512 if get_tree().paused or _map_open or _menu_open else 48
+    for meta_name in population_root.get_meta_list():
+        var value:Variant=population_root.get_meta(meta_name)
+        if value is Array and value.size()>entries_per_frame:
+            var resolved:Array=[]
+            resolved.resize(value.size())
+            for index in range(value.size()):
+                resolved[index]=_resolve_baked_node_references(value[index],region_root)
+                if (index+1)%entries_per_frame==0:await get_tree().process_frame
+            population_root.set_meta(meta_name,resolved)
+        else:
+            population_root.set_meta(meta_name,_resolve_baked_node_references(value,region_root))
+
+
+func _install_streamed_population_root(
+    region_root:Node3D,baked_population_root:Node3D,current_population_root:Node,root_name:String
+)->void:
+    # Entering a 9,000-node TownRoot in one operation is just as expensive as
+    # instantiating it on the main thread.  The packed scene is already complete
+    # off-tree, so detach its direct authored clusters and enter those clusters
+    # over several frames.  No content is removed and each building/collision
+    # assembly stays intact; the region is still far outside the player's view.
+    var incremental:=root_name in ["TownRoot","PropsRoot"]
+    if not incremental:
+        _clear_runtime_scene_owners(baked_population_root)
+        if current_population_root!=null:
+            region_root.remove_child(current_population_root);current_population_root.free()
+        region_root.add_child(baked_population_root);baked_population_root.name=root_name
+        await get_tree().process_frame
+        return
+    var staged_children:Array[Node]=[]
+    for child in baked_population_root.get_children():
+        baked_population_root.remove_child(child)
+        staged_children.append(child)
+    baked_population_root.owner=null
+    if current_population_root!=null:
+        region_root.remove_child(current_population_root);current_population_root.free()
+    region_root.add_child(baked_population_root);baked_population_root.name=root_name
+    # Town children are coherent houses/settlements and may themselves exceed
+    # the target. Props are mostly tiny MultiMesh instances, so a smaller batch
+    # keeps renderer registration inside a normal 60 FPS frame budget.
+    var streaming_under_cover:=get_tree().paused or _map_open or _menu_open
+    var node_budget:=(900 if root_name=="TownRoot" else 1100) if streaming_under_cover else (60 if root_name=="TownRoot" else 100)
+    var rest_frames:=0 if streaming_under_cover else 2
+    await _enter_offtree_children_in_batches(baked_population_root,staged_children,node_budget,rest_frames)
+
+
+func _enter_offtree_children_in_batches(parent:Node,staged_children:Array[Node],node_budget:int,rest_frames:int)->void:
+    var pending:Array=[]
+    for child in staged_children:pending.append({"parent":parent,"node":child})
+    var batch_nodes:=0
+    while not pending.is_empty():
+        var task:Dictionary=pending.pop_front()
+        var target_parent:=task.parent as Node
+        var child:=task.node as Node
+        var child_nodes:=_count_offtree_nodes(child)
+        # Large authoring containers (town hubs and batched collision bodies)
+        # are safe to enter empty, then receive their existing children in the
+        # same order. Never split scripted nodes: their _ready() contract may
+        # require the complete child assembly on the first tree notification.
+        var can_split:=child_nodes>node_budget and child.get_script()==null and child.get_child_count()>0
+        if can_split:
+            var grandchildren:Array[Node]=[]
+            for grandchild in child.get_children():
+                child.remove_child(grandchild)
+                grandchildren.append(grandchild)
+            if batch_nodes+1>node_budget:
+                for _frame in range(rest_frames+1):await get_tree().process_frame
+                batch_nodes=0
+            child.owner=null
+            target_parent.add_child(child)
+            batch_nodes+=1
+            var insertion:Array=[]
+            for grandchild in grandchildren:insertion.append({"parent":child,"node":grandchild})
+            pending=insertion+pending
+            continue
+        if batch_nodes>0 and batch_nodes+child_nodes>node_budget:
+            for _frame in range(rest_frames+1):await get_tree().process_frame
+            batch_nodes=0
+        _clear_runtime_scene_owners(child)
+        target_parent.add_child(child)
+        batch_nodes+=child_nodes
+        if batch_nodes>=node_budget:
+            for _frame in range(rest_frames+1):await get_tree().process_frame
+            batch_nodes=0
+    if batch_nodes>0:
+        for _frame in range(rest_frames+1):await get_tree().process_frame
+
+
+func _count_offtree_nodes(node:Node)->int:
+    var count:=1
+    for child in node.get_children():count+=_count_offtree_nodes(child)
+    return count
 
 
 func _clear_runtime_scene_owners(node:Node)->void:
@@ -337,14 +470,14 @@ func _register_region_context(zone_id:String,region_root:Node3D,offset:Vector2,l
     }
 
 
-func _make_streamed_region_root(zone_id:String,offset:Vector2)->Node3D:
+func _make_streamed_region_root(zone_id:String,offset:Vector2,attach_to_world:bool=true)->Node3D:
     var streamed_root:Node3D=$WorldRoot.get_node_or_null("StreamedRegions")
     if streamed_root==null:
         streamed_root=Node3D.new();streamed_root.name="StreamedRegions";$WorldRoot.add_child(streamed_root)
     var region_root:=Node3D.new()
     region_root.name=zone_id.to_pascal_case()
     region_root.position=Vector3(offset.x,0.0,offset.y)
-    streamed_root.add_child(region_root)
+    if attach_to_world:streamed_root.add_child(region_root)
     for child_name in ["TerrainRoot","RiverRoot","RoadRoot","BridgeRoot","TownRoot","PropsRoot"]:
         var child:=Node3D.new();child.name=child_name;region_root.add_child(child)
     return region_root
@@ -377,6 +510,10 @@ func _ensure_skeld_region_loaded()->void:
     await _ensure_streamed_region_loaded("skeld_coast")
 
 
+func _ensure_southern_region_loaded()->void:
+    await _ensure_streamed_region_loaded("sunscar_drylands")
+
+
 func _stream_region_ready(zone_id:String)->bool:
     if zone_id=="north_frontier":return _north_region_ready
     if zone_id=="glacial_range":return _glacial_region_ready
@@ -384,6 +521,7 @@ func _stream_region_ready(zone_id:String)->bool:
     if zone_id=="east_marches":return _east_region_ready
     if zone_id=="stormbreak_highlands":return _stormbreak_region_ready
     if zone_id=="skeld_coast":return _skeld_region_ready
+    if zone_id=="sunscar_drylands":return _southern_region_ready
     return _region_contexts.has(zone_id)
 
 
@@ -394,6 +532,7 @@ func _stream_region_loading(zone_id:String)->bool:
     if zone_id=="east_marches":return _east_region_loading
     if zone_id=="stormbreak_highlands":return _stormbreak_region_loading
     if zone_id=="skeld_coast":return _skeld_region_loading
+    if zone_id=="sunscar_drylands":return _southern_region_loading
     return false
 
 
@@ -404,6 +543,7 @@ func _set_stream_region_loading(zone_id:String,value:bool)->void:
     elif zone_id=="east_marches":_east_region_loading=value
     elif zone_id=="stormbreak_highlands":_stormbreak_region_loading=value
     elif zone_id=="skeld_coast":_skeld_region_loading=value
+    elif zone_id=="sunscar_drylands":_southern_region_loading=value
 
 
 func _set_stream_region_ready(zone_id:String,value:bool)->void:
@@ -413,13 +553,22 @@ func _set_stream_region_ready(zone_id:String,value:bool)->void:
     elif zone_id=="east_marches":_east_region_ready=value
     elif zone_id=="stormbreak_highlands":_stormbreak_region_ready=value
     elif zone_id=="skeld_coast":_skeld_region_ready=value
+    elif zone_id=="sunscar_drylands":_southern_region_ready=value
 
 
 func _ensure_streamed_region_loaded(zone_id:String)->void:
-    if _stream_region_ready(zone_id):return
-    if _stream_region_loading(zone_id):
-        while _stream_region_loading(zone_id):await get_tree().process_frame
-        return
+    # Packed-scene installation, terrain mesh creation and gameplay service
+    # construction all touch renderer resources. Keep streamed region builds
+    # serialized so two neighboring preloads cannot interleave those writes
+    # during a fast horse ride or repeated map teleports.
+    while true:
+        if _stream_region_ready(zone_id):return
+        if _stream_region_loading(zone_id):
+            while _stream_region_loading(zone_id):await get_tree().process_frame
+            if _stream_region_ready(zone_id):return
+        if _region_stream_pipeline_zone.is_empty():break
+        await get_tree().process_frame
+    _region_stream_pipeline_zone=zone_id
     _set_stream_region_loading(zone_id,true)
     var local_profile:Dictionary=_world_profile.make_zone_profile(zone_id)
     var fallback_offset:=NORTH_REGION_OFFSET
@@ -428,8 +577,13 @@ func _ensure_streamed_region_loaded(zone_id:String)->void:
     elif zone_id=="east_marches":fallback_offset=EAST_REGION_OFFSET
     elif zone_id=="stormbreak_highlands":fallback_offset=STORMBREAK_REGION_OFFSET
     elif zone_id=="skeld_coast":fallback_offset=SKELD_REGION_OFFSET
+    elif zone_id=="sunscar_drylands":fallback_offset=SOUTHERN_REGION_OFFSET
     var offset:Vector2=local_profile.get("region_origin",fallback_offset)
-    var region_root:=_make_streamed_region_root(zone_id,offset)
+    # Construct the terrain scene chunk off the active tree. Godot supports
+    # building off-tree chunks on a worker; adding the completed three-node
+    # terrain assembly is substantially cheaper than generating meshes,
+    # materials, and height-map collision during a live travel frame.
+    var region_root:=_make_streamed_region_root(zone_id,offset,false)
     var terrain_builder:=TerrainBuilder.new()
     var preview_builder:=WorldPreviewBuilder.new()
     var stream_started_usec:int=Time.get_ticks_usec()
@@ -441,9 +595,21 @@ func _ensure_streamed_region_loaded(zone_id:String)->void:
     # more than a kilometre inside Northwood. Visual population is then spread
     # across frames so the crossing itself remains hitch-free.
     await get_tree().process_frame
+    _region_stream_phase="creating_terrain"
     terrain_started_usec=Time.get_ticks_usec()
-    var result:Dictionary=terrain_builder.generate_world(region_root.get_node("TerrainRoot"),local_profile)
+    var terrain_thread:=Thread.new()
+    var terrain_thread_error:=terrain_thread.start(func()->Dictionary:
+        return terrain_builder.generate_world(region_root.get_node("TerrainRoot"),local_profile)
+    )
+    var result:Dictionary={}
+    if terrain_thread_error==OK:
+        while terrain_thread.is_alive():await get_tree().process_frame
+        result=terrain_thread.wait_to_finish()
+    else:
+        push_warning("Unable to start the %s terrain worker; using the main thread."%zone_id)
+        result=terrain_builder.generate_world(region_root.get_node("TerrainRoot"),local_profile)
     terrain_elapsed_usec=Time.get_ticks_usec()-terrain_started_usec
+    await _attach_streamed_terrain_in_slices(region_root)
     _register_region_context(zone_id,region_root,offset,local_profile,result,terrain_builder,preview_builder)
     var visual_bake_loaded:=await _try_install_streamed_visual_bake(zone_id,region_root)
     if not visual_bake_loaded:
@@ -470,19 +636,132 @@ func _ensure_streamed_region_loaded(zone_id:String)->void:
     # the normal incremental preload is already running. This prevents shader
     # and visibility pipelines from compiling on the first player-visible turn
     # toward a distant settlement, without moving or dismounting the hero.
+    _region_stream_phase="warming_renderer"
     await _warm_streamed_region_render(zone_id,local_profile,offset)
     _set_stream_region_ready(zone_id,true)
-    _set_stream_region_loading(zone_id,false)
+    _region_stream_phase="refreshing_atlas"
+    var finalize_atlas_started:=Time.get_ticks_usec()
     _refresh_world_atlas()
-    $GameplayDirector.refresh_populated_world_registries()
+    var finalize_atlas_usec:=Time.get_ticks_usec()-finalize_atlas_started
+    await get_tree().process_frame
+    # The active GameplayDirector must not index doors, harvestables, and prop
+    # collisions in a remote region. Its streamed configuration rebuilds those
+    # registries when the player actually crosses the seam; doing it here was a
+    # redundant whole-world scan and caused the last preload-completion hitch.
+    var finalize_registry_usec:=0
+    _region_stream_phase="refreshing_torches"
+    var finalize_torches_started:=Time.get_ticks_usec()
     _town_torches=get_tree().get_nodes_in_group("town_torches")
+    var finalize_torches_usec:=Time.get_ticks_usec()-finalize_torches_started
+    _set_stream_region_loading(zone_id,false)
+    _region_stream_pipeline_zone=""
+    _region_stream_phase="idle"
     if OS.get_environment("BROKEN_KNIGHT_PROFILE_BUILD")=="1":
+        print("REGION_STREAM_FINALIZE_PROFILE|zone=%s|atlas_ms=%.1f|registries_ms=%.1f|torches_ms=%.1f"%[
+            zone_id,float(finalize_atlas_usec)/1000.0,float(finalize_registry_usec)/1000.0,float(finalize_torches_usec)/1000.0,
+        ])
         print("REGION_STREAM_PROFILE|zone=%s|terrain_ms=%.1f|visual_bake=%s|slowest_job=%s|slowest_job_ms=%.1f|total_ms=%.1f"%[
             zone_id,float(terrain_elapsed_usec)/1000.0,str(visual_bake_loaded),slowest_job_label,float(slowest_job_usec)/1000.0,
             float(Time.get_ticks_usec()-stream_started_usec)/1000.0,
         ])
     var opened_name:=str(local_profile.get("zone_name",zone_id))
     $UI/OldHud.show_notification("%s is ready"%opened_name,Color(.66,.86,1.0))
+
+
+func _attach_streamed_terrain_in_slices(region_root:Node3D)->void:
+    # A completed HeightMapShape still has to register 103k samples with the
+    # physics server when it enters the active tree. Separate visual, body, and
+    # shape entry so mesh upload and collision registration never share the
+    # same travel frame.
+    var terrain_root:=region_root.get_node("TerrainRoot") as Node3D
+    _split_streamed_heightmap_collision(terrain_root)
+    if get_tree().paused or _map_open or _menu_open:
+        ($WorldRoot.get_node("StreamedRegions") as Node3D).add_child(region_root)
+        await get_tree().process_frame
+        return
+    var terrain_nodes:Array[Node]=[]
+    var bodies_by_terrain:Dictionary={}
+    var shapes_by_body:Dictionary={}
+    for terrain_node in terrain_root.get_children():
+        terrain_root.remove_child(terrain_node)
+        terrain_nodes.append(terrain_node)
+        var bodies:Array[Node]=[]
+        for body in terrain_node.get_children():
+            terrain_node.remove_child(body)
+            bodies.append(body)
+            var shapes:Array[Node]=[]
+            for shape in body.get_children():
+                body.remove_child(shape)
+                shapes.append(shape)
+            shapes_by_body[body]=shapes
+        bodies_by_terrain[terrain_node]=bodies
+    ($WorldRoot.get_node("StreamedRegions") as Node3D).add_child(region_root)
+    await get_tree().process_frame
+    for terrain_node in terrain_nodes:
+        _region_stream_phase="attaching_terrain_visual"
+        terrain_root.add_child(terrain_node)
+        await get_tree().process_frame
+        for body in bodies_by_terrain.get(terrain_node,[]):
+            _region_stream_phase="attaching_terrain_body"
+            terrain_node.add_child(body)
+            await get_tree().process_frame
+            for shape in shapes_by_body.get(body,[]):
+                _region_stream_phase="attaching_terrain_collision"
+                body.add_child(shape)
+                await get_tree().process_frame
+
+
+func _split_streamed_heightmap_collision(terrain_root:Node3D)->void:
+    # A single 321x321 HeightMapShape registers all 103k samples atomically.
+    # Four overlapping 161x161 quadrants are physically identical at their
+    # shared rows, but PhysicsServer can register one quadrant per frame.
+    for terrain_node in terrain_root.get_children():
+        for body in terrain_node.get_children():
+            for collision_value in body.get_children():
+                if not collision_value is CollisionShape3D:continue
+                var original:=collision_value as CollisionShape3D
+                if not original.shape is HeightMapShape3D:continue
+                var source:=original.shape as HeightMapShape3D
+                var source_width:=source.map_width
+                var source_depth:=source.map_depth
+                if source_width<201 or source_depth<201:continue
+                var cells_x:=source_width-1
+                var cells_z:=source_depth-1
+                if cells_x%2!=0 or cells_z%2!=0:continue
+                var half_x:=int(cells_x/2)
+                var half_z:=int(cells_z/2)
+                var source_data:=source.map_data
+                var original_position:=original.position
+                var original_scale:=original.scale
+                body.remove_child(original)
+                original.free()
+                for tile_z in range(2):
+                    for tile_x in range(2):
+                        var tile_width:=half_x+1
+                        var tile_depth:=half_z+1
+                        var tile_data:=PackedFloat32Array()
+                        tile_data.resize(tile_width*tile_depth)
+                        var start_x:=tile_x*half_x
+                        var start_z:=tile_z*half_z
+                        for local_z in range(tile_depth):
+                            var source_row:=(start_z+local_z)*source_width+start_x
+                            var tile_row:=local_z*tile_width
+                            for local_x in range(tile_width):
+                                tile_data[tile_row+local_x]=source_data[source_row+local_x]
+                        var tile_shape:=HeightMapShape3D.new()
+                        tile_shape.map_width=tile_width
+                        tile_shape.map_depth=tile_depth
+                        tile_shape.map_data=tile_data
+                        var tile_collision:=CollisionShape3D.new()
+                        tile_collision.name="TerrainHeightmapQuadrant_%d_%d"%[tile_x,tile_z]
+                        tile_collision.shape=tile_shape
+                        tile_collision.scale=original_scale
+                        var center_sample_x:=float(start_x)+float(half_x)*.5-float(cells_x)*.5
+                        var center_sample_z:=float(start_z)+float(half_z)*.5-float(cells_z)*.5
+                        tile_collision.position=original_position+Vector3(
+                            center_sample_x*original_scale.x,0.0,center_sample_z*original_scale.z
+                        )
+                        body.add_child(tile_collision)
 
 
 func _warm_streamed_region_render(zone_id:String,profile:Dictionary,offset:Vector2)->void:
@@ -557,8 +836,10 @@ func _refresh_world_atlas()->void:
     elif not _planned_stormbreak_global_profile.is_empty():profiles.append(_planned_stormbreak_global_profile)
     if _region_contexts.has("skeld_coast"):profiles.append(_region_contexts["skeld_coast"].global_profile)
     elif not _planned_skeld_global_profile.is_empty():profiles.append(_planned_skeld_global_profile)
+    if _region_contexts.has("sunscar_drylands"):profiles.append(_region_contexts["sunscar_drylands"].global_profile)
+    elif not _planned_southern_global_profile.is_empty():profiles.append(_planned_southern_global_profile)
     _world_atlas_profile=_world_profile.make_world_atlas(profiles)
-    _world_atlas_profile["stream_revision"]=(1 if _north_region_ready else 0)+(2 if _glacial_region_ready else 0)+(4 if _western_region_ready else 0)+(8 if _stormbreak_region_ready else 0)+(16 if _skeld_region_ready else 0)+(32 if _east_region_ready else 0)
+    _world_atlas_profile["stream_revision"]=(1 if _north_region_ready else 0)+(2 if _glacial_region_ready else 0)+(4 if _western_region_ready else 0)+(8 if _stormbreak_region_ready else 0)+(16 if _skeld_region_ready else 0)+(32 if _east_region_ready else 0)+(64 if _southern_region_ready else 0)
     $UI/WorldMap.configure(_world_atlas_profile,$Player,$GameplayDirector,Callable(self,"_sample_global_terrain_height"))
     $UI/Minimap.configure(_world_atlas_profile,$Player,$GameplayDirector,Callable(self,"_sample_global_terrain_height"))
     var extent:Vector2=_world_atlas_profile.get("map_extent",Vector2.ONE*7200.0)
@@ -593,6 +874,112 @@ func _sample_global_height(x:float,z:float)->Vector3:
     var local_point:=Vector2(x,z)-offset
     var sampled:Vector3=context.result.height_sampler.call(local_point.x,local_point.y)
     return Vector3(x,sampled.y,z)
+
+
+func _sample_global_water_state(x:float,z:float)->Dictionary:
+    var context:=_region_context_for_point(x,z)
+    if context.is_empty():return {}
+    var local_point:=Vector2(x,z)-Vector2(context.get("offset",Vector2.ZERO))
+    var profile:Dictionary=context.get("local_profile",{})
+    var result:Dictionary=context.get("result",{})
+    var terrain_sampler:Callable=result.get("terrain_height_sampler",result.get("height_sampler",Callable()))
+    if not terrain_sampler.is_valid():return {}
+    var terrain_y:=float((terrain_sampler.call(local_point.x,local_point.y) as Vector3).y)
+
+    # Ocean owns its river-mouth overlap; once west of the authored coastline,
+    # the player is in the Grey Sea rather than an infinitely extended river.
+    for basin_value in profile.get("ocean_basins",[]):
+        if not basin_value is Dictionary:continue
+        var basin:Dictionary=basin_value
+        if str(basin.get("kind",""))!="coast" or str(basin.get("edge","west"))!="west":continue
+        var coast_x:=_coast_x_at_z(local_point.y,basin.get("coast_points",[]))
+        var offshore:=coast_x-local_point.x
+        if offshore<=.20:continue
+        var ocean_surface:=float(basin.get("water_height",-.6))
+        var ocean_flow:=Vector2(-1.0,sin(local_point.y*.0023)*.18).normalized()
+        return {
+            "in_water":true,"kind":"ocean","name":str(basin.get("name","Open Sea")),
+            "surface_y":ocean_surface,"depth":maxf(0.0,ocean_surface-terrain_y),
+            "flow_direction":ocean_flow,"flow_strength":clampf(.34+offshore/250.0,.34,2.25),
+            "hazard":true,"offshore_distance":offshore,
+        }
+
+    for pond_value in profile.get("pond_sites",[]):
+        if not pond_value is Dictionary:continue
+        var pond:Dictionary=pond_value
+        var center:Vector2=pond.get("position",Vector2.ZERO)
+        var delta:=local_point-center
+        var angle:=atan2(delta.y,delta.x)
+        var radius:=float(pond.get("radius",70.0))*1.18
+        var irregularity:=1.0+sin(angle*3.0+center.x*.0017)*.11+sin(angle*7.0+center.y*.0011)*.055
+        if delta.length()>radius*irregularity-.30:continue
+        var pond_surface:=float(pond.get("water_height",1.2))+.055
+        return {
+            "in_water":true,"kind":"pond","name":str(pond.get("name","Pond")),
+            "surface_y":pond_surface,"depth":maxf(0.0,pond_surface-terrain_y),
+            "flow_direction":Vector2.ZERO,"flow_strength":0.0,"hazard":false,
+        }
+
+    var river_info:=_nearest_water_corridor(local_point,profile.get("river_corridors",[]))
+    if not river_info.is_empty():
+        var river:Dictionary=river_info.corridor
+        var width:=_river_width_at_progress(river,float(river_info.progress))
+        if float(river_info.distance)<=width*.5-.25:
+            var river_sampler:Callable=result.get("river_height_sampler",terrain_sampler)
+            var river_surface:=float((river_sampler.call(local_point.x,local_point.y) as Vector3).y)+float(profile.get("river_water_lift",1.35))
+            return {
+                "in_water":true,"kind":"river","name":str(river.get("name","River")),
+                "surface_y":river_surface,"depth":maxf(0.0,river_surface-terrain_y),
+                "flow_direction":Vector2(river_info.direction),"flow_strength":clampf(.48+width*.010,.48,1.05),
+                "hazard":false,"progress":float(river_info.progress),
+            }
+    return {}
+
+
+func _nearest_water_corridor(point:Vector2,corridors:Array)->Dictionary:
+    var best:Dictionary={}
+    var best_distance:=INF
+    for corridor_value in corridors:
+        if not corridor_value is Dictionary:continue
+        var corridor:Dictionary=corridor_value
+        var points:Array=corridor.get("points",[])
+        if points.size()<2:continue
+        for index in range(points.size()-1):
+            var a:=Vector2(points[index]);var b:=Vector2(points[index+1])
+            var ab:=b-a;var length_squared:=ab.length_squared()
+            var t:=0.0 if length_squared<=.0001 else clampf((point-a).dot(ab)/length_squared,0.0,1.0)
+            var distance:=point.distance_to(a+ab*t)
+            if distance>=best_distance:continue
+            best_distance=distance
+            best={
+                "corridor":corridor,"distance":distance,
+                "progress":(float(index)+t)/float(points.size()-1),
+                "direction":ab.normalized() if length_squared>.0001 else Vector2.ZERO,
+            }
+    return best
+
+
+func _river_width_at_progress(river:Dictionary,progress:float)->float:
+    var fallback:=float(river.get("width",36.0))
+    var source:=float(river.get("source_width",fallback))
+    var mouth:=float(river.get("mouth_width",fallback))
+    return lerpf(source,mouth,clampf(progress,0.0,1.0))
+
+
+func _coast_x_at_z(z:float,points:Array)->float:
+    if points.is_empty():return -INF
+    var nearest_x:=float(Vector2(points[0]).x)
+    var nearest_delta:=absf(z-float(Vector2(points[0]).y))
+    for index in range(points.size()-1):
+        var a:=Vector2(points[index]);var b:=Vector2(points[index+1])
+        var segment_delta:=minf(absf(z-a.y),absf(z-b.y))
+        if segment_delta<nearest_delta:
+            nearest_delta=segment_delta
+            nearest_x=a.x if absf(z-a.y)<absf(z-b.y) else b.x
+        if z>=minf(a.y,b.y) and z<=maxf(a.y,b.y):
+            var t:=0.0 if absf(b.y-a.y)<.0001 else clampf((z-a.y)/(b.y-a.y),0.0,1.0)
+            return lerpf(a.x,b.x,t)
+    return nearest_x
 
 
 func _sample_global_terrain_height(x:float,z:float)->Vector3:
@@ -658,12 +1045,17 @@ func _near_loaded_streaming_seam(context:Dictionary,local_point:Vector2,world_si
 
 func _update_region_streaming(delta:float)->void:
     if not is_instance_valid($Player) or (_dungeon_visual_mode and $Player.is_interior_mode()):return
-    if _active_zone_id not in ["starting_realm","north_frontier","glacial_range","western_reaches","east_marches","stormbreak_highlands","skeld_coast"]:return
+    if _active_zone_id not in ["starting_realm","north_frontier","glacial_range","western_reaches","east_marches","stormbreak_highlands","skeld_coast","sunscar_drylands"]:return
+    # Do not construct an adjacent region while GameplayDirector is replacing
+    # its current region services. The next streaming tick will resume preload
+    # immediately after the transition finishes.
+    if _region_gameplay_transition_busy:return
     _region_stream_tick+=delta
     if _region_stream_tick<.22:return
     _region_stream_tick=0.0
     var player_z:float=$Player.global_position.z
     var player_x:float=$Player.global_position.x
+    _update_region_visual_residency(player_x,player_z)
     # Only preload a cardinal neighbor while the player is actually travelling
     # through that neighbor's approach corridor. The previous sign-only checks
     # loaded Northwood from far-eastern Cinderwatch (and the Western Reaches at
@@ -678,16 +1070,17 @@ func _update_region_streaming(delta:float)->void:
         _ensure_western_region_loaded()
     if player_x>EAST_PRELOAD_X and in_central_west_east_corridor and not _east_region_ready and not _east_region_loading:
         _ensure_east_region_loaded()
-    var nearing_stormbreak:=\
-        (player_x<-3600.0 and player_z<-400.0) or \
-        (player_z<-3600.0 and player_x<-400.0) or \
-        (player_x<-2000.0 and player_z<-2000.0)
+    if player_z>SOUTHERN_PRELOAD_Z and in_central_north_corridor and not _southern_region_ready and not _southern_region_loading:
+        _ensure_southern_region_loaded()
+    # Stormbreak occupies the north-west tile. Require meaningful progress on
+    # both axes; the old broad OR clauses loaded it from Pinewatch merely
+    # because that town sits 470 m west of the atlas centreline.
+    var nearing_stormbreak:=player_x<WESTERN_PRELOAD_X and player_z<REGION_PRELOAD_Z and player_x>-10800.0 and player_z>-10800.0
     if nearing_stormbreak and not _stormbreak_region_ready and not _stormbreak_region_loading:
         _ensure_stormbreak_region_loaded()
-    var nearing_skeld:=\
-        (player_x<-3600.0 and player_z<-7600.0) or \
-        (player_z<-10800.0 and player_x<-400.0) or \
-        (player_x<-2200.0 and player_z<-9200.0)
+    # Skeld is the far north-west coast, not a neighbor of the central glacial
+    # corridor. Both westward and northward progress are required.
+    var nearing_skeld:=player_x<WESTERN_PRELOAD_X and player_z<-9200.0
     if nearing_skeld and not _skeld_region_ready and not _skeld_region_loading:
         _ensure_skeld_region_loaded()
     _prepare_gameplay_region_for_position(player_z,player_x)
@@ -700,11 +1093,58 @@ func _update_region_streaming(delta:float)->void:
         $UI/OldHud.show_notification(region_name,Color(1.0,.78,.30))
 
 
+func _update_region_visual_residency(player_x:float,player_z:float)->void:
+    # Keep authored state resident (felled trees, doors, discoveries), but do
+    # not render or process every previously visited 7.2 km tile forever. A
+    # generous hysteresis band wakes neighbors well before they are visible and
+    # sleeps them only after the player is several kilometres beyond the seam.
+    var force_visible:=_admin_view
+    for zone_value in _region_contexts.keys():
+        var zone_id:=str(zone_value)
+        var context:Dictionary=_region_contexts[zone_id]
+        var offset:Vector2=context.get("offset",Vector2.ZERO)
+        var half_size:=float(context.get("local_profile",{}).get("world_size",7200.0))*.5
+        var outside_x:=maxf(0.0,absf(player_x-offset.x)-half_size)
+        var outside_z:=maxf(0.0,absf(player_z-offset.y)-half_size)
+        var distance_to_tile:=Vector2(outside_x,outside_z).length()
+        var resident:=bool(_region_visual_residency.get(zone_id,true))
+        if force_visible or zone_id==_active_zone_id:
+            resident=true
+        elif resident and distance_to_tile>2500.0:
+            resident=false
+        elif not resident and distance_to_tile<1600.0:
+            resident=true
+        _set_region_visual_resident(zone_id,context,resident)
+
+
+func _set_region_visual_resident(zone_id:String,context:Dictionary,resident:bool)->void:
+    if bool(_region_visual_residency.get(zone_id,true))==resident and _region_visual_residency.has(zone_id):return
+    _region_visual_residency[zone_id]=resident
+    var region_root:=context.get("root") as Node3D
+    if not is_instance_valid(region_root):return
+    if zone_id!="starting_realm":
+        region_root.visible=resident
+        region_root.process_mode=Node.PROCESS_MODE_INHERIT if resident else Node.PROCESS_MODE_DISABLED
+        return
+    # WorldRoot also owns StreamedRegions, lighting-independent global systems,
+    # and cannot be hidden wholesale. Suspend only the starter tile's authored
+    # population and terrain roots.
+    for root_name in ["TerrainRoot","RiverRoot","RoadRoot","BridgeRoot","TownRoot","PropsRoot"]:
+        var population_root:=region_root.get_node_or_null(root_name) as Node3D
+        if not is_instance_valid(population_root):continue
+        population_root.visible=resident
+        population_root.process_mode=Node.PROCESS_MODE_INHERIT if resident else Node.PROCESS_MODE_DISABLED
+
+
 func _prepare_gameplay_region_for_position(player_z:float,player_x:float=INF)->void:
-    if _region_gameplay_transition_busy:return
+    if _region_gameplay_transition_busy or not _region_stream_pipeline_zone.is_empty():return
     if not is_finite(player_x):player_x=$Player.global_position.x
     var target_zone:=_active_zone_id
-    if _east_region_ready and player_x>REGION_ACTIVATE_EAST_X and absf(player_z)<3600.0:
+    if _southern_region_ready and player_z>REGION_ACTIVATE_SOUTH_Z and absf(player_x)<3600.0:
+        target_zone="sunscar_drylands"
+    elif _active_zone_id=="sunscar_drylands" and player_z<REGION_ACTIVATE_START_FROM_SOUTH_Z:
+        target_zone="starting_realm"
+    elif _east_region_ready and player_x>REGION_ACTIVATE_EAST_X and absf(player_z)<3600.0:
         target_zone="east_marches"
     elif _active_zone_id=="east_marches" and player_x<REGION_ACTIVATE_START_FROM_EAST_X:
         target_zone="starting_realm"
@@ -728,7 +1168,7 @@ func _prepare_gameplay_region_for_position(player_z:float,player_x:float=INF)->v
         target_zone="glacial_range"
     elif _north_region_ready and player_z<REGION_ACTIVATE_NORTH_Z:
         target_zone="north_frontier"
-    elif player_z>REGION_ACTIVATE_START_Z:
+    elif player_z>REGION_ACTIVATE_START_Z and _active_zone_id!="sunscar_drylands":
         target_zone="starting_realm"
     elif _active_zone_id=="glacial_range" and player_z>REGION_ACTIVATE_FRONTIER_Z:
         target_zone="north_frontier"
@@ -743,6 +1183,11 @@ func _activate_streamed_gameplay_region(zone_id:String)->void:
     $GameplayDirector.clear_for_zone_reload(true)
     _active_zone_id=zone_id
     var context:Dictionary=_region_contexts[zone_id]
+    # A region preloaded while the player was several kilometres away may be
+    # visually suspended by residency management. Wake the newly active tile
+    # immediately so map travel and test teleports never show an empty sky for
+    # the next 0.22-second streaming poll.
+    _update_region_visual_residency($Player.global_position.x,$Player.global_position.z)
     _active_profile=context.global_profile
     await $GameplayDirector.configure_streamed(
         $Player,Callable(self,"_sample_global_height"),
@@ -751,7 +1196,9 @@ func _activate_streamed_gameplay_region(zone_id:String)->void:
     $GameplayDirector.load_zone_transition_state(_persistent_region_state)
     if not _world_atlas_profile.is_empty():
         $UI/WorldMap.configure(_world_atlas_profile,$Player,$GameplayDirector,Callable(self,"_sample_global_terrain_height"))
+        await get_tree().process_frame
         $UI/Minimap.configure(_world_atlas_profile,$Player,$GameplayDirector,Callable(self,"_sample_global_terrain_height"))
+        await get_tree().process_frame
     _town_torches=get_tree().get_nodes_in_group("town_torches")
     _region_gameplay_transition_busy=false
     if OS.get_environment("BROKEN_KNIGHT_PROFILE_BUILD")=="1":
@@ -808,7 +1255,7 @@ func _load_zone(zone_id:String,entry_edge:String)->void:
     # The north frontier is an outdoor streaming seam, not a portal reload.
     # Retain this method for the older east/west zones until each receives its
     # own authored neighbouring region.
-    var seamless_regions:=["starting_realm","north_frontier","glacial_range","western_reaches","east_marches","stormbreak_highlands","skeld_coast"]
+    var seamless_regions:=["starting_realm","north_frontier","glacial_range","western_reaches","east_marches","stormbreak_highlands","skeld_coast","sunscar_drylands"]
     if zone_id in seamless_regions and (_active_zone_id in seamless_regions):
         if zone_id=="glacial_range":await _ensure_glacial_region_loaded()
         elif zone_id=="north_frontier":await _ensure_north_region_loaded()
@@ -816,6 +1263,7 @@ func _load_zone(zone_id:String,entry_edge:String)->void:
         elif zone_id=="east_marches":await _ensure_east_region_loaded()
         elif zone_id=="stormbreak_highlands":await _ensure_stormbreak_region_loaded()
         elif zone_id=="skeld_coast":await _ensure_skeld_region_loaded()
+        elif zone_id=="sunscar_drylands":await _ensure_southern_region_loaded()
         return
     if zone_id==_active_zone_id:return
     get_tree().paused=true
@@ -830,6 +1278,7 @@ func _load_zone(zone_id:String,entry_edge:String)->void:
     _east_region_ready=false;_east_region_loading=false
     _stormbreak_region_ready=false;_stormbreak_region_loading=false
     _skeld_region_ready=false;_skeld_region_loading=false
+    _southern_region_ready=false;_southern_region_loading=false
     _world_atlas_profile={}
     _active_zone_id=zone_id
     var profile:Dictionary=_world_profile.make_zone_profile(zone_id)
@@ -848,7 +1297,7 @@ func _load_zone(zone_id:String,entry_edge:String)->void:
     elif entry_edge=="east":entry_point=Vector2(margin,0)
     elif entry_edge=="west":entry_point=Vector2(-margin,0)
     var spawn_position:Vector3=_world_result.height_sampler.call(entry_point.x,entry_point.y)
-    $Player.configure_world(Callable(self,"_sample_global_height"),spawn_position+Vector3.UP*.08,Callable(self,"_sample_global_walkable"),Callable(self,"_sample_global_structure_height"))
+    $Player.configure_world(Callable(self,"_sample_global_height"),spawn_position+Vector3.UP*.08,Callable(self,"_sample_global_walkable"),Callable(self,"_sample_global_structure_height"),Callable(self,"_sample_global_water_state"))
     $Player.set_interior_mode(false)
     $GameplayDirector.configure($Player,Callable(self,"_sample_global_height"),Callable(self,"_sample_global_walkable"),global_profile)
     $GameplayDirector.load_zone_transition_state(gameplay_progress)
@@ -946,8 +1395,17 @@ func _position_player(spawn_position: Vector3) -> void:
     var player: CharacterBody3D = $Player
     player.configure_world(
         Callable(self,"_sample_global_height"),spawn_position,
-        Callable(self,"_sample_global_walkable"),Callable(self,"_sample_global_structure_height")
+        Callable(self,"_sample_global_walkable"),Callable(self,"_sample_global_structure_height"),
+        Callable(self,"_sample_global_water_state")
     )
+
+
+func _on_player_swimming_changed(active:bool,water_kind:String,water_name:String)->void:
+    if not active:return
+    if water_kind=="ocean":
+        $UI/OldHud.show_notification("%s — strong current; stamina drains quickly"%water_name,Color(.46,.78,1.0))
+    else:
+        $UI/OldHud.show_notification("Swimming in %s — Shift swims faster"%water_name,Color(.52,.82,1.0))
 
 
 func _create_admin_marker() -> void:
@@ -1035,7 +1493,9 @@ func _teleport_from_world_map(world_point: Vector2) -> void:
     # offscreen teleport. Suppressing that redundant redraw saves a complete
     # second rendering of the detailed atlas during every map teleport.
     $UI/WorldMap.set_process(false)
-    if world_point.x<WESTERN_REGION_SEAM_X+160.0 and world_point.y<GLACIAL_REGION_SEAM_Z+160.0:
+    if world_point.y>SOUTHERN_REGION_SEAM_Z-160.0 and absf(world_point.x)<3760.0:
+        await _ensure_southern_region_loaded()
+    elif world_point.x<WESTERN_REGION_SEAM_X+160.0 and world_point.y<GLACIAL_REGION_SEAM_Z+160.0:
         await _ensure_skeld_region_loaded()
     elif world_point.x<WESTERN_REGION_SEAM_X+160.0 and world_point.y<NORTH_REGION_SEAM_Z+160.0 and world_point.y>GLACIAL_REGION_SEAM_Z-160.0:
         await _ensure_stormbreak_region_loaded()
@@ -1047,6 +1507,11 @@ func _teleport_from_world_map(world_point: Vector2) -> void:
         await _ensure_glacial_region_loaded()
     elif world_point.y<NORTH_REGION_SEAM_Z+160.0:
         await _ensure_north_region_loaded()
+    # A map jump can land beyond the natural preload line of the next northern
+    # tile. Prepare that tile while the opaque map still covers the transition
+    # instead of letting its terrain cache land on the first walking frame.
+    if world_point.y<GLACIAL_PRELOAD_Z and absf(world_point.x)<4200.0:
+        await _ensure_glacial_region_loaded()
     var map_profile:Dictionary=_world_atlas_profile if not _world_atlas_profile.is_empty() else _active_profile
     var extent:Vector2=map_profile.get("map_extent",Vector2.ONE*float(map_profile.get("world_size",7200.0)))
     var center:Vector2=map_profile.get("map_center",Vector2.ZERO)
@@ -1057,7 +1522,16 @@ func _teleport_from_world_map(world_point: Vector2) -> void:
     )
     var destination:Vector3=_sample_global_height(safe_point.x,safe_point.y)
     $Player.teleport_to_surface(destination + Vector3.UP * 0.08)
-    _prepare_gameplay_region_for_position(safe_point.y,safe_point.x)
+    # A previous geographic handoff may still be finishing when the player
+    # immediately chooses another map destination. Let it finish, then request
+    # the profile for the actual destination; otherwise the busy guard drops
+    # this request and gameplay remains one region behind the player.
+    while _region_gameplay_transition_busy:
+        await get_tree().process_frame
+    var destination_context:=_region_context_for_point(safe_point.x,safe_point.y)
+    var destination_zone:=str(destination_context.get("id",_active_zone_id))
+    if destination_zone!=_active_zone_id:
+        await _activate_streamed_gameplay_region(destination_zone)
     # A long atlas teleport can cross more than one streamed region. Finish the
     # destination gameplay profile while the opaque, paused map still covers
     # the scene; otherwise the first controllable frame can inherit AI/service
@@ -1078,9 +1552,11 @@ func _teleport_from_world_map(world_point: Vector2) -> void:
     # Let visibility, shadow and local collision queues settle at the new
     # horizon before input returns. These are real destination frames, merely
     # presented beneath the still-open map.
+    var can_await_presented_frame:=DisplayServer.get_name()!="headless"
     for _warm_frame in range(4):
         await get_tree().process_frame
-        await RenderingServer.frame_post_draw
+        if can_await_presented_frame:
+            await RenderingServer.frame_post_draw
     # Swap the large map for the local HUD while input is still withheld. The
     # minimap has its own destination texture/canvas warm-up; exposing it and
     # restoring movement in the same frame was the remaining teleport hitch.
@@ -1091,7 +1567,8 @@ func _teleport_from_world_map(world_point: Vector2) -> void:
     $Player.set_input_enabled(false)
     for _hud_warm_frame in range(2):
         await get_tree().process_frame
-        await RenderingServer.frame_post_draw
+        if can_await_presented_frame:
+            await RenderingServer.frame_post_draw
     _sync_pause_state()
 
 
@@ -1506,6 +1983,17 @@ func _apply_region_atmosphere(zone_id:String)->void:
             cloud_bias=.030
             cloud_tint_strength=.20
             cloud_tint=Color(.86,.91,.94)
+        "sunscar_drylands":
+            env.fog_density=.000052
+            env.fog_light_color=Color(.82,.75,.60)
+            env.fog_height=13.0
+            env.fog_height_density=.0010
+            env.adjustment_saturation=1.055
+            env.adjustment_contrast=1.025
+            env.adjustment_brightness=.945
+            cloud_bias=-.032
+            cloud_tint_strength=.16
+            cloud_tint=Color(.94,.84,.67)
         _:
             env.fog_density=.000075
             env.fog_light_color=Color(.69,.76,.81)

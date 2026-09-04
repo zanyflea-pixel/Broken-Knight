@@ -46,8 +46,8 @@ func _run()->void:
     if int(interaction_actions.get("read_lore",0))<2:failures.append("glacial lore sites are unavailable")
     if int(interaction_actions.get("hidden_cache",0))<2:failures.append("glacial secrets are unavailable")
     var map_profile:Dictionary=main.get_node("UI/WorldMap").get("_profile")
-    if Vector2(map_profile.get("map_extent",Vector2.ZERO)).distance_to(Vector2(14400,21600))>.1:
-        failures.append("runtime atlas does not cover the planned four-region world")
+    if Vector2(map_profile.get("map_extent",Vector2.ZERO)).distance_to(Vector2(21600,21600))>.1:
+        failures.append("runtime atlas does not cover the planned seven-region world")
 
     print("GLACIAL_RUNTIME|ready=%s|height_delta=%.3f|walkable=%s|trolls=%d|wildlife=%d|discoveries=%s|failures=%d"%[
         str(main.get("_glacial_region_ready")),absf(south_edge.y-north_edge.y),

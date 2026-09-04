@@ -15,7 +15,10 @@ func _run()->void:
     var western:Dictionary=profiles.make_zone_profile("western_reaches")
     var shared_seam:={"key":"western_reaches_pass","blend_width":620.0,"base_height":15.0}
     starting["region_origin"]=Vector2.ZERO
-    starting["seam_edges"].append(shared_seam.merged({"edge":"west"},true))
+    # Isolate this lateral join. The full starter profile now also owns north
+    # and east seams; retaining those here makes the four-region corner rules
+    # intentionally override the west-only approach sampled by this test.
+    starting["seam_edges"]=[shared_seam.merged({"edge":"west"},true)]
     western["region_origin"]=Vector2(-7200,0)
     western["seam_edges"]=[shared_seam.merged({"edge":"east"},true)]
     # This test isolates the land join. River continuity receives its own

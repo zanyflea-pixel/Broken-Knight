@@ -22,6 +22,21 @@ func _run()->void:
         if str(chain.get("name",""))=="":failures.append("unnamed mountain range remains on royal survey");break
 
     var world_map:=map_script.new() as Control
+    var geology_samples:=[
+        {"name":"March Keep Basalt Teeth","family":"basalt"},
+        {"name":"White Crown Moraine","family":"glacial"},
+        {"name":"Cape Keld Sea Stack","family":"coastal"},
+        {"name":"Greywatch Shelf","family":"layered"},
+    ]
+    for sample in geology_samples:
+        if str(world_map.call("_geology_landmark_family",{"name":sample.name}))!=str(sample.family):
+            failures.append("map geology family missing: %s"%sample.family)
+    var minimap_script:=load("res://scripts/Minimap.gd") as Script
+    var minimap:=minimap_script.new() as Control
+    for sample in geology_samples.slice(0,3):
+        if str(minimap.call("_major_geology_family",{"kind":"outcrop","name":sample.name}))!=str(sample.family):
+            failures.append("minimap geology family missing: %s"%sample.family)
+    minimap.free()
     world_map.size=Vector2(1280,720)
     var player:=Node3D.new();player.position=Vector3(-420,0,70)
     root.add_child(player)
@@ -44,10 +59,10 @@ func _run()->void:
     await process_frame
     var features:Array=world_map.get("_map_features")
     if features.size()<70:failures.append("complete survey exposes too few authored features")
-    print("WORLD_MAP_PASS|resolution=%d|fills_screen=%s|features=%d|map_sites=%d|forests=%d|mountains=%d|failures=%d"%[
+    print("WORLD_MAP_PASS|resolution=%d|fills_screen=%s|features=%d|map_sites=%d|forests=%d|mountains=%d|geology_families=%d|failures=%d"%[
         0 if world_map.get("_terrain_texture")==null else (world_map.get("_terrain_texture") as ImageTexture).get_width(),
         panel.size.distance_to(Vector2(1280,720))<=.01,
-        features.size(),profile.get("map_sites",[]).size(),profile.get("forest_regions",[]).size(),profile.get("mountain_chains",[]).size(),failures.size(),
+        features.size(),profile.get("map_sites",[]).size(),profile.get("forest_regions",[]).size(),profile.get("mountain_chains",[]).size(),geology_samples.size(),failures.size(),
     ])
     for failure in failures:push_error("WORLD_MAP_FAILURE|%s"%failure)
     world_map.free();player.free()

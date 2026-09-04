@@ -53,10 +53,10 @@ func _run()->void:
     if mounted_horse!=null and not player.is_mounted():failures.append("northbound region activation dismounted the player")
     if mounted_horse!=null and mounted_horse.get_parent()!=player:failures.append("mounted horse was detached during region activation")
     var map_profile:Dictionary=main.get_node("UI/WorldMap").get("_profile")
-    if Vector2(map_profile.get("map_extent",Vector2.ZERO)).distance_to(Vector2(14400,21600))>.1:
-        failures.append("world map did not expose the planned four-region atlas")
+    if Vector2(map_profile.get("map_extent",Vector2.ZERO)).distance_to(Vector2(21600,21600))>.1:
+        failures.append("world map did not expose the planned seven-region atlas")
     var atlas_regions:Array=map_profile.get("region_summaries",[])
-    for expected_region in ["starting_realm","north_frontier","glacial_range","western_reaches"]:
+    for expected_region in ["starting_realm","north_frontier","glacial_range","western_reaches","stormbreak_highlands","skeld_coast","east_marches"]:
         var found_region:=false
         for region_data in atlas_regions:
             if str((region_data as Dictionary).get("zone_id",""))==expected_region:

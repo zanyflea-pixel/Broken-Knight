@@ -18,8 +18,9 @@ func _capture()->void:
     var z_raw:=OS.get_environment("BROKEN_KNIGHT_MINIMAP_Z")
     var capture_x:=250.0 if x_raw.is_empty() else float(x_raw)
     var capture_z:=-2450.0 if z_raw.is_empty() else float(z_raw)
-    var world_result:Dictionary=main.get("_world_result")
-    player.global_position=world_result.height_sampler.call(capture_x,capture_z)+Vector3.UP*.08
+    player.global_position=main._sample_global_height(capture_x,capture_z)+Vector3.UP*.08
+    if OS.get_environment("BROKEN_KNIGHT_MINIMAP_SURFACE_ONLY")=="1":
+        minimap.configure(main.get("_world_atlas_profile"),player,null,Callable(main,"_sample_global_terrain_height"))
     minimap.set_anchors_preset(Control.PRESET_TOP_LEFT)
     minimap.position=Vector2(390,100)
     minimap.size=Vector2(500,500)

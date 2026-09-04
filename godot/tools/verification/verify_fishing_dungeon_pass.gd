@@ -6,8 +6,11 @@ func _init()->void:call_deferred("_run")
 
 func _run()->void:
     var failures:Array[String]=[]
-    var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate();root.add_child(main)
-    await process_frame;await process_frame;await physics_frame
+    var main:Node3D=(load("res://scenes/Main.tscn") as PackedScene).instantiate()
+    main.set("auto_boot_enabled",false)
+    root.add_child(main)
+    await main.boot_world(Callable(),false,true)
+    await physics_frame
     var hero:Node=main.get_node("Player");var director:Node=main.get_node("GameplayDirector")
     var axe_found:=false;var pole_found:=false
     for item in hero.bag_slots:
@@ -59,17 +62,24 @@ func _run()->void:
     for item in hero.bag_slots:
         if item.get("stack_key","")=="item:raw_fish":raw_fish_found=true
     if not raw_fish_found:failures.append("reeling did not add raw fish to bag")
-    if not director.can_craft_recipe(director.get_recipes()[-1]):failures.append("raw fish not accepted by cooking")
+    var cooked_recipe:Dictionary={}
+    for recipe in director.get_recipes():
+        if str(recipe.get("id",""))=="cooked_fish":cooked_recipe=recipe;break
+    if cooked_recipe.is_empty() or not director.can_craft_recipe(cooked_recipe):failures.append("raw fish not accepted by cooking")
     var craft_result:String=director.craft_recipe("cooked_fish")
     if not craft_result.begins_with("Crafted"):failures.append("cooked fish recipe failed")
     var cooked_id:=""
     for item in hero.bag_slots:
-        if str(item.get("id","")).begins_with("cooked_fish"):cooked_id=item.id;break
+        if str(item.get("name",""))=="Cooked Fish" and str(item.get("buff_name",""))=="Well Fed":cooked_id=item.id;break
     if cooked_id.is_empty():failures.append("cooked fish missing from bag")
     else:
         hero.use_bag_item_id(cooked_id)
         if hero.food_power_bonus<8:failures.append("cooked food buff not applied")
+    var minimap_layer:=main.get_node("UI/Minimap/CachedMapLayer")
+    hero.set_interior_mode(false);hero.global_position=Vector3(9390,40,-1800)
+    if bool(minimap_layer.call("_inside_dungeon")):failures.append("Eastern Marches incorrectly classified as a dungeon on the minimap")
     hero.set_interior_mode(true);hero.global_position=Vector3(8000,-82,54)
+    if not bool(minimap_layer.call("_inside_dungeon")):failures.append("active dungeon interior missing from minimap state")
     director.call("_stream_local_gameplay");await physics_frame
     var test_minion:={"bounds":Rect2(Vector2(7960,-64),Vector2(80,128))}
     var blocked:bool=not director.call("_dungeon_step_allowed",test_minion,Vector3(8000,-82,54),Vector3(8006,-82,54))

@@ -34,6 +34,8 @@ func make_zone_profile(zone_id:String)->Dictionary:
             _author_stormbreak_highlands(profile)
         "skeld_coast":
             _author_skeld_coast(profile)
+        "sunscar_drylands":
+            _author_sunscar_drylands(profile)
         _:
             profile["zone_id"]="starting_realm"
             profile["zone_name"]="Riverwatch Realm - Starting Zone"
@@ -43,6 +45,7 @@ func make_zone_profile(zone_id:String)->Dictionary:
                 {"edge":"north","target":"north_frontier","entry":"south","seamless":true},
                 {"edge":"east","target":"east_marches","entry":"west","seamless":true},
                 {"edge":"west","target":"western_reaches","entry":"east","seamless":true},
+                {"edge":"south","target":"sunscar_drylands","entry":"north","seamless":true},
             ]
     return profile
 
@@ -55,13 +58,23 @@ func _author_starting_north_seam(profile:Dictionary)->void:
         "junction_along":-3600.0,"junction_height":18.5,"junction_blend":680.0,
         "junctions":[{"key":"riverwatch_northeast_junction","along":3600.0,"height":17.0,"blend":680.0}],
     },{
+        "edge":"north","key":"sunscar_gate_pass","blend_width":620.0,
+        "base_height":14.5,"junction_key":"riverwatch_southwest_junction",
+        "junction_along":-3600.0,"junction_height":14.8,"junction_blend":680.0,
+        "junctions":[{"key":"riverwatch_southeast_junction","along":3600.0,"height":15.2,"blend":680.0}],
+        "river_crossings":[
+            {"name":"Sunrun Headwater","along":300.0,"width":72.0,"bed_height":6.714},
+        ],
+    },{
         "edge":"west","key":"western_reaches_pass","blend_width":620.0,
         "base_height":15.0,"junction_key":"riverwatch_northwest_junction",
         "junction_along":-3600.0,"junction_height":18.5,"junction_blend":680.0,
+        "junctions":[{"key":"riverwatch_southwest_junction","along":3600.0,"height":14.8,"blend":680.0}],
     },{
         "edge":"east","key":"eastern_marches_pass","blend_width":620.0,
         "base_height":16.0,"junction_key":"riverwatch_northeast_junction",
         "junction_along":-3600.0,"junction_height":17.0,"junction_blend":680.0,
+        "junctions":[{"key":"riverwatch_southeast_junction","along":3600.0,"height":15.2,"blend":680.0}],
         "river_crossings":[
             {"name":"Redstone Headwater","along":-3560.0,"width":52.0,"bed_height":10.544},
             {"name":"Eastreach Emberwash","along":2850.0,"width":46.0,"bed_height":10.543},
@@ -75,6 +88,16 @@ func _author_starting_north_seam(profile:Dictionary)->void:
         "points":[
             Vector2(250,-2450),Vector2(410,-2650),Vector2(540,-2920),
             Vector2(500,-3220),Vector2(420,-3440),Vector2(360,-3600),
+        ],
+    })
+    profile["road_corridors"].append({
+        "name":"Sunward Realmroad","route_class":"major",
+        "purpose":"continuous southern road from Highfield into the Sunscar caravan country",
+        "destinations":["Highfield","Sundown Gate","Emberwell"],"width":18.0,
+        "terrain_width":235.0,"terrain_relief":4.0,"grade_limit":.070,
+        "points":[
+            Vector2(-550,1680),Vector2(-520,2080),Vector2(-470,2500),
+            Vector2(-390,2920),Vector2(-350,3300),Vector2(-420,3600),
         ],
     })
     profile["road_corridors"].append({
@@ -108,6 +131,232 @@ func _author_starting_north_seam(profile:Dictionary)->void:
             Vector2(2530,-2200),
         ],6),
     })
+    # A visible receiving reach joins the dryland watershed to Northwood's
+    # existing tributary. Both tiles share the 8.4 m grade at the seam, so the
+    # channel and liquid remain continuous instead of ending at the map edge.
+    profile["river_corridors"].append({
+        "name":"Sunrun Headwater","width":48.0,"source_width":72.0,"mouth_width":48.0,
+        "source_height":8.4,"mouth_height":5.3,
+        "source_kind":"Sunscar mountain runoff","source_landmark":"Sunrun Cascades",
+        "termination":"the Northwood Tributary",
+        "points":_catmull_rom_points([
+            Vector2(300,3600),Vector2(240,3440),Vector2(120,3260),
+            Vector2(-70,3090),Vector2(-300,2940),Vector2(-570,2805),
+        ],6),
+    })
+
+
+func _author_sunscar_drylands(profile:Dictionary)->void:
+    profile["zone_id"]="sunscar_drylands"
+    profile["zone_name"]="Sunscar Drylands"
+    profile["biome_id"]="semi_arid_drylands"
+    profile["climate"]="hot semi-arid river country"
+    profile["danger_tier"]=3
+    profile["recommended_level"]=[8,18]
+    profile["difficulty_multiplier"]=1.52
+    profile["snow_line"]=10000.0
+    profile["snow_strength"]=0.0
+    profile["population_scale"]=0.25
+    profile["meadow_samples_per_chunk"]=265
+    profile["streamed_population"]=true
+    profile["streamed_heightmap_collision"]=true
+    profile["region_origin"]=Vector2(0,7200)
+    profile["seam_edges"]=[{
+        "edge":"south","key":"sunscar_gate_pass","blend_width":620.0,
+        "base_height":14.5,"junction_key":"riverwatch_southwest_junction",
+        "junction_along":-3600.0,"junction_height":14.8,"junction_blend":680.0,
+        "junctions":[{"key":"riverwatch_southeast_junction","along":3600.0,"height":15.2,"blend":680.0}],
+        "river_crossings":[
+            {"name":"Sunrun River","along":300.0,"width":72.0,"bed_height":6.714},
+        ],
+    }]
+    profile["zone_exits"]=[
+        {"edge":"north","target":"starting_realm","entry":"south","seamless":true},
+    ]
+    profile["spawn_site"]={
+        "name":"Sundown Gate","position":Vector2(-500,-2850),"radius":174.0,
+        "ground_height":18.0,"ground_inner_ratio":.82,"starter":false,
+        "architecture_set":"marcher_stone",
+        "role":"northern caravan gate, water customs post, and dryland provisioning town",
+        "siting_reason":"a firm gravel shelf above the Sunrun flood channel where the realmroad leaves Riverwatch",
+        "connections":["Highfield","Emberwell","Red Mesa Hold"],
+    }
+    profile["town_sites"]=[
+        {
+            "name":"Emberwell","position":Vector2(1500,420),"radius":188.0,
+            "ground_height":39.0,"ground_inner_ratio":.82,"architecture_set":"marcher_timber",
+            "role":"oasis market, irrigated garden town, and central caravan exchange",
+            "siting_reason":"a broad alluvial bench above the spring pool and below the eastern escarpment",
+            "connections":["Sundown Gate","Red Mesa Hold","Copper Hollow"],
+        },{
+            "name":"Red Mesa Hold","position":Vector2(-1050,1880),"radius":166.0,
+            "ground_height":43.0,"ground_inner_ratio":.80,"architecture_set":"marcher_stone",
+            "role":"southern road ward controlling the pass between the mesas",
+            "siting_reason":"a defensible sandstone shoulder beside the only low-gradient caravan route south",
+            "connections":["Emberwell","Sundown Gate","Southroad Pass"],
+        },{
+            "name":"Copper Hollow","position":Vector2(2440,230),"radius":142.0,
+            "ground_height":48.0,"ground_inner_ratio":.80,"architecture_set":"marcher_stone",
+            "role":"small mining settlement serving the copper and iron shelves",
+            "siting_reason":"a stable bench below exposed eastern geology and well above flash-flood channels",
+            "connections":["Emberwell","Copper Shelf Mine"],
+        },
+    ]
+    profile["camp_sites"]=[
+        {"name":"Northbound Caravan Camp","position":Vector2(-610,-2380),"radius":46.0},
+        {"name":"Red Mesa Drovers Camp","position":Vector2(-1370,1530),"radius":42.0},
+        {"name":"Sunrun Survey Camp","position":Vector2(1740,2060),"radius":40.0},
+    ]
+    profile["map_sites"]=[
+        {"name":"Sunspire Mesa","kind":"watchtower","position":Vector2(-2320,420),"radius":52.0,"elevation_lift":28.0,"elevation_inner":74.0,"elevation_radius":310.0,"elevation_role":"the red mesa visible from Sundown Gate and most of the north road"},
+        {"name":"Sunrun Span","kind":"bridge","position":Vector2(430,-620),"radius":34.0,"elevation_role":"the realmroad's necessary crossing of the Sunrun"},
+        {"name":"Emberwell Spring","kind":"lake","position":Vector2(1260,890),"radius":148.0,"elevation_role":"the permanent spring basin supporting Emberwell"},
+        {"name":"Sunrun Cascades","kind":"headwater","position":Vector2(2130,2690),"radius":40.0,"elevation_lift":16.0,"elevation_inner":52.0,"elevation_radius":220.0,"elevation_role":"mountain runoff gathering into the Sunrun River"},
+        {"name":"Copper Shelf Mine","kind":"ruin","position":Vector2(2860,-120),"radius":34.0,"first_destination":true,"elevation_role":"the first dangerous destination east of Emberwell"},
+        {"name":"Southroad Pass","kind":"waystation","position":Vector2(-1220,3220),"radius":34.0,"first_destination":true,"elevation_role":"the graded exit between the southern mesas"},
+    ]
+    profile["landmark_sites"]=[
+        {"name":"Sunspire Sandstone Crown","kind":"outcrop","position":Vector2(-2320,420),"radius":126.0,"count":30,"rotation":.18},
+        {"name":"Copper Shelf Ribs","kind":"outcrop","position":Vector2(2750,-40),"radius":112.0,"count":26,"rotation":-.34},
+        {"name":"Red Mesa Gate Teeth","kind":"outcrop","position":Vector2(-1430,1960),"radius":92.0,"count":22,"rotation":.28},
+        {"name":"Sunrun Gorge Stones","kind":"outcrop","position":Vector2(1720,2100),"radius":96.0,"count":20,"rotation":-.16},
+        {"name":"Emberwell Date Grove","kind":"grove","species":"willow","position":Vector2(1190,760),"radius":112.0,"count":28},
+        {"name":"North Sunrun Tamarisk","kind":"grove","species":"willow","position":Vector2(170,-1720),"radius":76.0,"count":15},
+        {"name":"Sundown Gate Waystone","kind":"waystone","position":Vector2(-450,-3310),"radius":10.0,"rotation":.04},
+        {"name":"Southroad Cairn","kind":"cairn","position":Vector2(-1200,3160),"radius":9.0,"scale":1.25,"rotation":-.12},
+    ]
+    profile["ecology_sites"]=[
+        {"name":"Emberwell Reed Garden","kind":"bracken","position":Vector2(1190,910),"radius":250.0,"count":180},
+        {"name":"Sunrun Green Ribbon","kind":"bracken","position":Vector2(300,-1260),"radius":310.0,"count":165},
+        {"name":"Sundown Sage Flats","kind":"bracken","position":Vector2(-820,-2420),"radius":280.0,"count":130},
+        {"name":"Copper Shelf Scrub","kind":"bracken","position":Vector2(2380,120),"radius":250.0,"count":120},
+    ]
+    profile["encounter_sites"]=[
+        {"name":"Sundown Road Ashfangs","position":Vector2(-900,-1900),"enemy":"ashfang","count":5,"radius":66.0,"rank":3},
+        {"name":"Sunrun Span Raiders","position":Vector2(630,-460),"enemy":"imp","count":6,"radius":70.0,"rank":4},
+        {"name":"Copper Shelf Ashscales","position":Vector2(2780,-80),"enemy":"ashscale_basilisk","count":4,"radius":82.0,"rank":5},
+        {"name":"Red Mesa Grave Patrol","position":Vector2(-1680,2280),"enemy":"gravebound","count":6,"radius":76.0,"rank":5},
+    ]
+    profile["wildlife_sites"]=[
+        {"name":"Sunrun Deer","position":Vector2(660,300),"species":"deer","count":7,"radius":430.0},
+        {"name":"Sage Flat Hares","position":Vector2(-980,-1400),"species":"hare","count":10,"radius":420.0},
+        {"name":"Mesa Grouse","position":Vector2(-1850,800),"species":"grouse","count":8,"radius":390.0},
+    ]
+    profile["secret_sites"]=[
+        {"name":"Sundown Smuggler Cache","position":Vector2(-820,-2740),"kind":"hidden_cache","loot_table":"marcher_supplies"},
+        {"name":"Sunspire Survey Chest","position":Vector2(-2260,500),"kind":"hidden_cache","loot_table":"marcher_relics"},
+        {"name":"Copper Shelf Foreman's Cache","position":Vector2(2880,-90),"kind":"hidden_cache","loot_table":"cinderwatch_gear"},
+    ]
+    profile["lore_sites"]=[
+        {"name":"Sundown Customs Ledger","position":Vector2(-520,-2820),"kind":"book","entry":"sundown_ledger"},
+        {"name":"The Sunrun Covenant","position":Vector2(470,-590),"kind":"inscription","entry":"sunrun_covenant"},
+        {"name":"Emberwell Water Book","position":Vector2(1520,450),"kind":"book","entry":"emberwell_water_book"},
+    ]
+    profile["field_boundaries"]=[
+        {"name":"Emberwell North Garden","points":[Vector2(1320,650),Vector2(1530,760),Vector2(1710,610),Vector2(1480,500),Vector2(1320,650)]},
+        {"name":"Emberwell South Garden","points":[Vector2(1540,210),Vector2(1760,330),Vector2(1880,170),Vector2(1640,60),Vector2(1540,210)]},
+    ]
+    profile["forest_regions"]=[
+        {"name":"Emberwell Oasis Grove","center":Vector2(1150,760),"radius":520.0,"density":.62},
+        {"name":"Sunrun Riparian Belt","center":Vector2(320,-1340),"radius":430.0,"density":.38},
+    ]
+    profile["mountain_chains"]=[
+        {"name":"Sunrun Source Range","center":Vector2(2500,3050),"angle":-.34,"length":1800.0,"width":600.0,"height":110.0,"snow_line":10000.0},
+        {"name":"Western Redwall","center":Vector2(-2800,1000),"angle":.20,"length":1800.0,"width":550.0,"height":70.0,"snow_line":10000.0},
+        {"name":"Copper Shelf Escarpment","center":Vector2(3300,100),"angle":-.10,"length":1400.0,"width":430.0,"height":70.0,"snow_line":10000.0},
+    ]
+    profile["ocean_basins"]=[]
+    profile["flat_regions"]=[]
+    profile["landform_regions"]=[
+        {"name":"Sundown Gravel Shelf","kind":"upland","center":Vector2(-500,-2700),"radius":1120.0,"aspect":.72,"angle":.04,"amplitude":11.0},
+        {"name":"Sunrun Vale","kind":"valley","center":Vector2(560,-600),"length":6100.0,"width":760.0,"angle":-.18,"amplitude":5.0},
+        {"name":"Emberwell Basin","kind":"basin","center":Vector2(1080,720),"radius":1060.0,"aspect":.76,"angle":.20,"amplitude":10.0},
+        {"name":"Red Mesa Shoulder","kind":"ridge","center":Vector2(-1320,1780),"length":2100.0,"width":600.0,"angle":.18,"amplitude":20.0},
+        {"name":"Southroad Rolling Country","kind":"rolling","center":Vector2(-500,2640),"radius":1600.0,"aspect":.84,"angle":-.08,"amplitude":18.0,"wavelength":560.0},
+    ]
+    profile["terrain_palette_regions"]=[
+        {"name":"Sundown Scrub","center":Vector2(-520,-2500),"radius":1650.0,"aspect":.78,"angle":.02,"strength":.76,"color":[.37,.31,.18],"secondary_color":[.25,.27,.15],"cover_color":[.42,.34,.16],"cover_count":390},
+        {"name":"Sunrun Alluvium","center":Vector2(420,-650),"radius":2100.0,"aspect":.34,"angle":-.18,"strength":.78,"color":[.30,.28,.17],"secondary_color":[.24,.31,.18],"cover_color":[.32,.35,.17],"cover_count":420},
+        {"name":"Emberwell Green","center":Vector2(1040,690),"radius":1050.0,"aspect":.78,"angle":.16,"strength":.82,"color":[.30,.34,.18],"secondary_color":[.19,.31,.16],"cover_color":[.37,.40,.18],"cover_count":420},
+        {"name":"Western Red Sandstone","center":Vector2(-2260,1080),"radius":1800.0,"aspect":.62,"angle":.18,"strength":.80,"color":[.46,.29,.17],"secondary_color":[.34,.24,.16],"cover_color":[.49,.34,.19],"cover_count":300},
+        {"name":"Copper Shelf Stone","center":Vector2(2450,240),"radius":1550.0,"aspect":.68,"angle":-.12,"strength":.78,"color":[.43,.36,.27],"secondary_color":[.30,.28,.23],"cover_color":[.39,.32,.22],"cover_count":260},
+        {"name":"Southroad Ochre","center":Vector2(-420,2650),"radius":1750.0,"aspect":.80,"angle":-.06,"strength":.72,"color":[.44,.34,.20],"secondary_color":[.29,.28,.17],"cover_color":[.47,.38,.20],"cover_count":320},
+    ]
+    profile["pond_sites"]=[
+        {"name":"Emberwell Spring","position":Vector2(1260,890),"radius":148.0,"water_height":34.5},
+        {"name":"Sage Mirror","position":Vector2(-1750,-760),"radius":82.0,"water_height":14.4},
+    ]
+    profile["waterfall_sites"]=[
+        {"name":"Sunrun Cascades","position":Vector2(2020,2420),"width":24.0,"drop":4.2},
+    ]
+    profile["river_corridors"]=[{
+        "name":"Sunrun River","width":36.0,"source_width":14.0,"mouth_width":72.0,
+        "source_height":52.0,"mouth_height":8.4,
+        "source_kind":"seasonal snow-free mountain runoff and sandstone springs","source_landmark":"Sunrun Cascades",
+        "termination":"the Sunrun Headwater in Riverwatch and ultimately the Kingsflow",
+        "points":_catmull_rom_points([
+            Vector2(2200,2820),Vector2(2100,2600),Vector2(2020,2420),
+            Vector2(1830,2170),Vector2(1560,1870),Vector2(1310,1510),
+            Vector2(1100,1120),Vector2(900,650),Vector2(700,170),
+            Vector2(520,-260),Vector2(430,-620),Vector2(350,-1040),
+            Vector2(280,-1520),Vector2(330,-2050),Vector2(290,-2600),
+            Vector2(310,-3150),Vector2(300,-3600),
+        ],6),
+    },{
+        "name":"Emberwell Spring Run","width":16.0,"source_width":10.0,"mouth_width":16.0,
+        "source_height":35.95,"mouth_height":34.8,
+        "source_kind":"permanent oasis spring","source_landmark":"Emberwell Spring",
+        "termination":"the Sunrun River",
+        "points":_catmull_rom_points([
+            Vector2(1260,890),Vector2(1190,820),Vector2(1080,760),Vector2(900,650),
+        ],6),
+    }]
+    profile["road_corridors"]=[{
+        "name":"Sunward Realmroad","route_class":"major",
+        "purpose":"the continuous caravan road from Riverwatch through the dryland towns and toward the southern passes",
+        "destinations":["Highfield","Sundown Gate","Red Mesa Hold","Southroad Pass"],
+        "width":18.0,"terrain_width":235.0,"terrain_relief":4.0,"grade_limit":.070,
+        "points":[
+            Vector2(-420,-3600),Vector2(-460,-3300),Vector2(-500,-2850),
+            Vector2(-430,-2400),Vector2(-500,-1900),Vector2(-480,-1450),
+            Vector2(-400,-1050),Vector2(-250,-750),Vector2(-220,-300),
+            Vector2(-320,180),Vector2(-500,680),Vector2(-720,1160),
+            Vector2(-900,1540),
+            Vector2(-1050,1880),Vector2(-1180,2320),Vector2(-1260,2780),Vector2(-1220,3220),Vector2(-1200,3600),
+        ],
+    },{
+        "name":"Emberwell Caravan Road","route_class":"secondary",
+        "purpose":"the single engineered crossing from the Sunward road to the oasis market",
+        "destinations":["Sunward Realmroad","Sunrun Span","Emberwell"],
+        "width":12.5,"terrain_width":185.0,"terrain_relief":3.3,"grade_limit":.085,
+        "points":[
+            Vector2(-250,-750),Vector2(-80,-650),Vector2(430,-620),
+            Vector2(800,-560),Vector2(1110,-350),Vector2(1350,-20),Vector2(1500,420),
+        ],
+    },{
+        "name":"Copper Shelf Road","route_class":"secondary",
+        "purpose":"a contour freight road from Emberwell to the eastern mine settlement",
+        "destinations":["Emberwell","Copper Hollow","Copper Shelf Mine"],
+        "width":12.0,"terrain_width":180.0,"terrain_relief":3.3,"grade_limit":.090,
+        "points":[Vector2(1500,420),Vector2(1740,380),Vector2(2010,330),Vector2(2260,280),Vector2(2440,230),Vector2(2700,80),Vector2(2860,-120)],
+    },{
+        "name":"Sunspire Overlook Road","route_class":"secondary",
+        "purpose":"a gradual shelf road from Red Mesa Hold to the Sunspire overlook",
+        "destinations":["Red Mesa Hold","Sunspire Mesa"],
+        "width":10.5,"terrain_width":170.0,"terrain_relief":3.0,"grade_limit":.095,
+        "points":[Vector2(-1050,1880),Vector2(-1320,1640),Vector2(-1580,1360),Vector2(-1810,1040),Vector2(-2020,720),Vector2(-2220,500)],
+    }]
+    profile["ford_sites"]=[{
+        "name":"Sunrun Span","position":Vector2(430,-620),
+        "radius":44.0,"standalone":false,"bridge_width":11.0,"bank_guard":true,
+        "crossing_class":"major",
+        "purpose":"the single necessary crossing carrying the Sunward Realmroad to Emberwell",
+    }]
+    profile["trail_corridors"]=[
+        {"name":"Sunrun Cascade Track","route_class":"local","purpose":"walkable approach from the eastern road to the river source overlook","width":4.8,"engineered_grade":true,"points":[Vector2(2440,230),Vector2(2350,720),Vector2(2240,1240),Vector2(2160,1780),Vector2(2020,2420)]},
+        {"name":"Emberwell Shore Path","route_class":"local","purpose":"short angler path from the market to the spring's walkable bank","width":3.5,"engineered_grade":true,"points":[Vector2(1500,420),Vector2(1430,580),Vector2(1380,720),Vector2(1365,790)]},
+        {"name":"Smuggler Shelf Track","route_class":"local","purpose":"concealed footpath from Sundown Gate to the western cache shelf","width":4.4,"engineered_grade":true,"points":[Vector2(-500,-2850),Vector2(-650,-2820),Vector2(-820,-2740)]},
+    ]
 
 
 func _author_eastern_marches(profile:Dictionary)->void:
@@ -1162,6 +1411,10 @@ func _author_stormbreak_highlands(profile:Dictionary)->void:
             "radius":48.0,
         },
         {
+            "name":"Blacktarn Runoff Bridge","kind":"bridge","position":Vector2(-1200,-2800),
+            "radius":34.0,
+        },
+        {
             "name":"The Shattered Choir","kind":"ruin","position":Vector2(-2860,2030),
             "radius":38.0,"elevation_lift":10.0,"elevation_inner":48.0,
             "elevation_radius":205.0,"elevation_role":"a broken stone sanctuary above the western moor",
@@ -1321,7 +1574,11 @@ func _author_stormbreak_highlands(profile:Dictionary)->void:
     profile["ford_sites"]=[{
         "name":"Galehorn Crossing","position":Vector2(780,-300),
         "radius":50.0,"standalone":false,"bridge_width":11.5,"bank_guard":true,
-        "purpose":"the single reliable high-road crossing of Galehorn Run",
+        "purpose":"the main reliable high-road crossing of Galehorn Run",
+    },{
+        "name":"Blacktarn Runoff Bridge","position":Vector2(-1200,-2800),
+        "radius":36.0,"standalone":false,"bridge_width":8.5,"bank_guard":true,
+        "purpose":"a narrow upper crossing carrying Skeld Pass Road over the tarn runoff",
     }]
     profile["trail_corridors"]=[
         {"name":"Blacktarn Climb","route_class":"local","purpose":"survey path from Stormbreak Hold to the river source","width":5.2,"engineered_grade":true,"points":[Vector2(-220,-340),Vector2(-480,-820),Vector2(-650,-1340),Vector2(-790,-1840),Vector2(-930,-2260),Vector2(-1130,-2710)]},

@@ -276,6 +276,136 @@ def build_granary():
     return join_objects(pieces, "SaltwatchGranary")
 
 
+def build_dawnford_arrival_set():
+    """A compact caravan arrival vignette that leaves the realmroad open."""
+    pieces = []
+    # The wagon is parked on the shoulder, with believable wheels, shafts and
+    # cargo instead of an oversized solid block beside the road.
+    pieces.extend([
+        box("ArrivalWagonBed", (0.0, 0.0, 1.65), (6.8, 3.3, 0.48), OAK),
+        box("ArrivalWagonFront", (0.0, -1.5, 2.25), (6.8, 0.28, 1.55), OAK),
+        box("ArrivalWagonRear", (0.0, 1.5, 2.25), (6.8, 0.28, 1.55), OAK),
+        box("ArrivalShaftLeft", (-1.35, -4.7, 1.15), (0.24, 6.6, 0.24), OAK, (0.06, 0.0, 0.0)),
+        box("ArrivalShaftRight", (1.35, -4.7, 1.15), (0.24, 6.6, 0.24), OAK, (0.06, 0.0, 0.0)),
+        box("ArrivalCanvasRoll", (-1.7, 0.0, 2.35), (2.4, 2.1, 1.05), CANVAS),
+        box("ArrivalCargoChest", (1.8, 0.1, 2.20), (2.0, 1.8, 1.40), WARM_STONE),
+    ])
+    for x in (-3.0, 3.0):
+        for y in (-1.05, 1.05):
+            pieces.append(cylinder("ArrivalWagonWheel", (x, y, 1.15), 1.15, 0.34, OAK, 14,
+                                   (0.0, math.pi * 0.5, 0.0)))
+            pieces.append(cylinder("ArrivalWheelHub", (x, y, 1.15), 0.26, 0.48, BRONZE, 12,
+                                   (0.0, math.pi * 0.5, 0.0)))
+    # Customs stones frame a person-scale ledger table without becoming a
+    # wall or another building silhouette.
+    pieces.extend([
+        box("ArrivalLedgerTable", (7.2, 0.2, 1.15), (4.2, 1.8, 0.30), OAK),
+        box("ArrivalLedgerLegLeft", (5.55, 0.2, 0.58), (0.32, 1.35, 1.16), OAK),
+        box("ArrivalLedgerLegRight", (8.85, 0.2, 0.58), (0.32, 1.35, 1.16), OAK),
+        cylinder("ArrivalWaystone", (7.1, 4.0, 1.65), 0.72, 3.3, LIMESTONE, 8),
+        box("ArrivalWaystoneCap", (7.1, 4.0, 3.35), (1.7, 1.15, 0.42), WARM_STONE),
+        cylinder("ArrivalWaterJar", (10.0, 1.6, 0.85), 0.68, 1.7, TERRACOTTA, 12),
+    ])
+    return join_objects(pieces, "DawnfordArrivalSet")
+
+
+def build_amberfield_field_set():
+    """Field-edge tools and crop handling at player height, not a field wall."""
+    pieces = []
+    # An open timber gate gives the field a readable entrance. The central
+    # opening remains six metres wide and therefore never blocks traversal.
+    for x in (-5.0, 5.0):
+        pieces.extend([
+            box("FieldGateStoneFoot", (x, 0.0, 0.38), (1.2, 1.2, 0.76), WARM_STONE),
+            box("FieldGatePost", (x, 0.0, 2.0), (0.42, 0.42, 4.0), OAK),
+        ])
+    pieces.extend([
+        box("FieldGateLintel", (0.0, 0.0, 3.85), (10.4, 0.42, 0.42), OAK),
+        box("FieldToolBench", (8.2, 2.5, 1.05), (4.0, 1.6, 0.30), OAK),
+        box("FieldToolLegLeft", (6.65, 2.5, 0.53), (0.28, 1.2, 1.06), OAK),
+        box("FieldToolLegRight", (9.75, 2.5, 0.53), (0.28, 1.2, 1.06), OAK),
+        box("FieldRakeHead", (8.2, 1.6, 1.45), (2.4, 0.22, 0.22), BRONZE),
+        box("FieldRakeHandle", (8.2, 3.3, 2.0), (0.20, 3.6, 0.20), OAK, (0.38, 0.0, 0.0)),
+    ])
+    # Irregular sheaf clusters communicate active grain fields without
+    # repeating a row-pattern across the landscape.
+    for index, (x, y, scale) in enumerate(((-7.8, 3.0, 1.0), (-9.4, 1.2, 0.82), (-6.2, 4.4, 0.72))):
+        pieces.append(cone(f"GrainSheaf{index}", (x, y, 1.05 * scale),
+                           0.95 * scale, 0.28 * scale, 2.1 * scale, CANVAS, 9))
+        pieces.append(cylinder(f"SheafBinding{index}", (x, y, 1.05 * scale),
+                               0.56 * scale, 0.16, OAK, 10))
+    return join_objects(pieces, "AmberfieldFieldSet")
+
+
+def build_march_keep_gate_approach():
+    """Paired road furniture that announces the keep while preserving its gate."""
+    pieces = []
+    for x in (-8.0, 8.0):
+        pieces.extend([
+            box("GateApproachPlinth", (x, 0.0, 0.50), (3.2, 3.2, 1.0), WARM_STONE),
+            cylinder("GateApproachColumn", (x, 0.0, 2.45), 0.78, 3.9, LIMESTONE, 10),
+            cylinder("GateApproachBrazier", (x, 0.0, 4.45), 1.18, 0.42, BRONZE, 10),
+            cylinder("GateApproachEmbers", (x, 0.0, 4.72), 0.78, 0.14, EMBER, 10),
+        ])
+    pieces.extend([
+        box("GateNoticeBoard", (-12.0, 4.2, 2.15), (4.8, 0.34, 2.6), OAK),
+        box("GateNoticePostLeft", (-13.6, 4.2, 1.25), (0.34, 0.34, 2.5), OAK),
+        box("GateNoticePostRight", (-10.4, 4.2, 1.25), (0.34, 0.34, 2.5), OAK),
+        box("GateGuardBench", (12.0, 4.0, 0.95), (4.8, 1.4, 0.30), OAK),
+        box("GateBenchFootLeft", (10.2, 4.0, 0.48), (0.34, 1.0, 0.96), OAK),
+        box("GateBenchFootRight", (13.8, 4.0, 0.48), (0.34, 1.0, 0.96), OAK),
+    ])
+    return join_objects(pieces, "MarchKeepGateApproach")
+
+
+def build_saltwatch_work_yard():
+    """Salt meadow work tables and drying racks with clear walk lanes."""
+    pieces = []
+    for rack_x in (-5.2, 5.2):
+        for y in (-3.1, 3.1):
+            pieces.append(box("SaltRackPost", (rack_x, y, 1.75), (0.36, 0.36, 3.5), OAK))
+        pieces.extend([
+            box("SaltRackBeam", (rack_x, 0.0, 3.35), (0.42, 6.6, 0.42), OAK),
+            box("SaltDryingTray", (rack_x, 0.0, 1.65), (4.2, 5.4, 0.24), WARM_STONE),
+        ])
+    pieces.extend([
+        box("SaltSortingTable", (0.0, 6.2, 1.15), (6.2, 2.2, 0.32), OAK),
+        box("SaltTableFootLeft", (-2.45, 6.2, 0.58), (0.34, 1.7, 1.16), OAK),
+        box("SaltTableFootRight", (2.45, 6.2, 0.58), (0.34, 1.7, 1.16), OAK),
+        box("SaltBlockLarge", (-1.6, 6.2, 1.55), (1.7, 1.3, 0.48), LIMESTONE),
+        box("SaltBlockSmall", (1.1, 6.2, 1.45), (1.2, 1.0, 0.34), LIMESTONE),
+        cylinder("BrineJarLeft", (-8.4, 4.7, 0.95), 0.72, 1.9, TERRACOTTA, 12),
+        cylinder("BrineJarRight", (-10.0, 4.0, 0.72), 0.56, 1.44, TERRACOTTA, 12),
+    ])
+    return join_objects(pieces, "SaltwatchWorkYard")
+
+
+def build_cinderwatch_survey_set():
+    """Compact expedition instruments for the survey camp below Embercrag."""
+    pieces = []
+    # A proper tripod/theodolite silhouette is readable from the approach.
+    for angle in (0.0, TAU / 3.0, TAU * 2.0 / 3.0):
+        x, y = math.cos(angle) * 1.55, math.sin(angle) * 1.55
+        pieces.append(box("SurveyTripodLeg", (x * 0.55, y * 0.55, 1.55),
+                          (0.22, 0.22, 3.5), OAK,
+                          (math.sin(angle) * 0.30, -math.cos(angle) * 0.30, angle)))
+    pieces.extend([
+        cylinder("SurveyInstrumentPivot", (0.0, 0.0, 3.1), 0.62, 0.52, BRONZE, 12),
+        cylinder("SurveyInstrumentScope", (0.0, 0.0, 3.35), 0.34, 2.6, BRONZE, 12,
+                 (0.0, math.pi * 0.5, 0.0)),
+        box("SurveyMapTable", (5.4, 0.8, 1.2), (4.8, 2.4, 0.32), OAK),
+        box("SurveyMapLegLeft", (3.55, 0.8, 0.60), (0.34, 1.8, 1.20), OAK),
+        box("SurveyMapLegRight", (7.25, 0.8, 0.60), (0.34, 1.8, 1.20), OAK),
+        box("SurveyMapBoard", (5.4, 0.8, 1.42), (3.9, 1.7, 0.08), CANVAS),
+        box("SurveyPack", (-4.3, 1.5, 0.82), (2.1, 1.6, 1.64), CANVAS),
+        cylinder("SurveySampleJar", (8.4, 1.0, 0.78), 0.55, 1.56, TERRACOTTA, 12),
+    ])
+    for index, (x, y) in enumerate(((-5.6, -3.7), (-2.8, -5.0), (6.6, -4.0))):
+        pieces.append(box(f"SurveyMarkerStake{index}", (x, y, 1.25), (0.20, 0.20, 2.5), OAK))
+        pieces.append(box(f"SurveyMarkerFlag{index}", (x + 0.55, y, 2.05), (1.1, 0.08, 0.72), CANVAS))
+    return join_objects(pieces, "CinderwatchSurveySet")
+
+
 def build_cinderwatch_beacon():
     pieces = [
         cylinder("BeaconGroundPlinth", (0, 0, 0.65), 7.4, 1.3, BASALT, 12),
@@ -381,8 +511,13 @@ build_march_keep()
 build_caravanserai()
 build_windmill()
 build_granary()
+build_dawnford_arrival_set()
+build_amberfield_field_set()
+build_march_keep_gate_approach()
+build_saltwatch_work_yard()
 build_cinderwatch_beacon()
 build_cinderwatch_signal_yard()
+build_cinderwatch_survey_set()
 build_embercrag_crown()
 
 os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)

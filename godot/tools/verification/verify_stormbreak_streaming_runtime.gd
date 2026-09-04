@@ -27,8 +27,11 @@ func _run()->void:
         failures.append("Stormbreak terrain was not populated")
     if is_instance_valid(region_root):
         var bridge_root:=region_root.get_node_or_null("BridgeRoot")
-        if bridge_root==null or bridge_root.get_child_count()!=1:
-            failures.append("Stormbreak should build exactly one intentional bridge")
+        if bridge_root==null or bridge_root.get_child_count()!=2:
+            var bridge_children:Array[String]=[]
+            if bridge_root!=null:
+                for bridge_child in bridge_root.get_children():bridge_children.append(str(bridge_child.name))
+            failures.append("Stormbreak should build its two intentional travel bridges; found %s"%str(bridge_children))
         for landmark_name in ["StormbreakBeacon","StormbreakShelter","ShatteredChoir"]:
             if region_root.find_child(landmark_name,true,false)==null:
                 failures.append("Stormbreak Blender landmark %s was not instantiated"%landmark_name)
@@ -83,8 +86,8 @@ func _run()->void:
     if storm_summaries!=1:failures.append("Stormbreak appears %d times in atlas summaries"%storm_summaries)
     var extent:Vector2=atlas.get("map_extent",Vector2.ZERO)
     var center:Vector2=atlas.get("map_center",Vector2.ZERO)
-    if extent.distance_to(Vector2(14400,21600))>.1:failures.append("Five-region atlas extent is not 14400 x 21600")
-    if center.distance_to(Vector2(-3600,-7200))>.1:failures.append("Five-region atlas center is incorrect")
+    if extent.distance_to(Vector2(21600,21600))>.1:failures.append("Seven-region atlas extent is not 21600 x 21600")
+    if center.distance_to(Vector2(0,-7200))>.1:failures.append("Seven-region atlas center is incorrect")
 
     print("STORMBREAK_STREAMING_RUNTIME|ready=%s|houses=%d|walkable=%s/%s|active=%s|encounters=%d|vendors=%d|atlas_regions=%d|failures=%d"%[
         str(bool(main.get("_stormbreak_region_ready"))).to_lower(),highland_houses,

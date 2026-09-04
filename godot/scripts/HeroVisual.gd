@@ -98,6 +98,7 @@ var _action_kind := ""
 var _death_active := false
 var _diagnostic_hero_mode := ""
 var _mounted := false
+var _swimming:=false
 var _mounted_pose_base:Dictionary={}
 
 var _skin_mat: StandardMaterial3D
@@ -299,6 +300,17 @@ func set_mounted(enabled:bool)->void:
 	if _mounted==enabled:return
 	if not enabled:_restore_mounted_pose()
 	_mounted=enabled
+	_air_animation_state=&""
+	_action_animation_state=&""
+	_action_kind=""
+	_action_time=0.0
+	_current_imported_animation=&""
+	_update_imported_animation(true)
+
+
+func set_swimming(enabled:bool)->void:
+	if _swimming==enabled:return
+	_swimming=enabled
 	_air_animation_state=&""
 	_action_animation_state=&""
 	_action_kind=""
@@ -927,6 +939,11 @@ func _update_imported_animation(force: bool = false) -> void:
 	var target: StringName
 	if _mounted:
 		target=&"WarriorIdle" if _warrior_equipped and _imported_animation_player.has_animation(&"WarriorIdle") else &"Idle"
+	elif _swimming:
+		# The imported rig has no dedicated swim clip yet. A slowed unarmed walk
+		# cycle plus the controller's forward float pose reads as a restrained
+		# breaststroke without inventing another static T-pose.
+		target=&"Walk" if _move_blend>.08 else &"Idle"
 	elif _warrior_equipped:
 		target=&"WarriorWalk" if _move_blend>.08 else &"WarriorIdle"
 		if not _imported_animation_player.has_animation(target):target=&"Walk" if _move_blend>.08 else &"Idle"
@@ -945,7 +962,7 @@ func _update_imported_animation(force: bool = false) -> void:
 	if target == &"Walk" or target == &"TorchWalk" or target == &"StaffWalk" or target == &"WarriorWalk":
 		# Use a jog-like visual cadence at high traversal speed. A strict foot-travel
 		# ratio made the short-legged cycle spin unnaturally fast and read robotic.
-		_imported_animation_player.speed_scale = clampf(_movement_speed / 3.6, 0.78, 2.35)
+		_imported_animation_player.speed_scale = .68 if _swimming else clampf(_movement_speed / 3.6, 0.78, 2.35)
 	else:
 		_imported_animation_player.speed_scale = 1.0
 
@@ -1153,9 +1170,10 @@ func _apply_animation() -> void:
 		var thrust := sin(action_strength * PI) if _action_time > 0.0 else 0.0
 		var cast_lean := 0.07 if _action_kind == "spark" else 0.11
 		var sprint_factor:=clampf((_movement_speed-5.2)/3.3,0.0,1.0)
-		_imported_hero.rotation = Vector3(-thrust * cast_lean-sprint_factor*.055, 0.0, -thrust * 0.035)
+		var swim_lean:=.48 if _swimming else 0.0
+		_imported_hero.rotation = Vector3(-thrust * cast_lean-sprint_factor*.055-swim_lean, 0.0, -thrust * 0.035)
 		# Imported hero and movement both face local +Z.
-		_imported_hero.position = Vector3(0.0, -thrust * 0.025, thrust * 0.08)
+		_imported_hero.position = Vector3(0.0,(-.02+sin(_time*4.8)*.025) if _swimming else -thrust*.025,thrust*.08)
 		if is_instance_valid(_equipment_armor_root):
 			_equipment_armor_root.rotation=_imported_hero.rotation
 			_equipment_armor_root.position=_imported_hero.position

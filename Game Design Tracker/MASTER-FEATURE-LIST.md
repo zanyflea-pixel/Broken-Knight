@@ -1,6 +1,7 @@
 # Broken Knight – Master Feature List
 
-Last reorganized: 2026-08-24
+Last reorganized: 2026-08-24  
+Last world-build update: 2026-08-28
 
 This list consolidates the World Build requests made throughout development. It records intent as well as implementation so later changes do not solve one problem by reintroducing another.
 
@@ -15,7 +16,7 @@ This list consolidates the World Build requests made throughout development. It 
 - **Partial** – regions should grow colder and more dangerous with distance north of the starting area.
 - **Partial** – each biome needs its own terrain palette, rocks, trees, vegetation, wildlife, enemies, settlements, loot, and ambient sound.
 - **Partial** – authored landmarks, overlooks, valleys, ridges, basins, cliffs, plains, and travel corridors must give every region identity.
-- **Partial** – Stormbreak adds purposeful slate ridges, outcrops, headwalls, and upland cliffs; Skeld adds coastal headlands, shore stones, a western ocean shelf, and sea stacks, with larger cliff families still planned.
+- **Partial** – the atlas now places 55 sparse Blender-authored regional formations plus 25 landform-scale cliff walls: continuous layered escarpments, columnar basalt teeth, snow-capped glacial crags, open wave-cut coastal arches, broad stratified mountain walls, and glacial cirque headwalls. Embercrag also has 81 bounded player-height volcanic features: cooled lava shelves, fractured obsidian, fumarole fields, charred snags, ash scrub, and fireweed. Future desert geology remains planned.
 - **Required rule** – never expose terrain holes, undersides, disconnected chunks, invisible floors, or fall-through seams.
 - **Required rule** – build expansion data-first so adding a region does not require rewriting the world runtime.
 
@@ -32,8 +33,8 @@ This list consolidates the World Build requests made throughout development. It 
 - **Partial** – banks should blend into nearby soil/grass and remain walkable where the slope reasonably allows it.
 - **Implemented** – ponds and waterfalls have authored site support.
 - **Partial** – ponds should be irregular, seated in terrain, free of grass/tree intrusions, and useful for fishing.
-- **Queued** – richer water surface motion, depth cues, foam near falls/rocks, current direction, and shore detail.
-- **Queued** – swimming in rivers/lakes and dangerous ocean swimming with stamina/threat rules.
+- **Implemented** – river surfaces now combine measured screen-space depth with a restrained channel-center depth profile, downstream travelling waves, broken current strands that follow the authored source-to-mouth UV direction, bank-pinned ripple displacement, shallow caustics, and soft shoreline contact. Still ponds and ocean water do not inherit directional river striping. Existing rock/shore detail, 30 cascade sheets, and 7 waterfall foam pools remain intact. All seven region bakes pass water-surface, river-cohesion, riverbank-contact, and waterfall-grade verification; the starter travel benchmark remains smooth at 4.59 ms average / 6.50 ms p95 with no 25 ms spikes.
+- **Partial / lowest priority** – basic river, lake, and Grey Sea swimming/current/stamina behavior exists, but every further swimming, animation, balance, and ocean-danger improvement is explicitly deferred behind the remaining world work.
 - **Required rule** – maps and minimaps must draw waterways as connected systems matching the actual world.
 
 ## 3. Roads, trails, bridges, and travel
@@ -49,7 +50,7 @@ This list consolidates the World Build requests made throughout development. It 
 - **Implemented** – bridges can have structural supports.
 - **Partial** – natural standalone foot crossings supplement road bridges where needed for full-map access.
 - **Required rule** – no side-water exploit should let the player climb onto a bridge from below.
-- **Queued** – regional travel signs with readable words, correct fronts/backs, and useful destination guidance.
+- **Implemented** – the regional travel graph now authors 24 physical road signs across all seven regions with 57 destination arms. Each arm points toward its real destination, names it with a useful distance, keeps text only on the player-facing wooden front, uses regional text color, and has solid post/board collision. The obsolete universal Riverwatch board is gone. Automated all-bake verification reports zero failures and four in-engine approach captures cover Riverwatch, Rainhaven, Icewatch Hold, and Dawnford.
 
 ## 4. Settlements, architecture, and interiors
 
@@ -67,21 +68,22 @@ This list consolidates the World Build requests made throughout development. It 
 - **Partial** – vendors should stand behind appropriate counters/market stalls and open a full shop menu.
 - **Partial** – town crafting areas and environmental service signage exist.
 - **Partial** – towns now receive small collision-aware roaming populations that sleep at distance; richer daily schedules and conversations remain planned.
-- **Queued** – readable books, shelves, kitchens, bedrooms, workshops, taverns, storage, guard posts, and regional decor sets.
+- **Partial** – a reusable Blender-authored interior kit now supplies stocked readable bookcases, kitchens, bedrooms/storage, tool workshops, tavern counters, reading desks, and castle guard furnishings across all six house roles; deeper biome-specific prop/material variants and more direct furnishing interactions remain planned.
 
 ## 5. Terrain, vegetation, and environment art
 
 - **Partial** – terrain uses blended biome colors, textured materials, authored landforms, fields, forests, rocks, grass, flowers, leaves, and ground clutter.
 - **Required rule** – no visible square biome tiles, hard grass color lines, stretched textures, z-fighting, shimmer, or floating foliage.
+- **Implemented** – Glacial Range snow and moraine ground now use three overlapping rotated world-space fields instead of square-repeated stone photography, height-threshold facets, or long striped macro waves. Snow stays below display white, receives ordinary world lighting, keeps restrained close grain, and softens only its rendered normal; two walking-height captures and a source guard protect the accepted no-checker composition.
 - **Partial** – grass coverage should fill suitable green land naturally without rows or crude stick shapes.
 - **Partial** – leaves/deadwood/undergrowth should gather naturally around trees; dense, sparse, and barren areas need intentional variation.
 - **Partial** – realistic Blender tree assets exist for broadleaf, birch, maple, pine, and willow.
 - **Required rule** – do not use trees that read as primitive blobs or have downward-pointing branch spikes/root sticks.
 - **Partial** – different environmental tree species should match climate, moisture, altitude, and biome.
-- **Queued** – additional desert, volcanic, and deadland tree/plant assets; Skeld now uses subarctic pine, birch, krummholz, heather, lichen, and dune-grass composition.
-- **Partial** – rock formations and ore rocks require multiple silhouettes and material types, not recolors alone.
+- **Partial** – Embercrag now uses Blender-authored charred snags, hardy ash scrub, and fireweed; additional desert and deadland tree/plant assets remain queued. Skeld uses subarctic pine, birch, krummholz, heather, lichen, and dune-grass composition.
+- **Partial** – regional geology now has four distinct landmark-scale Blender-authored families (layered escarpment, basalt columns, glacial crown crag, coastal arch), two landform-scale boundary families (stratified mountain wall and glacial cirque headwall), three Embercrag volcanic formations (fractured cooled-lava shelf, obsidian fan, eroded fumarole mound), and four distinct gatherable ore-outcrop families. The 25 large walls are limited to at most one per mountain chain, use outward-facing buried aprons, four-piece aligned collision, long-distance batching, and strict road/river/town/bridge clearances; future desert geology remains planned.
 - **Partial** – ice-capped northern mountains with an altitude-driven snow line.
-- **Partial** – alpine snow and coastal vegetation are implemented; desert cactus/tumbleweed fields and volcanic rock/lava ecology remain queued.
+- **Partial** – alpine snow, coastal vegetation, and the Eastern Marches' first volcanic geology/plant ecology are implemented. Embercrag's props now sit inside a 1.394 km irregular ash/basalt terrain apron that blends softly into the March soil instead of reading as a circular decal; broader volcanic succession and desert cactus/tumbleweed fields remain queued.
 
 ## 6. Maps, minimap, navigation, and markers
 
@@ -91,12 +93,15 @@ This list consolidates the World Build requests made throughout development. It 
 - **Required rule** – map fills its available screen area; no decorative blank columns, thick yellow border, unused key panel, or overlapping text.
 - **Required rule** – maps use visual detail rather than relying on extra explanatory text.
 - **Implemented** – player direction uses a facing silhouette rather than a generic circle.
+- **Implemented** – authored landmark-scale geology uses distinct compact cartography on both the detailed map and minimap: basalt columns, glacial crags, coastal arches, and layered escarpments no longer share a generic rock-dot treatment. Ordinary scatter remains unmarked.
+- **Implemented** – Embercrag's 1.394 km ash/basalt apron has matching visual treatment on the local/region map and minimap, plus a cratered volcano silhouette rather than a generic circle. The map uses translucent irregular terrain layers beneath roads/rivers; the minimap uses a precomputed volcano-only terrain cache rather than rescanning every map site per pixel.
+- **Implemented** – dungeon minimap selection uses the hero's authoritative interior state rather than the obsolete `X > 7800` coordinate shortcut, so the Eastern Marches can no longer be misclassified as Barrowfen Ossuary.
 - **Partial** – map teleport mode supports temporary click-anywhere travel for testing.
 - **Implemented** – the detailed atlas relief is a shipped generated asset; roads, rivers, sites, services, facing, hover details, and teleport aiming remain live overlays. Regional views cull only off-screen geography, and mouse movement no longer redraws the full illustrated map.
 - **Partial** – map labels have contrast/collision handling and local-view clipping; remaining regions still need continued title and dense-label review.
 - **Partial** – dungeon interiors need their own maps instead of the outdoor world map.
 - **Queued** – fog-of-war/reveal rules after layouts are stable.
-- **Queued** – clearer quest/destination markers that guide without replacing exploration.
+- **Implemented** – navigation now selects exactly one primary story objective from the active quest order. The world map gives it a larger double-diamond symbol and keeps other story objectives secondary; the live minimap shows the primary objective directly when nearby or a single edge arrow plus distance when it is outside the 650 m survey radius. No route line or field of quest dots replaces exploration. Verification confirms two active story objectives but exactly one primary marker; in-engine map/minimap captures passed after moving the distance readout clear of the 250 m scale bar. Starter travel remains spike-free at 4.76 ms average / 7.36 ms p95.
 
 ## 7. Player traversal, mounts, and survival
 
@@ -104,8 +109,8 @@ This list consolidates the World Build requests made throughout development. It 
 - **Required rule** – feet remain on top of every valid terrain/road/town surface and never sink into raised overlays.
 - **Partial** – fall damage and death exist but need forgiving tuning and full regression testing.
 - **Required rule** – falling must not launch/teleport the player into the sky.
-- **Partial** – horse riding, saddle placement, gallop, and seamless region crossing exist; hero must remain mounted during streaming.
-- **Queued** – swimming locomotion and current/ocean danger.
+- **Partial** – horse riding, saddle placement, gallop, and seamless region crossing exist; the stable-aisle E interaction is verified at a reachable 4.5 m radius and live horse discovery prevents missed bake registration. Hero remains mounted through the accepted north streaming test.
+- **Partial / lowest priority** – the first traversal layer is functional; no further swimming work should displace terrain, settlements, regional content, maps, roads, rivers, or performance work.
 - **Partial** – buildable campfire system and camp cooking.
 - **Queued** – rest/sleep utility and safe-camp rules if they support the day/night loop.
 
@@ -131,9 +136,9 @@ This list consolidates the World Build requests made throughout development. It 
 - **Implemented** – equippable fishing pole, natural river/pond fishing detection, bobber/bite timing, and fish item foundation.
 - **Verify** – fishing pole must visibly sit in the hero's hand as a fishing pole in gameplay and equipment preview.
 - **Partial** – fishing needs clearer casting/reeling animation, water feedback, and reward variety.
-- **Implemented** – axe woodcutting and pickaxe mining foundations; all appropriate trees/rocks should be resource nodes.
+- **Implemented** – axe woodcutting and pickaxe mining foundations; all appropriate trees/rocks are resource nodes. The seven-zone atlas now has 1,690 Blender-authored mineable outcrops across distinct iron, copper, silver/quartz, and gold/quartz silhouettes. Breaking one deposit hides only that batched instance, leaves its ore-specific low fractured remnant, drops manual ore/stone pickups, removes collision, and restores the intact outcrop after 150 seconds without adding permanent depleted-state draw calls.
 - **Required rule** – chopping removes only the selected standing tree, falls one tree, despawns it later, and leaves non-spinning logs to pick up manually.
-- **Partial** – rock nodes need distinct ore types, visuals, break states, and pickups.
+- **Implemented** – rock nodes have distinct iron, copper, silver/quartz, and gold/quartz silhouettes, ore-matched Blender break states, isolated three-hit depletion, manual ore/stone pickups, local collision removal, and timed intact respawn.
 - **Implemented** – herbs, sticks/logs, berries, mushrooms, ores, fish, and other materials can enter stacked bag slots.
 - **Required rule** – gathered/dropped items are visible, grounded, non-spinning objects resembling the actual item.
 
@@ -210,8 +215,23 @@ This list consolidates the World Build requests made throughout development. It 
 - **Required target** – 60 FPS during normal travel on the target machine.
 - **Partial** – seven-region chunked terrain/content streaming, corridor-aware ahead-of-player loading, bounded offscreen regional render warm-up, sliced procedural fallback jobs, deterministic multi-region seam junctions, shared river-crossing datums, MultiMesh population, generated atlas relief, streamed heightmap collision, and signature-checked visual bakes for the starter plus all six streamed regions exist.
 - **Implemented** – the starter population bake reduces measured boot completion from roughly 13.0 seconds to 5.1 seconds while retaining automatic procedural fallback if the bake is missing or stale.
-- **Measured** – same-region map teleport improved from 3.82 seconds to 0.32 seconds; cold remote targets improved from roughly 54–57 seconds to 1.72–1.91 seconds, with a 27.77 ms worst first playable frame across all seven destinations. The Eastern town-outskirts fallback job improved from 532.8 ms to 18.6 ms after replacing individually materialized avenue trees with registered/choppable species batches.
-- **Tracked limitation** – the accepted single-scene streamed bake still has an approximately 118–135 ms instantiate slice during far-ahead preload. A smaller-slice multi-file experiment was reverted after it failed headless renderer validation.
+- **Measured** – the corrected seven-destination suite now lands on real settlement/region coordinates: starter map travel is 0.148 seconds, remote cold preparation is 0.67–1.04 seconds beneath the paused map, and the worst first controllable frame is 16.82 ms. This replaces the earlier 3.82-second same-region and roughly 54–57-second cold-remote paths. The Eastern town-outskirts fallback job improved from 532.8 ms to 18.6 ms after replacing individually materialized avenue trees with registered/choppable species batches.
+- **Implemented** – streamed region construction is serialized, does not overlap GameplayDirector's service replacement, and map teleports directly activate their loaded destination tile. Off-axis Stormbreak/Skeld preloads were tightened so unrelated regions no longer build while travelling the central northern corridor.
+- **Implemented** – generated-scene interaction groups persist for horses, doors, castle traversal surfaces, lookouts, and town torches. Perpendicular seam repair now preserves the neighboring tile's owned boundary column; the measured west runtime crack fell from 0.54662 m to 0.00006 m.
+- **Implemented** – atlas relief uses continuous world-space climate color instead of restarting at each stream tile, feathers authored land into textured survey paper, and ships as a regenerated 512 px image so the visual improvement adds no map-open survey work.
+- **Implemented** – all seven regions ship deterministic engineered-road cache bakes. Exact road grades and shoulders now load in 5.8–8.8 ms instead of being recomputed for 97–178 ms while travelling; total streamed terrain construction is down to roughly 19–25 ms.
+- **Implemented** – streamed terrain and visual bakes are constructed as serialized off-tree worker chunks, then entered into the live world in bounded authored assemblies. Large tree/rock/collision metadata registries and remote gameplay setup are sliced across frames; map-covered travel uses larger safe batches.
+- **Measured** – the mounted northbound natural-travel stress test improved from one 212.08 ms frame to 14.26 ms p95, 19.93 ms p99, and 30.70 ms maximum with zero frames at or above 34 ms. The player remains mounted and the correct gameplay region activates.
+- **Measured** – all six streamed approaches now pass mounted natural-travel stress with zero frames at or above 34 ms. Accepted maximums are North 30.21, West 29.17, East 30.00, Glacial 30.63, Stormbreak 26.21, and Skeld 27.32 ms.
+- **Implemented** – streamed heightmap collision retains full 321×321 data while entering as four exact 161×161 quadrants across separate frames; shared physical extents and height rows differ by 0.00000 m.
+- **Implemented** – far visited regions preserve authored state but suspend visuals and inherited processing beyond a 2.5 km hysteresis threshold, waking 1.6 km before re-entry. Harvest/tree/rock/prop registries now index the active tile rather than every loaded tile.
+- **Measured** – the latest paused-map fast path prepares ordinary remote destinations in 0.91–1.05 seconds, the chained north preparation in 1.52 seconds, and returns control with a 16.79 ms worst first frame.
+- **Measured** – with all six streamed regions loaded and mounted play resumed in Skeld, only the active tile stays resident; the starter and five distant tiles sleep. The 360-frame full-atlas headless sample measures 12.05 ms p95, 16.67 ms p99, and 22.29 ms maximum.
+- **Implemented** – Eastern Marches close-range authorship now complements its distant landmarks with five compact Blender-authored, collidable compositions at Dawnford, Amberfield, March Keep, Saltwatch, and Cinderwatch. Rendered review moved obscured first placements to usable settlement edges and retained the broad grassland sightlines and clear road lanes.
+- **Measured** – the current seven-site rendered Eastern pass measures 3.84 ms median, 6.07 ms p95, 7.22 ms p99, 13.52 ms maximum, and zero frames above 25 ms. Cinderwatch now clears its former near-threshold result at 5.29 ms p95; the latest mounted natural East stream records 13.62/19.97/32.20 ms p95/p99/maximum with zero 34 ms spikes.
+- **Implemented** – activating a preloaded region now wakes its retained visual tile immediately, preventing a slept destination from showing empty sky until the next streaming-residency poll. The rendered review also exposed and fixed a typed wildlife-leg animation regression.
+- **Measured** – the rendered seven-region atlas profile on the RTX 2080 retains 1,089.8 MB Godot static memory (1,094.5 MB peak) and 625.0 MB rendering-device memory after every tile is loaded, shown, and revisited. The streamed regions add 561.6 MB over the warm starter baseline; shared textures remain nearly flat at 316.3 MB while buffers grow to 247.5 MB.
+- **Accepted decision** – do not add full state-serialized region unloading at the current seven-region scale. The measured target has ample RAM/VRAM headroom, only the active tile remains visible, mount/state persist, and the extended rendered revisit stays bounded at 17.38 ms p95 / 22.61 ms p99 / 28.34 ms maximum. Re-profile after major atlas growth or when a lower-memory minimum target is defined.
 - **Required rule** – no large teleport, zone-boundary, castle, or menu-open frame spikes.
 - **Required rule** – streaming cannot dismount the player, reset animation/state, respawn enemies at the player, or lose inventory/quests.
 - **Required rule** – distant AI/wildlife/props use LOD, culling, sleeping, pooling, or low-frequency simulation.

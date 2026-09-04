@@ -89,12 +89,21 @@ func _benchmark()->void:
     var worst_frame_index:=-1
     var worst_frame_ms:=0.0
     var sample_started:=Time.get_ticks_usec()
+    var trace_visibility:=OS.get_environment("BROKEN_KNIGHT_BENCHMARK_TRACE")=="1"
+    var previous_draw_calls:=int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
     for frame_index in range(SAMPLE_FRAMES):
         _place_player(player,main,start+route_vector*float(WARMUP_FRAMES+frame_index)*.20)
         var frame_started:=Time.get_ticks_usec()
         await process_frame
         await RenderingServer.frame_post_draw
         var frame_ms:=float(Time.get_ticks_usec()-frame_started)/1000.0
+        var current_draw_calls:=int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+        if trace_visibility and absi(current_draw_calls-previous_draw_calls)>=3:
+            var trace_point:=start+route_vector*float(WARMUP_FRAMES+frame_index)*.20
+            print("WORLD_RUNTIME_VISIBILITY|frame=%d|point=%.1f,%.1f|draw_calls=%d|delta=%+d|frame_ms=%.2f"%[
+                frame_index,trace_point.x,trace_point.y,current_draw_calls,current_draw_calls-previous_draw_calls,frame_ms,
+            ])
+        previous_draw_calls=current_draw_calls
         samples.append(frame_ms)
         if frame_ms>worst_frame_ms:
             worst_frame_ms=frame_ms

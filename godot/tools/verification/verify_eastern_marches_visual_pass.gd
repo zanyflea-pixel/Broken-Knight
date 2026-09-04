@@ -17,7 +17,12 @@ func _run()->void:
         "DawnfordCaravanserai":Vector3(34,8,25),
         "AmberfieldWindmill":Vector3(14,15,12),
         "SaltwatchGranary":Vector3(15,10,15),
+        "DawnfordArrivalSet":Vector3(13.5,3,12),
+        "AmberfieldFieldSet":Vector3(19,3,5),
+        "MarchKeepGateApproach":Vector3(25,4,5),
+        "SaltwatchWorkYard":Vector3(17,3,10),
         "CinderwatchBeacon":Vector3(10,15,10),
+        "CinderwatchSurveySet":Vector3(14,5,7),
         "EmbercragBasaltCrown":Vector3(38,10,38),
     }
     var source_surfaces:=0
@@ -40,6 +45,7 @@ func _run()->void:
     var context:Dictionary=main.get("_region_contexts").get("east_marches",{})
     var region_root:Node3D=context.get("root")
     var identity_count:=0
+    var player_composition_count:=0
     var cinder_overrides:=0
     var cinder_lightest:=0.0
     for identity_name in ["Dawnford Identity","Amberfield Identity","March Keep Identity","Saltwatch Identity","Cinderwatch Beacon","Embercrag Basalt Crown"]:
@@ -58,6 +64,18 @@ func _run()->void:
                     cinder_lightest=maxf(cinder_lightest,(albedo.r+albedo.g+albedo.b)/3.0)
         if identity.find_child("*col",true,false)==null and identity.find_child("StaticBody3D",true,false)==null:
             failures.append("%s has no imported trimesh collision"%identity_name)
+
+    for composition_name in [
+        "Dawnford Arrival Shoulder","Amberfield Working Verge","March Keep Gate Approach",
+        "Saltwatch Brine Yard","Cinderwatch Survey Station",
+    ]:
+        var composition:=region_root.find_child(composition_name,true,false) as MeshInstance3D if is_instance_valid(region_root) else null
+        if composition==null:
+            failures.append("Rendered Eastern player-height composition is missing %s"%composition_name)
+            continue
+        player_composition_count+=1
+        if composition.find_child("*col",true,false)==null and composition.find_child("StaticBody3D",true,false)==null:
+            failures.append("%s has no imported trimesh collision"%composition_name)
 
     var town_root:=region_root.get_node_or_null("TownRoot") if is_instance_valid(region_root) else null
     var marcher_houses:=0
@@ -84,8 +102,8 @@ func _run()->void:
     if cinder_overrides<3:failures.append("Cinderwatch has only %d regional material overrides"%cinder_overrides)
     if cinder_lightest<.45:failures.append("Cinderwatch material palette is still too dark (%.3f)"%cinder_lightest)
 
-    print("EASTERN_MARCHES_VISUAL|kit_surfaces=%d|identities=%d|houses=%d|hipped_roofs=%d|boundaries=%d|glassmere_vertices=%d|cinder_overrides=%d|cinder_lightest=%.3f|failures=%d"%[
-        source_surfaces,identity_count,marcher_houses,hipped_roofs,marcher_boundaries,glassmere_vertices,cinder_overrides,cinder_lightest,failures.size(),
+    print("EASTERN_MARCHES_VISUAL|kit_surfaces=%d|identities=%d|player_compositions=%d|houses=%d|hipped_roofs=%d|boundaries=%d|glassmere_vertices=%d|cinder_overrides=%d|cinder_lightest=%.3f|failures=%d"%[
+        source_surfaces,identity_count,player_composition_count,marcher_houses,hipped_roofs,marcher_boundaries,glassmere_vertices,cinder_overrides,cinder_lightest,failures.size(),
     ])
     for failure in failures:push_error("EASTERN_MARCHES_VISUAL_FAILURE|%s"%failure)
     quit(0 if failures.is_empty() else 1)

@@ -4,6 +4,7 @@ extends Control
 var _player:Node3D
 var _director:Node
 var _enemy_positions:Array[Vector3]=[]
+var _primary_objective:Dictionary={}
 var _redraw_accumulator:=0.0
 var _enemy_accumulator:=0.0
 var view_radius:=650.0
@@ -13,6 +14,7 @@ func configure(player:Node3D,director:Node)->void:
     _player=player
     _director=director
     _refresh_enemies()
+    _refresh_objective()
     queue_redraw()
 
 
@@ -23,6 +25,7 @@ func _process(delta:float)->void:
     if _enemy_accumulator>=.25:
         _enemy_accumulator=0.0
         _refresh_enemies()
+        _refresh_objective()
     if _redraw_accumulator>=.125:
         _redraw_accumulator=0.0
         queue_redraw()
@@ -34,6 +37,7 @@ func _draw()->void:
     var radius:=minf(size.x,size.y)*.455
     for ring in [.33,.66,1.0]:draw_arc(center,radius*ring,0,TAU,72,Color(.20,.13,.05,.22),1.0)
     _draw_enemies(center,radius)
+    _draw_primary_objective(center,radius)
     _draw_player(center)
     draw_arc(center,radius,0,TAU,112,Color(.19,.11,.035),4.0,true)
     draw_arc(center,radius-6,0,TAU,112,Color(.76,.57,.24),1.5,true)
@@ -81,6 +85,51 @@ func _draw_player(center:Vector2)->void:
 func _refresh_enemies()->void:
     if is_instance_valid(_director) and _director.has_method("get_minion_positions"):
         _enemy_positions=_director.get_minion_positions()
+
+
+func _refresh_objective()->void:
+    _primary_objective={}
+    if is_instance_valid(_director) and _director.has_method("get_primary_story_objective"):
+        _primary_objective=_director.get_primary_story_objective()
+
+
+func _draw_primary_objective(center:Vector2,radius:float)->void:
+    if _primary_objective.is_empty():return
+    var objective_3d:Vector3=_primary_objective.get("position",Vector3.ZERO)
+    var objective:=Vector2(objective_3d.x,objective_3d.z)
+    var player_position:=Vector2(_player.global_position.x,_player.global_position.z)
+    var delta:=objective-player_position
+    if delta.length_squared()<1.0:return
+    var map_offset:=delta/view_radius*radius
+    if map_offset.length()<radius-13.0:
+        var p:=center+map_offset
+        var diamond:=PackedVector2Array([p+Vector2(0,-8),p+Vector2(6.5,0),p+Vector2(0,8),p+Vector2(-6.5,0)])
+        draw_colored_polygon(diamond,Color(1.0,.70,.10,.98))
+        draw_polyline(diamond,Color(.18,.08,.02),1.7,true)
+        draw_circle(p,2.2,Color(.20,.06,.015,.96))
+        return
+    var direction:=delta.normalized()
+    var marker_center:=center+direction*(radius-19.0)
+    var tangent:=Vector2(-direction.y,direction.x)
+    var arrow:=PackedVector2Array([
+        marker_center+direction*8.5,
+        marker_center-direction*5.5+tangent*5.2,
+        marker_center-direction*2.5,
+        marker_center-direction*5.5-tangent*5.2,
+    ])
+    draw_colored_polygon(arrow,Color(1.0,.71,.10,.98))
+    draw_polyline(arrow,Color(.17,.065,.015,.98),1.7,true)
+    var metres:=delta.length()
+    var distance_text:="%d m"%roundi(metres) if metres<1000.0 else "%.1f km"%(metres/1000.0)
+    var text_width:=ThemeDB.fallback_font.get_string_size(distance_text,HORIZONTAL_ALIGNMENT_LEFT,-1,10).x
+    var label_position:=marker_center-direction*36.0-Vector2(text_width*.5,-4)
+    _small_label(distance_text,label_position)
+
+
+func _small_label(text:String,position:Vector2)->void:
+    for offset in [Vector2(-1.5,0),Vector2(1.5,0),Vector2(0,-1.5),Vector2(0,1.5)]:
+        draw_string(ThemeDB.fallback_font,position+offset,text,HORIZONTAL_ALIGNMENT_LEFT,-1,10,Color(.96,.88,.69,.95))
+    draw_string(ThemeDB.fallback_font,position,text,HORIZONTAL_ALIGNMENT_LEFT,-1,10,Color(.18,.09,.025))
 
 
 func _cardinal(text:String,position:Vector2)->void:
